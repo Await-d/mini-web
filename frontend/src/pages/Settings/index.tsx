@@ -235,7 +235,7 @@ const SettingsPage = () => {
 
   return (
     <div className="settings-page">
-      <Card bordered={false}>
+      <Card variant="borderless">
         <Title level={4}>
           <SettingOutlined /> 系统设置
         </Title>

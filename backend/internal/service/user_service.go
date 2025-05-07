@@ -2,89 +2,86 @@ package service
 
 import (
 	"errors"
-	"time"
-
-	"github.com/yourname/mini-web/internal/model"
+	"fmt"
+	
+	"gitee.com/await29/mini-web/internal/model"
 )
 
-// UserService 用户服务实现
+// UserService 用户服务
 type UserService struct {
-	users []model.User
+	userRepo model.UserRepository
 }
 
-// NewUserService 创建用户服务
-func NewUserService() *UserService {
-	return &UserService{
-		users: model.MockUsers,
-	}
+// NewUserService 创建用户服务实例
+func NewUserService(userRepo model.UserRepository) *UserService {
+	return &UserService{userRepo: userRepo}
 }
 
 // GetUsers 获取所有用户
-func (s *UserService) GetUsers() ([]model.User, error) {
-	return s.users, nil
+func (s *UserService) GetUsers() ([]*model.User, error) {
+	return s.userRepo.GetAll()
 }
 
 // GetUserByID 根据ID获取用户
 func (s *UserService) GetUserByID(id uint) (*model.User, error) {
-	for _, user := range s.users {
-		if user.ID == id {
-			return &user, nil
-		}
+	user, err := s.userRepo.GetByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("获取用户信息失败: %w", err)
 	}
-	return nil, errors.New("用户不存在")
+	
+	if user == nil {
+		return nil, errors.New("用户不存在")
+	}
+	
+	return user, nil
 }
 
 // CreateUser 创建用户
-func (s *UserService) CreateUser(user model.User) (*model.User, error) {
+func (s *UserService) CreateUser(user *model.User) error {
+	// 检查用户名是否已存在
+	existingUser, err := s.userRepo.GetByUsername(user.Username)
+	if err != nil {
+		return fmt.Errorf("检查用户名失败: %w", err)
+	}
+	
+	if existingUser != nil {
+		return errors.New("用户名已存在")
+	}
+	
 	// 检查邮箱是否已存在
-	for _, u := range s.users {
-		if u.Email == user.Email {
-			return nil, errors.New("邮箱已存在")
-		}
+	existingUser, err = s.userRepo.GetByEmail(user.Email)
+	if err != nil {
+		return fmt.Errorf("检查邮箱失败: %w", err)
 	}
-
-	// 生成新ID
-	maxID := uint(0)
-	for _, u := range s.users {
-		if u.ID > maxID {
-			maxID = u.ID
-		}
+	
+	if existingUser != nil {
+		return errors.New("邮箱已存在")
 	}
-	user.ID = maxID + 1
-	user.CreatedAt = time.Now()
-	user.UpdatedAt = time.Now()
-
-	// 添加用户
-	s.users = append(s.users, user)
-	return &user, nil
+	
+	// 创建用户
+	return s.userRepo.Create(user)
 }
 
-// UpdateUser 更新用户
-func (s *UserService) UpdateUser(user model.User) (*model.User, error) {
-	for i, u := range s.users {
-		if u.ID == user.ID {
-			// 保留创建时间和密码
-			user.CreatedAt = u.CreatedAt
-			if user.Password == "" {
-				user.Password = u.Password
-			}
-			user.UpdatedAt = time.Now()
-			
-			s.users[i] = user
-			return &user, nil
-		}
+// UpdateUser 更新用户信息
+func (s *UserService) UpdateUser(user *model.User) error {
+	// 检查用户是否存在
+	existingUser, err := s.userRepo.GetByID(user.ID)
+	if err != nil {
+		return fmt.Errorf("检查用户ID失败: %w", err)
 	}
-	return nil, errors.New("用户不存在")
+	
+	if existingUser == nil {
+		return errors.New("用户不存在")
+	}
+	
+	// 更新用户
+	return s.userRepo.Update(user)
 }
 
 // DeleteUser 删除用户
 func (s *UserService) DeleteUser(id uint) error {
-	for i, user := range s.users {
-		if user.ID == id {
-			// 删除用户
-			s.users = append(s.users[:i], s.users[i+1:]...)
-			return nil
-		}
-	}
-	return errors.New("用户不存在")
+	// 这里应该实现删除用户的逻辑
+	// 但目前UserRepository接口没有定义DeleteUser方法
+	// 所以返回未实现错误
+	return errors.New("删除用户功能未实现")
 }

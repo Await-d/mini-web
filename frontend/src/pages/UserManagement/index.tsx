@@ -176,7 +176,7 @@ const UserManagement = () => {
 
   return (
     <div className="user-management">
-      <Card bordered={false}>
+      <Card variant="borderless">
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
           <Title level={4}>
             <UserOutlined /> 用户管理

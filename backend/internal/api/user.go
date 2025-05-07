@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/await29/mini-web/internal/model"
+	"gitee.com/await29/mini-web/internal/model"
 )
 
 // UserHandler 用户相关处理器

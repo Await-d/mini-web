@@ -21,7 +21,13 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+    
+    /* CSS Modules */
+    "plugins": [
+      { "name": "typescript-plugin-css-modules" }
+    ]
   },
-  "include": ["src"]
+  "include": ["src", "src/types"],
+  "files": ["src/types/xterm-addon-search.d.ts"]
 }

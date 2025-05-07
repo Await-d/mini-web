@@ -1,21 +1,21 @@
-import { RouterProvider } from 'react-router-dom';
-import { ConfigProvider } from 'antd';
-import zhCN from 'antd/locale/zh_CN';
-import { router } from './router';
-import { themeConfig } from './theme';
+import { useRoutes } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { TerminalProvider } from './contexts/TerminalContext';
+import { routes } from './routes';
 
-function App() {
+/**
+ * 应用根组件，包含认证提供者、终端提供者和路由
+ */
+const App = () => {
+  const element = useRoutes(routes);
+  
   return (
-    <ConfigProvider
-      locale={zhCN}
-      theme={themeConfig}
-    >
-      <AuthProvider>
-        <RouterProvider router={router} />
-      </AuthProvider>
-    </ConfigProvider>
+    <AuthProvider>
+      <TerminalProvider>
+        {element}
+      </TerminalProvider>
+    </AuthProvider>
   );
-}
+};
 
 export default App;

@@ -11,7 +11,7 @@ const Dashboard: React.FC = () => {
       
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} md={6}>
-          <Card bordered={false} hoverable>
+          <Card variant="borderless" hoverable>
             <Statistic 
               title="用户总数" 
               value={1254} 
@@ -21,7 +21,7 @@ const Dashboard: React.FC = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card bordered={false} hoverable>
+          <Card variant="borderless" hoverable>
             <Statistic 
               title="总订单" 
               value={8846} 
@@ -31,7 +31,7 @@ const Dashboard: React.FC = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card bordered={false} hoverable>
+          <Card variant="borderless" hoverable>
             <Statistic 
               title="文件数" 
               value={572} 
@@ -41,7 +41,7 @@ const Dashboard: React.FC = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card bordered={false} hoverable>
+          <Card variant="borderless" hoverable>
             <Statistic 
               title="销售额" 
               value={9280} 
@@ -58,8 +58,8 @@ const Dashboard: React.FC = () => {
         <Col xs={24} md={12}>
           <Card 
             title="最近活动" 
-            bordered={false}
-            headStyle={{ borderBottom: '1px solid #f0f0f0' }}
+            variant="borderless"
+            styles={{ header: { borderBottom: '1px solid #f0f0f0' } }}
           >
             <p>用户登录系统 - 10分钟前</p>
             <p>新订单 #12345 已创建 - 25分钟前</p>
@@ -71,8 +71,8 @@ const Dashboard: React.FC = () => {
         <Col xs={24} md={12}>
           <Card 
             title="系统概况" 
-            bordered={false} 
-            headStyle={{ borderBottom: '1px solid #f0f0f0' }}
+            variant="borderless" 
+            styles={{ header: { borderBottom: '1px solid #f0f0f0' } }}
           >
             <p>CPU使用率: 32% <ArrowDownOutlined style={{ color: '#52c41a' }} /></p>
             <p>内存使用率: 65% <ArrowUpOutlined style={{ color: '#faad14' }} /></p>

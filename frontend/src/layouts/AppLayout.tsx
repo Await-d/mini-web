@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Layout, Menu, theme, Button, Dropdown, Avatar, Space } from 'antd';
 import { 
   MenuFoldOutlined, 
@@ -8,19 +8,30 @@ import {
   UserOutlined,
   SettingOutlined,
   LogoutOutlined,
-  UserSwitchOutlined
+  UserSwitchOutlined,
+  LinkOutlined
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 
 const { Header, Sider, Content } = Layout;
 
 const AppLayout: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
+  const [selectedKey, setSelectedKey] = useState('dashboard');
   const navigate = useNavigate();
+  const location = useLocation();
   const { currentUser, logout } = useAuth();
   
   const { token } = theme.useToken();
+  
+  // 根据当前路径更新选中的菜单项
+  useEffect(() => {
+    const pathname = location.pathname;
+    // 提取路径的第一部分作为当前选中的菜单项
+    const path = pathname.split('/')[1] || 'dashboard';
+    setSelectedKey(path);
+  }, [location.pathname]);
   
   const menuItems = [
     {
@@ -30,6 +41,12 @@ const AppLayout: React.FC = () => {
       onClick: () => navigate('/dashboard')
     },
     {
+      key: 'connections',
+      icon: <LinkOutlined />,
+      label: '远程连接',
+      onClick: () => navigate('/connections')
+    },
+    {
       key: 'data',
       icon: <AppstoreOutlined />,
       label: '数据管理',
@@ -37,7 +54,7 @@ const AppLayout: React.FC = () => {
     },
     {
       key: 'user',
-      icon: <UserOutlined />,
+      icon: <UserSwitchOutlined />,
       label: '用户管理',
       onClick: () => navigate('/users')
     },
@@ -73,7 +90,7 @@ const AppLayout: React.FC = () => {
         </div>
         <Menu
           mode="inline"
-          defaultSelectedKeys={['dashboard']}
+          selectedKeys={[selectedKey]}
           style={{ borderRight: 0 }}
           items={menuItems}
         />

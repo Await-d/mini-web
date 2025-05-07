@@ -1,89 +1,128 @@
-# Mini Web 项目
+# Mini Web 管理系统
 
-基于React 19 + Ant Design 5 + TypeScript构建的前端和Go后端的Web应用。
+Mini Web 是一个使用 React + Go 构建的现代化 Web 管理系统，提供用户身份验证和基本管理功能。
+
+## 功能特性
+
+- 用户认证（登录/注册）
+- 用户权限管理
+- 响应式设计
+- 基于 JWT 的认证
+- SQLite 数据库支持
+
+## 技术栈
+
+### 前端
+
+- React 18
+- TypeScript
+- Ant Design 5
+- React Router 6
+- Axios
+
+### 后端
+
+- Go
+- Gorilla Mux (HTTP 路由)
+- SQLite3
+- JWT
+
+## 快速开始
+
+### 环境要求
+
+- Node.js 16+
+- Go 1.21+
+- 包管理工具: npm/yarn
+
+### 安装与运行
+
+1. 克隆项目
+
+```bash
+git clone https://github.com/yourusername/mini-web.git
+cd mini-web
+```
+
+2. 启动应用（Windows）
+
+```bash
+# 同时启动前端和后端
+run.bat
+
+# 仅启动前端
+run.bat frontend
+
+# 仅启动后端
+run.bat backend
+```
+
+3. 启动应用（Linux/macOS）
+
+```bash
+# 同时启动前端和后端
+chmod +x run.sh
+./run.sh
+
+# 仅启动前端
+./run.sh frontend
+
+# 仅启动后端
+./run.sh backend
+```
+
+4. 访问应用
+
+前端: http://localhost:5173
+后端API: http://localhost:8080/api
+
+## 用户帐号
+
+系统初始化后会创建以下用户：
+
+- 管理员: username: `admin`, password: `admin123`
+- 普通用户: username: `user`, password: `user123`
 
 ## 项目结构
 
 ```
 mini-web/
-├── frontend/          # 前端代码
-│   ├── public/        # 静态资源
-│   ├── src/           # 源代码
-│   │   ├── assets/    # 静态资源
-│   │   ├── components/# 组件
-│   │   ├── hooks/     # 自定义Hooks
-│   │   ├── layouts/   # 布局组件
-│   │   ├── pages/     # 页面组件
-│   │   ├── App.tsx    # 应用入口组件
-│   │   ├── main.tsx   # 主入口文件
-│   │   └── router.tsx # 路由配置
-│   ├── index.html     # HTML模板
-│   └── package.json   # 依赖管理
-└── backend/           # 后端代码
-    ├── cmd/           # 入口命令
-    ├── internal/      # 内部包
-    │   ├── api/       # API处理
-    │   ├── config/    # 配置
-    │   ├── model/     # 数据模型
-    │   └── service/   # 业务逻辑
-    ├── pkg/           # 可导出的包
-    └── go.mod         # Go模块定义
+├── frontend/                # 前端代码
+│   ├── src/                 # 源代码
+│   │   ├── components/      # 通用组件
+│   │   ├── contexts/        # 上下文
+│   │   ├── pages/           # 页面
+│   │   ├── services/        # API服务
+│   │   └── ...
+│   └── ...
+├── backend/                 # 后端代码
+│   ├── cmd/                 # 入口程序
+│   ├── internal/            # 内部包
+│   │   ├── api/             # API处理器
+│   │   ├── config/          # 配置
+│   │   ├── middleware/      # 中间件
+│   │   ├── model/           # 数据模型
+│   │   └── service/         # 业务逻辑
+│   └── ...
+└── ...
 ```
 
-## 前端
+## API 文档
 
-### 技术栈
+### 认证 API
 
-- React 19
-- TypeScript
-- Ant Design 5
-- Vite
-- Vitest (单元测试)
-- Playwright (E2E测试)
+- `POST /api/auth/login` - 用户登录
+- `POST /api/auth/register` - 用户注册
+- `GET /api/user/profile` - 获取用户信息
+- `PUT /api/user/profile` - 更新用户信息
+- `PUT /api/user/password` - 更新用户密码
+- `POST /api/auth/refresh` - 刷新 Token
 
-### 开发
+### 管理员 API
 
-```bash
-# 安装依赖
-cd frontend
-yarn
+- `GET /api/admin/users` - 获取所有用户
+- `GET /api/admin/users/{id}` - 获取指定用户
 
-# 启动开发服务器
-yarn dev
+## 许可证
 
-# 运行测试
-yarn test
-
-# 构建生产版本
-yarn build
-```
-
-## 后端
-
-### 技术栈
-
-- Go
-- 标准库HTTP服务器 (后续可升级为Gin)
-
-### 开发
-
-```bash
-# 运行后端
-cd backend
-go run cmd/server/main.go
-
-# 构建
-go build -o bin/server cmd/server/main.go
-```
-
-## 功能特性
-
-- 响应式布局
-- 主题定制
-- 路由管理
-- RESTful API
-- 用户认证
-
-## 贡献指南
-
-请参考[.cursor/rules](.cursor/rules)目录下的规范文档进行开发。
+MIT
