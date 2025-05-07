@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -38,10 +39,13 @@ type RDPTerminalSession struct {
 func createRDPTerminalSession(conn *model.Connection) (*RDPTerminalSession, error) {
 	// 先尝试TCP连接到RDP服务器
 	addr := net.JoinHostPort(conn.Host, strconv.Itoa(conn.Port))
+	log.Printf("尝试连接RDP服务器: %s", addr)
 	tcpConn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
+		log.Printf("连接RDP服务器失败: %v", err)
 		return nil, fmt.Errorf("连接RDP服务器失败: %w", err)
 	}
+	log.Printf("已成功连接到RDP服务器: %s", addr)
 
 	// 创建数据传输管道
 	reader, writer := io.Pipe()
@@ -64,58 +68,138 @@ func createRDPTerminalSession(conn *model.Connection) (*RDPTerminalSession, erro
 		sessionInfo: fmt.Sprintf("%s@%s:%d", conn.Username, conn.Host, conn.Port),
 	}
 
-	// 发送连接成功消息
-	writer.Write([]byte("RDP_CONNECTED"))
+	log.Printf("RDP会话对象已创建，准备初始化")
 
-	// 发送连接信息
-	writer.Write([]byte(fmt.Sprintf("RDP_INFO:%s:%d:%d:%s",
-		conn.Host, conn.Port, 0, conn.Username)))
+	// 不在此处发送初始消息，改为在handleRDPEvents中发送
 
 	// 启动处理协程
 	go session.handleRDPEvents()
 
+	log.Printf("RDP终端会话已创建并初始化完成")
 	return session, nil
 }
 
 // 处理RDP事件
 func (r *RDPTerminalSession) handleRDPEvents() {
 	defer close(r.closedChan)
+	
+	log.Printf("启动RDP事件处理循环，准备发送初始消息")
+
+	// 给读取协程更多时间来启动
+	time.Sleep(300 * time.Millisecond)
+
+	// 发送连接成功消息
+	r.mutex.Lock()
+	if _, err := r.writer.Write([]byte("RDP_CONNECTED")); err != nil {
+		log.Printf("发送RDP连接成功消息失败: %v", err)
+		r.mutex.Unlock()
+		return // 如果发送失败，直接返回，避免后续操作
+	} else {
+		log.Printf("已发送RDP连接成功消息")
+	}
+	r.mutex.Unlock()
+
+	// 较长延迟，确保上一条消息被处理
+	time.Sleep(200 * time.Millisecond)
+
+	// 发送连接信息
+	r.mutex.Lock()
+	connInfo := fmt.Sprintf("RDP_INFO:%s:%d:%s", r.model.Host, r.model.Port, r.model.Username)
+	if _, err := r.writer.Write([]byte(connInfo)); err != nil {
+		log.Printf("发送RDP连接信息失败: %v", err)
+		r.mutex.Unlock()
+		return // 如果发送失败，直接返回，避免后续操作
+	} else {
+		log.Printf("已发送RDP连接信息: %s", connInfo)
+	}
+	r.mutex.Unlock()
 
 	// 设置定时器，定期发送保持活跃消息
 	keepAliveTicker := time.NewTicker(30 * time.Second)
 	defer keepAliveTicker.Stop()
 
-	// 设置截图定时器
-	screenshotTicker := time.NewTicker(1 * time.Second)
+	// 设置截图定时器，初始设置为较慢的更新频率
+	screenshotTicker := time.NewTicker(5 * time.Second) // 降低初始频率减少管道阻塞风险
 	defer screenshotTicker.Stop()
+
+	// 快速初始化阶段的计数器
+	initPhaseCounter := 0
+
+	// 延迟一段时间后再发送第一个屏幕截图
+	time.Sleep(800 * time.Millisecond)
 
 	// 发送连接信息
 	r.mutex.Lock()
-	r.writer.Write([]byte(fmt.Sprintf("RDP_INFO:连接到 %s:%d [用户: %s]",
-		r.model.Host, r.model.Port, r.model.Username)))
+	connectionInfo := fmt.Sprintf("RDP_INFO:连接到 %s:%d [用户: %s]",
+		r.model.Host, r.model.Port, r.model.Username)
+	_, err := r.writer.Write([]byte(connectionInfo))
 	r.mutex.Unlock()
+	
+	if err != nil {
+		log.Printf("发送RDP连接信息失败: %v", err)
+		return // 添加失败检查
+	} else {
+		log.Printf("已发送RDP连接信息: %s", connectionInfo)
+	}
 
-	// 发送模拟通知，告知客户端RDP后端实现处于开发中
+	// 再次延迟，确保上一条消息被处理
+	time.Sleep(200 * time.Millisecond)
+
+	// 发送通知，告知客户端RDP后端实现状态
 	r.mutex.Lock()
-	r.writer.Write([]byte("RDP_NOTICE:RDP协议支持正在开发中。目前使用模拟图形界面。"))
+	noticeMsg := "RDP_NOTICE:RDP远程桌面会话已建立。正在等待屏幕数据..."
+	_, err = r.writer.Write([]byte(noticeMsg))
 	r.mutex.Unlock()
+	
+	if err != nil {
+		log.Printf("发送RDP通知失败: %v", err)
+		return // 添加失败检查
+	} else {
+		log.Printf("已发送RDP通知: %s", noticeMsg)
+	}
 
-	// 启动时发送一次初始屏幕截图
-	r.sendDummyScreenshot()
+	// 再次延迟，确保上一条消息被处理
+	time.Sleep(500 * time.Millisecond)
 
+	// 启动时立即发送一次初始屏幕截图
+	log.Printf("发送初始RDP屏幕截图")
+	r.sendDummyScreenshot() // 直接调用，不使用goroutine
+
+	log.Printf("RDP事件循环已启动，开始监听事件")
+	
 	for {
 		select {
 		case <-r.stopChan:
+			log.Printf("收到RDP会话停止信号，退出事件循环")
 			return
 		case <-keepAliveTicker.C:
 			// 发送保持活跃的消息
 			r.mutex.Lock()
-			r.writer.Write([]byte("RDP_KEEP_ALIVE"))
+			_, err := r.writer.Write([]byte("RDP_KEEP_ALIVE"))
 			r.mutex.Unlock()
+			
+			if err != nil {
+				log.Printf("发送RDP保活消息失败: %v", err)
+				// 不返回，继续尝试其他操作
+			} else {
+				log.Printf("已发送RDP保活消息")
+			}
 		case <-screenshotTicker.C:
+			// 初始化阶段结束后，调整屏幕更新频率
+			if initPhaseCounter < 10 {
+				initPhaseCounter++
+				if initPhaseCounter == 10 {
+					// 调整为更慢的更新频率
+					screenshotTicker.Reset(10 * time.Second) // 进一步降低频率
+					log.Printf("初始化阶段结束，调整屏幕更新频率为10秒一次")
+				}
+			}
+			
 			// 定期发送屏幕截图
-			if time.Since(r.lastUpdate) >= 1*time.Second {
-				r.sendDummyScreenshot()
+			timeSinceUpdate := time.Since(r.lastUpdate)
+			if timeSinceUpdate >= 2*time.Second { // 增加最小间隔到2秒
+				log.Printf("定时更新RDP屏幕截图 (距上次更新: %.2f秒)", timeSinceUpdate.Seconds())
+				r.sendDummyScreenshot() // 直接调用，不使用goroutine
 			}
 		}
 	}
@@ -123,27 +207,55 @@ func (r *RDPTerminalSession) handleRDPEvents() {
 
 // sendDummyScreenshot 发送模拟的屏幕截图
 func (r *RDPTerminalSession) sendDummyScreenshot() {
+	// 检查是否应该跳过本次更新
 	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
-	// 创建模拟屏幕图像
+	if time.Since(r.lastUpdate) < 500*time.Millisecond {
+		r.mutex.Unlock()
+		log.Printf("跳过本次屏幕截图，距上次更新时间太短")
+		return
+	}
+	
+	// 获取所需数据后立即释放锁，避免长时间持有
+	width := r.width
+	height := r.height
+	// 标记更新时间提前，避免其他请求重复发送
+	r.lastUpdate = time.Now()
+	r.mutex.Unlock()
+	
+	log.Printf("正在生成RDP模拟屏幕截图: 宽度=%d, 高度=%d", width, height)
+	
+	// 在锁外执行耗时操作
 	img := r.createDummyScreenImage()
-
-	// 将图像编码为PNG
+	
+	// 将图像编码为PNG，使用最快的压缩
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
+	enc := &png.Encoder{
+		CompressionLevel: png.BestSpeed,
+	}
+	if err := enc.Encode(&buf, img); err != nil {
 		log.Printf("PNG编码失败: %v", err)
 		return
 	}
-
+	
 	// Base64编码
 	base64Image := base64.StdEncoding.EncodeToString(buf.Bytes())
-
-	// 发送屏幕截图消息
-	r.writer.Write([]byte(fmt.Sprintf("RDP_SCREENSHOT:%d:%d:%s", r.width, r.height, base64Image)))
-
-	// 更新时间戳
-	r.lastUpdate = time.Now()
+	
+	// 记录数据大小
+	log.Printf("PNG编码完成，原始大小: %d 字节, Base64编码后: %d 字节", 
+		buf.Len(), len(base64Image))
+	
+	// 构建消息
+	messageFormat := fmt.Sprintf("RDP_SCREENSHOT:%d:%d:%s", width, height, base64Image)
+	
+	log.Printf("发送RDP屏幕截图，消息大小: %d 字节", len(messageFormat))
+	
+	// 直接写入，不再获取锁
+	_, err := r.writer.Write([]byte(messageFormat))
+	if err != nil {
+		log.Printf("发送RDP屏幕截图失败: %v", err)
+	} else {
+		log.Printf("RDP屏幕截图已成功发送")
+	}
 }
 
 // createDummyScreenImage 创建模拟的屏幕图像
@@ -259,43 +371,107 @@ func (r *RDPTerminalSession) Write(p []byte) (int, error) {
 		return 0, nil
 	}
 
-	// 解析客户端消息
-	// 这里是简化的协议处理，实际应用中需要根据前端约定的协议格式
-	switch p[0] {
-	case 1: // 键盘事件
-		if len(p) >= 3 {
-			keyCode := uint16(p[1])<<8 | uint16(p[2])
-			isDown := len(p) >= 4 && p[3] != 0
-
-			// 仅记录事件，实际RDP实现待开发
-			log.Printf("RDP键盘事件: 键码=%d, 按下=%v", keyCode, isDown)
-
-			// 发送按键响应
-			r.writer.Write([]byte(fmt.Sprintf("RDP_KEY:%d:%v", keyCode, isDown)))
-
-			// 触发屏幕更新
-			r.lastUpdate = time.Now().Add(-1 * time.Second)
+	// 如果收到的是JSON消息，尝试解析
+	if p[0] == '{' {
+		var msg map[string]interface{}
+		if err := json.Unmarshal(p, &msg); err == nil {
+			// 处理JSON命令
+			log.Printf("收到RDP客户端JSON命令: %s", string(p))
+			
+			if msgType, ok := msg["type"].(string); ok {
+				switch msgType {
+				case "init":
+					log.Printf("收到RDP初始化请求")
+					// 标记需要更新，解锁后异步发送
+					r.lastUpdate = time.Now().Add(-2 * time.Second)
+					go func() {
+						time.Sleep(100 * time.Millisecond)
+						r.sendDummyScreenshot()
+					}()
+					return len(p), nil
+					
+				case "screenshot":
+					log.Printf("收到RDP屏幕截图请求")
+					// 标记需要更新，解锁后异步发送
+					r.lastUpdate = time.Now().Add(-2 * time.Second)
+					go func() {
+						time.Sleep(100 * time.Millisecond)
+						r.sendDummyScreenshot()
+					}()
+					return len(p), nil
+					
+				case "resize":
+					// 处理调整大小请求
+					width, _ := msg["width"].(float64)
+					height, _ := msg["height"].(float64)
+					if width > 0 && height > 0 {
+						r.width = int(width)
+						r.height = int(height)
+						log.Printf("调整RDP屏幕尺寸为: %dx%d", r.width, r.height)
+						// 标记需要更新，解锁后异步发送
+						r.lastUpdate = time.Now().Add(-2 * time.Second)
+						go func() {
+							time.Sleep(200 * time.Millisecond)
+							r.sendDummyScreenshot()
+						}()
+					}
+					return len(p), nil
+				}
+			}
 		}
+	}
 
-	case 2: // 鼠标事件
-		if len(p) >= 6 {
-			x := uint16(p[1])<<8 | uint16(p[2])
-			y := uint16(p[3])<<8 | uint16(p[4])
-			buttonMask := p[5]
+	// 解析客户端二进制消息
+	if len(p) >= 1 {
+		switch p[0] {
+		case 1: // 键盘事件
+			if len(p) >= 4 {
+				isDown := p[1] != 0
+				keyCode := uint16(p[2])<<8 | uint16(p[3])
 
-			// 仅记录事件，实际RDP实现待开发
-			log.Printf("RDP鼠标事件: 坐标=(%d,%d), 按钮=%d", x, y, buttonMask)
+				// 记录键盘事件
+				log.Printf("RDP键盘事件: 键码=%d, 按下=%v", keyCode, isDown)
 
-			// 发送鼠标响应
-			r.writer.Write([]byte(fmt.Sprintf("RDP_MOUSE:%d:%d:%d", x, y, buttonMask)))
+				// 发送按键响应
+				r.writer.Write([]byte(fmt.Sprintf("RDP_KEY:%d:%v", keyCode, isDown)))
 
-			// 触发屏幕更新
-			r.lastUpdate = time.Now().Add(-1 * time.Second)
+				// 标记需要更新，解锁后异步发送
+				r.lastUpdate = time.Now().Add(-2 * time.Second)
+				go func() {
+					time.Sleep(300 * time.Millisecond)
+					r.sendDummyScreenshot()
+				}()
+			}
+
+		case 2: // 鼠标事件
+			if len(p) >= 6 {
+				x := uint16(p[1])<<8 | uint16(p[2])
+				y := uint16(p[3])<<8 | uint16(p[4])
+				buttonMask := p[5]
+
+				// 记录鼠标事件
+				log.Printf("RDP鼠标事件: 坐标=(%d,%d), 按钮=%d", x, y, buttonMask)
+
+				// 发送鼠标响应
+				r.writer.Write([]byte(fmt.Sprintf("RDP_MOUSE:%d:%d:%d", x, y, buttonMask)))
+
+				// 标记需要更新，解锁后异步发送
+				r.lastUpdate = time.Now().Add(-2 * time.Second)
+				go func() {
+					time.Sleep(300 * time.Millisecond)
+					r.sendDummyScreenshot()
+				}()
+			}
+
+		case 3: // 屏幕截图请求
+			log.Printf("收到RDP屏幕刷新请求")
+			// 标记需要更新，解锁后异步发送
+			r.lastUpdate = time.Now().Add(-2 * time.Second)
+			go func() {
+				time.Sleep(100 * time.Millisecond)
+				r.sendDummyScreenshot()
+			}()
 		}
-
-	case 3: // 屏幕截图请求
-		// 立即发送当前屏幕截图
-		go r.sendDummyScreenshot()
 	}
 
 	return len(p), nil

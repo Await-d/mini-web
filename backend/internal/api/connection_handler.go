@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"gitee.com/await29/mini-web/internal/middleware"
 	"gitee.com/await29/mini-web/internal/model"
@@ -19,8 +21,8 @@ import (
 
 // 添加WebSocket升级器
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+	ReadBufferSize:  2 * 1024 * 1024, // 2MB
+	WriteBufferSize: 2 * 1024 * 1024, // 2MB
 	CheckOrigin: func(r *http.Request) bool {
 		// 在生产环境中应该检查来源
 		return true
@@ -444,46 +446,10 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Sec-WebSocket-Key, Sec-WebSocket-Extensions, Sec-WebSocket-Version")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	
-	// 配置简化的升级器 - 只用于测试基本连通性
-	var upgrader = websocket.Upgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-		CheckOrigin: func(r *http.Request) bool {
-			log.Printf("CheckOrigin被调用: Origin=%s", r.Header.Get("Origin"))
-			return true // 允许所有来源
-		},
-	}
+	// 使用全局定义的upgrader，不再定义本地upgrader
 	
 	// 简化逻辑：直接尝试升级WebSocket连接
 	log.Printf("尝试直接升级WebSocket连接...")
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("升级WebSocket连接失败: %v", err)
-		return
-	}
-	defer conn.Close()
-	
-	// 发送测试消息并进入简单的回显模式
-	log.Printf("WebSocket连接升级成功，进入回显模式")
-	conn.WriteMessage(websocket.TextMessage, []byte("WebSocket连接成功！这是一个测试消息。"))
-	
-	// 简单的消息回显循环
-	for {
-		messageType, p, err := conn.ReadMessage()
-		if err != nil {
-			log.Printf("读取消息错误: %v", err)
-			break
-		}
-		log.Printf("收到消息: %s", string(p))
-		
-		// 回显相同的消息
-		if err := conn.WriteMessage(messageType, p); err != nil {
-			log.Printf("发送消息错误: %v", err)
-			break
-		}
-	}
-	
-	log.Printf("WebSocket连接已关闭")
 	
 	// 首先检查URL查询参数中的令牌
 	urlToken := r.URL.Query().Get("token")
@@ -608,14 +574,26 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, terminal service.TerminalSession) {
 	var once sync.Once
 	done := make(chan struct{})
+	errChan := make(chan error, 2) // 用于传递错误
+	activeChan := make(chan struct{}, 2) // 用于活跃性检测
 	
-	// 向终端发送一条消息以获取协议信息
+	log.Printf("开始处理终端会话WebSocket通信")
+	
+	// 向终端发送一条测试消息
+	log.Printf("向终端发送测试消息")
 	terminal.Write([]byte{0}) // 发送空消息
 	
-	// 从第一个响应中解析协议类型
-	buf := make([]byte, 128)
-	n, _ := terminal.Read(buf)
-	// protocolInfo := string(buf[:n])  // 注释掉未使用的变量
+	// 从终端读取初始响应
+	buf := make([]byte, 512)
+	n, err := terminal.Read(buf)
+	if err != nil {
+		log.Printf("读取终端初始响应时出错: %v", err)
+	} else {
+		log.Printf("收到终端初始响应: %d 字节", n)
+		if n > 0 {
+			log.Printf("初始响应内容预览: %s", string(buf[:min(n, 100)]))
+		}
+	}
 	
 	// 判断是否为图形协议
 	isGraphical := false
@@ -623,12 +601,16 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 	
 	if n > 4 {
 		prefix := string(buf[:4])
+		log.Printf("终端响应前缀: %s", prefix)
+		
 		if prefix == "RDP_" {
 			isGraphical = true
 			protocol = model.ProtocolRDP
+			log.Printf("检测到RDP图形协议")
 		} else if prefix == "VNC_" {
 			isGraphical = true
 			protocol = model.ProtocolVNC
+			log.Printf("检测到VNC图形协议")
 		}
 	}
 	
@@ -637,97 +619,260 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 	// 如果是图形协议，发送一个初始化消息
 	if isGraphical {
 		initMsg := struct {
-			Type string `json:"type"`
+			Type     string `json:"type"`
 			Protocol string `json:"protocol"`
 		}{
-			Type: "init",
+			Type:     "init",
 			Protocol: protocol,
 		}
 		
 		initData, _ := json.Marshal(initMsg)
+		log.Printf("发送图形协议初始化消息: %s", string(initData))
+		
 		if err := wsConn.WriteMessage(websocket.TextMessage, initData); err != nil {
 			log.Printf("发送初始化消息失败: %v", err)
+			return
+		} else {
+			log.Printf("初始化消息发送成功")
 		}
 	}
 
+	// 设置超时检测器
+	timeout := 3 * time.Minute // 3分钟无活动则超时
+	lastActivity := time.Now()
+	
+	// 活动检测计时器
+	activityTimer := time.NewTicker(10 * time.Second)
+	defer activityTimer.Stop()
+
 	// 从WebSocket读取数据并写入终端
 	go func() {
-		defer once.Do(func() { close(done) })
+		defer once.Do(func() { 
+			log.Printf("WebSocket读取协程结束")
+			close(done) 
+		})
+		
+		log.Printf("启动WebSocket读取协程")
 
 		for {
+			// 设置读取超时
+			wsConn.SetReadDeadline(time.Now().Add(1 * time.Minute))
+			
 			messageType, p, err := wsConn.ReadMessage()
 			if err != nil {
 				log.Printf("读取WebSocket消息错误: %v", err)
+				errChan <- err
 				return
 			}
 
-			if messageType == websocket.TextMessage || messageType == websocket.BinaryMessage {
-				// 图形协议可能需要特殊处理
-				if isGraphical && messageType == websocket.TextMessage {
-					// 解析客户端命令
-					var cmd struct {
-						Type string `json:"type"`
-						Data json.RawMessage `json:"data"`
-					}
-					
-					if err := json.Unmarshal(p, &cmd); err == nil {
-						log.Printf("收到图形协议命令: %s", cmd.Type)
-						
-						// 这里可以添加特殊命令处理
-						switch cmd.Type {
-						case "resize":
-							var resizeData struct {
-								Width int `json:"width"`
-								Height int `json:"height"`
-							}
-							if err := json.Unmarshal(cmd.Data, &resizeData); err == nil {
-								terminal.WindowResize(uint16(resizeData.Height), uint16(resizeData.Width))
-							}
-							continue // 处理过特殊命令后不再向终端写入
-						}
-					}
+			// 更新活动时间
+			select {
+			case activeChan <- struct{}{}:
+			default:
+			}
+
+			log.Printf("收到WebSocket消息: 类型=%d, 大小=%d字节", messageType, len(p))
+
+			if messageType == websocket.TextMessage {
+				// 文本消息处理
+				if len(p) < 1000 {
+					log.Printf("文本消息内容: %s", string(p))
+				} else {
+					log.Printf("文本消息内容过长，仅记录前1000字节: %s...", string(p[:1000]))
 				}
 				
-				if _, err := terminal.Write(p); err != nil {
+				// 尝试解析JSON命令
+				var cmd struct {
+					Type string          `json:"type"`
+					Data json.RawMessage `json:"data"`
+				}
+				
+				if err := json.Unmarshal(p, &cmd); err == nil {
+					log.Printf("解析JSON命令成功: %s", cmd.Type)
+					
+					// 处理特殊命令
+					switch cmd.Type {
+					case "resize":
+						var resizeData struct {
+							Width  int `json:"width"`
+							Height int `json:"height"`
+						}
+						if err := json.Unmarshal(cmd.Data, &resizeData); err == nil {
+							log.Printf("收到终端调整大小命令: 宽度=%d, 高度=%d", 
+								resizeData.Width, resizeData.Height)
+							terminal.WindowResize(uint16(resizeData.Height), uint16(resizeData.Width))
+						} else {
+							log.Printf("解析调整大小命令失败: %v", err)
+						}
+					case "screenshot":
+						log.Printf("收到屏幕截图请求")
+						// 将截图请求传递给终端处理
+						n, err := terminal.Write(p)
+						if err != nil {
+							log.Printf("写入终端屏幕截图请求错误: %v", err)
+							errChan <- err
+						} else {
+							log.Printf("屏幕截图请求已传递给终端: %d字节", n)
+						}
+					default:
+						// 其他命令直接传递给终端
+						log.Printf("将JSON命令传递给终端: %s", cmd.Type)
+						n, err := terminal.Write(p)
+						if err != nil {
+							log.Printf("写入终端错误: %v", err)
+							errChan <- err
+						} else {
+							log.Printf("写入终端成功: %d/%d 字节", n, len(p))
+						}
+					}
+				} else {
+					// 非JSON格式文本，直接传递
+					log.Printf("非JSON格式文本，直接传递给终端")
+					n, err := terminal.Write(p)
+					if err != nil {
+						log.Printf("写入终端错误: %v", err)
+						errChan <- err
+					} else {
+						log.Printf("写入终端成功: %d/%d 字节", n, len(p))
+					}
+				}
+			} else if messageType == websocket.BinaryMessage {
+				// 二进制消息处理
+				log.Printf("收到二进制消息: %d字节，前几个字节值: %v", len(p), p[:min(len(p), 16)])
+				
+				// 将二进制数据直接传递给终端
+				n, err := terminal.Write(p)
+				if err != nil {
 					log.Printf("写入终端错误: %v", err)
+					errChan <- err
 					return
 				}
+				log.Printf("二进制数据写入终端成功: %d/%d 字节", n, len(p))
 			}
 		}
 	}()
 
 	// 从终端读取数据并写入WebSocket
 	go func() {
-		defer once.Do(func() { close(done) })
+		defer once.Do(func() { 
+			log.Printf("终端读取协程结束")
+			close(done) 
+		})
+		
+		log.Printf("启动终端读取协程")
 
-		buf := make([]byte, 16384) // 增加缓冲区大小以处理图形数据
+		buf := make([]byte, 1024*1024*2) // 增加缓冲区大小到2MB以处理大型图形数据
 		for {
+			// 设置读取截止时间
+			deadline := time.Now().Add(30 * time.Second)
+			if err := wsConn.SetReadDeadline(deadline); err != nil {
+				log.Printf("设置WebSocket写入超时失败: %v", err)
+			}
+			
 			n, err := terminal.Read(buf)
 			if err != nil {
 				if err != io.EOF {
 					log.Printf("读取终端输出错误: %v", err)
+					errChan <- err
+				} else {
+					log.Printf("终端连接已关闭 (EOF)")
+					errChan <- err
 				}
 				return
+			}
+			
+			// 更新活动时间
+			select {
+			case activeChan <- struct{}{}:
+			default:
+			}
+			
+			if n > 0 {
+				log.Printf("从终端读取了 %d 字节数据", n)
+				
+				// 检查数据前缀用于调试
+				if n > 4 {
+					prefix := string(buf[:min(4, n)])
+					log.Printf("终端数据前缀: %s", prefix)
+					
+					// 对于图形协议消息，记录更详细的信息
+					if prefix == "RDP_" || prefix == "VNC_" {
+						parts := bytes.SplitN(buf[:n], []byte(":"), 2)
+						if len(parts) > 0 {
+							msgType := string(parts[0])
+							log.Printf("终端输出图形消息: 类型=%s, 总长度=%d字节", msgType, n)
+							
+							// 对于屏幕截图消息，额外记录信息
+							if msgType == "RDP_SCREENSHOT" || msgType == "VNC_SCREENSHOT" {
+								parts := bytes.SplitN(buf[:n], []byte(":"), 4)
+								if len(parts) >= 4 {
+									width := string(parts[1])
+									height := string(parts[2])
+									dataLen := n - len(parts[0]) - len(parts[1]) - len(parts[2]) - 3 // 减去分隔符的长度
+									log.Printf("屏幕截图数据: 类型=%s, 宽度=%s, 高度=%s, 数据长度=%d字节", 
+										msgType, width, height, dataLen)
+								}
+							}
+						}
+					} else if n < 100 {
+						// 对于小型非图形数据，记录全部内容
+						log.Printf("终端输出文本内容: %s", string(buf[:n]))
+					}
+				}
 			}
 			
 			// 确定发送的消息类型
 			msgType := websocket.BinaryMessage
 			
-			// 对于图形协议，如果接收到的数据以特定前缀开始，使用文本消息
-			if isGraphical && n > 4 {
-				prefix := string(buf[:4])
+			// 对于图形协议，使用文本消息传输特定前缀的数据
+			if n > 4 {
+				prefix := string(buf[:min(4, n)])
 				if prefix == "RDP_" || prefix == "VNC_" {
 					msgType = websocket.TextMessage
+					log.Printf("使用文本消息类型发送图形协议数据: %s...", prefix)
 				}
 			}
 
+			// 设置写入超时
+			wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := wsConn.WriteMessage(msgType, buf[:n]); err != nil {
 				log.Printf("写入WebSocket错误: %v", err)
+				errChan <- err
 				return
 			}
+			
+			log.Printf("成功发送 %d 字节数据到WebSocket客户端", n)
 		}
 	}()
 
-	// 等待结束
-	<-done
+	// 监控循环
+	log.Printf("启动监控循环...")
+	for {
+		select {
+		case <-done:
+			log.Printf("终端会话处理已完成")
+			return
+		case err := <-errChan:
+			log.Printf("检测到错误: %v，正在关闭会话", err)
+			return
+		case <-activeChan:
+			// 更新最后活动时间
+			lastActivity = time.Now()
+		case <-activityTimer.C:
+			// 检查是否超时
+			if time.Since(lastActivity) > timeout {
+				log.Printf("会话超时: 超过 %v 无活动，正在关闭", timeout)
+				wsConn.WriteMessage(websocket.TextMessage, []byte("会话超时，连接将被关闭"))
+				return
+			}
+		}
+	}
+}
+
+// min 返回两个整数中的较小值（Go 1.14+已内置此函数，兼容早期版本）
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
