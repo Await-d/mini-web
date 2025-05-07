@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gitee.com/await29/mini-web/internal/model"
+	"gitee.com/await29/mini-web/internal/model/sqlite"
 )
 
 var (
@@ -112,8 +113,17 @@ func (s *ConnectionService) CreateConnection(userID uint, req *model.ConnectionR
 
 // UpdateConnection 更新连接配置
 func (s *ConnectionService) UpdateConnection(userID uint, id uint, req *model.ConnectionRequest) (*model.Connection, error) {
-	// 获取现有连接
-	conn, err := s.connRepo.GetByID(id)
+	var conn *model.Connection
+	var err error
+	
+	// 使用修复后的方法获取连接，处理NULL值问题
+	if repo, ok := s.connRepo.(*sqlite.ConnectionRepository); ok {
+		conn, err = repo.GetByIDFixed(id)
+	} else {
+		// 回退到原始方法
+		conn, err = s.connRepo.GetByID(id)
+	}
+	
 	if err != nil {
 		return nil, fmt.Errorf("获取连接信息时出错: %w", err)
 	}
@@ -157,8 +167,17 @@ func (s *ConnectionService) UpdateConnection(userID uint, id uint, req *model.Co
 
 // DeleteConnection 删除连接
 func (s *ConnectionService) DeleteConnection(userID uint, id uint) error {
-	// 获取现有连接
-	conn, err := s.connRepo.GetByID(id)
+	var conn *model.Connection
+	var err error
+	
+	// 使用修复后的方法获取连接，处理NULL值问题
+	if repo, ok := s.connRepo.(*sqlite.ConnectionRepository); ok {
+		conn, err = repo.GetByIDFixed(id)
+	} else {
+		// 回退到原始方法
+		conn, err = s.connRepo.GetByID(id)
+	}
+	
 	if err != nil {
 		return fmt.Errorf("获取连接信息时出错: %w", err)
 	}
@@ -181,8 +200,17 @@ func (s *ConnectionService) DeleteConnection(userID uint, id uint) error {
 
 // GetConnection 获取连接详情
 func (s *ConnectionService) GetConnection(userID uint, id uint) (*model.Connection, error) {
-	// 获取连接
-	conn, err := s.connRepo.GetByID(id)
+	var conn *model.Connection
+	var err error
+	
+	// 使用修复后的方法获取连接，处理NULL值问题
+	if repo, ok := s.connRepo.(*sqlite.ConnectionRepository); ok {
+		conn, err = repo.GetByIDFixed(id)
+	} else {
+		// 回退到原始方法
+		conn, err = s.connRepo.GetByID(id)
+	}
+	
 	if err != nil {
 		return nil, fmt.Errorf("获取连接信息时出错: %w", err)
 	}
@@ -201,6 +229,16 @@ func (s *ConnectionService) GetConnection(userID uint, id uint) (*model.Connecti
 
 // GetUserConnections 获取用户的所有连接
 func (s *ConnectionService) GetUserConnections(userID uint) ([]*model.Connection, error) {
+	// 使用修复后的方法获取连接，处理NULL值问题
+	if repo, ok := s.connRepo.(*sqlite.ConnectionRepository); ok {
+		connections, err := repo.GetByUserIDFixed(userID)
+		if err != nil {
+			return nil, fmt.Errorf("获取用户连接时出错: %w", err)
+		}
+		return connections, nil
+	}
+	
+	// 回退到原始方法
 	connections, err := s.connRepo.GetByUserID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("获取用户连接时出错: %w", err)

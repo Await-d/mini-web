@@ -16,7 +16,7 @@ const LoginPage = () => {
     setLoading(true);
 
     try {
-      // 调用认证上下文中的登录方法
+      // 直接使用表单中的用户名和密码，不做任何转换
       const success = await login(values.username, values.password);
 
       if (success) {
@@ -78,7 +78,7 @@ const LoginPage = () => {
             >
               <Input.Password
                 prefix={<LockOutlined />}
-                placeholder="密码: admin"
+                placeholder="密码: admin123"
               />
             </Form.Item>
 

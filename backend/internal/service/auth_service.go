@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"log"
 
 	"gitee.com/await29/mini-web/internal/model"
 	"github.com/golang-jwt/jwt/v5"
@@ -42,23 +43,30 @@ func NewAuthService(userRepo model.UserRepository) *AuthService {
 
 // Login 用户登录
 func (s *AuthService) Login(username, password string) (*model.UserLoginResponse, error) {
+	// 添加日志记录登录尝试
+	log.Printf("登录尝试: 用户名=%s, 密码长度=%d", username, len(password))
+
 	// 验证用户名和密码
 	ok, user, err := s.userRepo.VerifyPassword(username, password)
 	if err != nil {
+		log.Printf("验证密码时出错: %v", err)
 		return nil, fmt.Errorf("验证密码时出错: %w", err)
 	}
 	if !ok || user == nil {
+		log.Printf("登录失败: 用户名或密码错误")
 		return nil, ErrInvalidCredentials
 	}
 
 	// 检查用户状态
 	if user.Status != "active" {
+		log.Printf("登录失败: 用户账号已被禁用")
 		return nil, errors.New("用户账号已被禁用")
 	}
 
 	// 生成JWT令牌
 	token, expireTime, err := s.generateToken(user)
 	if err != nil {
+		log.Printf("生成令牌时出错: %v", err)
 		return nil, fmt.Errorf("生成令牌时出错: %w", err)
 	}
 
@@ -69,6 +77,7 @@ func (s *AuthService) Login(username, password string) (*model.UserLoginResponse
 		Expire: expireTime.Unix(),
 	}
 
+	log.Printf("登录成功: 用户ID=%d, 用户名=%s", user.ID, user.Username)
 	return response, nil
 }
 

@@ -23,7 +23,7 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [screenInfo, setScreenInfo] = useState({ width: 1024, height: 768 });
   const [isConnected, setIsConnected] = useState(false);
-  
+
   // 用于记录鼠标和键盘状态
   const mouseStateRef = useRef({
     isDown: false,
@@ -31,30 +31,30 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
     y: 0,
     buttons: 0
   });
-  
+
   // 初始化图形终端
   useEffect(() => {
     if (!containerRef.current || !canvasRef.current || !webSocketRef.current) return;
-    
+
     setLoading(true);
     setError(null);
-    
+
     // 调整canvas尺寸
     const resizeCanvas = () => {
       if (!containerRef.current || !canvasRef.current) return;
-      
+
       const containerWidth = containerRef.current.clientWidth;
       const containerHeight = containerRef.current.clientHeight;
-      
+
       // 保持画布尺寸与容器一致
       canvasRef.current.width = containerWidth;
       canvasRef.current.height = containerHeight;
-      
+
       // 通知尺寸变化
       if (onResize) {
         onResize(containerWidth, containerHeight);
       }
-      
+
       // 发送尺寸调整消息到服务器
       if (webSocketRef.current && webSocketRef.current.readyState === WebSocket.OPEN) {
         const resizeMessage = {
@@ -62,37 +62,37 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
           width: containerWidth,
           height: containerHeight
         };
-        
+
+        console.log('发送尺寸调整消息:', resizeMessage);
         webSocketRef.current.send(JSON.stringify(resizeMessage));
       }
     };
-    
+
     // 调整Canvas尺寸
     resizeCanvas();
-    
+
     // 监听窗口大小变化
     window.addEventListener('resize', resizeCanvas);
-    
+
     // 处理WebSocket消息
     const handleWebSocketMessage = (event: MessageEvent) => {
       try {
         const data = event.data;
-        
-        // 记录接收到的消息类型（用于调试）
+
+        // 增强日志调试 - 打印所有消息内容
         console.log(`收到WebSocket消息: 类型=${typeof data}, 长度=${typeof data === 'string' ? data.length : (data instanceof ArrayBuffer ? data.byteLength : 'unknown')}`);
-        
+
         // 检查是否是文本消息
         if (typeof data === 'string') {
-          // 对于长消息截取部分显示
-          const previewData = data.length > 100 ? data.substring(0, 100) + '...' : data;
-          console.log('WebSocket文本消息内容预览:', previewData);
-          
+          // 记录所有文本消息的完整内容
+          console.log('WebSocket文本消息完整内容:', data);
+
           // 检查是否是图形协议消息
           if (data.startsWith(protocol.toUpperCase() + '_')) {
             const parts = data.split(':');
             const messageType = parts[0];
             console.log('图形协议消息类型:', messageType);
-            
+
             switch (messageType) {
               case 'RDP_CONNECTED':
               case 'VNC_CONNECT':
@@ -100,38 +100,51 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
                 setIsConnected(true);
                 setLoading(false);
                 break;
-                
+
               case 'RDP_INFO':
               case 'VNC_INFO':
                 // 显示连接信息
                 console.log('收到连接信息:', data);
                 // 可以在UI中显示连接信息
                 break;
-                
+
               case 'RDP_SCREENSHOT':
               case 'VNC_SCREENSHOT':
+                console.log(`收到屏幕截图消息，分段数量: ${parts.length}`);
+
+                // 确保消息格式正确
                 if (parts.length >= 4) {
-                  const width = parseInt(parts[1]);
-                  const height = parseInt(parts[2]);
-                  const base64Image = parts.slice(3).join(':'); // 重新组合可能包含冒号的base64数据
-                  
-                  console.log(`收到屏幕截图: 宽度=${width}, 高度=${height}, 数据长度=${base64Image.length}`);
-                  
-                  // 更新屏幕信息
-                  setScreenInfo({ width, height });
-                  
-                  // 绘制图像
-                  drawScreenshot(base64Image, width, height);
-                  
-                  // 如果之前在加载中，现在停止加载
-                  if (loading) {
-                    setLoading(false);
+                  try {
+                    const width = parseInt(parts[1]);
+                    const height = parseInt(parts[2]);
+                    const base64Image = parts.slice(3).join(':'); // 重新组合可能包含冒号的base64数据
+
+                    console.log(`解析屏幕截图消息: 宽度=${width}, 高度=${height}, 数据长度=${base64Image.length}`);
+
+                    // 确保base64数据有效
+                    if (base64Image.length > 0) {
+                      // 更新屏幕信息
+                      setScreenInfo({ width, height });
+
+                      // 绘制图像
+                      drawScreenshot(base64Image, width, height);
+
+                      // 如果之前在加载中，现在停止加载
+                      if (loading) {
+                        console.log('屏幕截图加载成功，结束加载状态');
+                        setLoading(false);
+                      }
+                    } else {
+                      console.error('屏幕截图base64数据为空');
+                    }
+                  } catch (error) {
+                    console.error('解析屏幕截图消息出错:', error);
                   }
                 } else {
                   console.error('截图数据格式错误:', parts);
                 }
                 break;
-                
+
               case 'RDP_ERROR':
               case 'VNC_ERROR':
                 // 显示错误信息
@@ -142,7 +155,7 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
                   message.error(`远程连接错误: ${errorMessage}`);
                 }
                 break;
-                
+
               case 'RDP_NOTICE':
               case 'VNC_NOTICE':
                 // 显示通知信息
@@ -152,35 +165,92 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
                   message.info(noticeMessage);
                 }
                 break;
-                
+
               case 'RDP_KEEP_ALIVE':
               case 'VNC_KEEP_ALIVE':
                 console.log('收到保活消息');
                 // 可以更新连接状态或响应保活
                 break;
-                
+
+              // 增加对其他可能的消息类型的处理  
+              case 'RDP_KEY':
+              case 'VNC_KEY':
+                console.log('收到按键响应消息:', data);
+                break;
+
+              case 'RDP_MOUSE':
+              case 'VNC_MOUSE':
+                console.log('收到鼠标响应消息:', data);
+                break;
+
+              case 'RDP_RESIZE':
+              case 'VNC_RESIZE':
+                console.log('收到调整大小响应消息:', data);
+                break;
+
               // 其他消息类型处理
               default:
                 console.log('收到未知图形协议消息:', data);
                 break;
             }
           } else {
-            // 非特定协议前缀的消息
+            // 处理非特定协议前缀的消息
             console.log('收到非协议格式文本消息:', data);
+
+            // 尝试解析为JSON
             try {
-              // 尝试解析为JSON
               const jsonData = JSON.parse(data);
               console.log('解析为JSON:', jsonData);
-              
+
               // 处理JSON格式的消息
-              if (jsonData.type === 'error') {
-                console.error('JSON错误消息:', jsonData.error || jsonData.message);
-                setError(jsonData.error || jsonData.message || '未知错误');
-                message.error(jsonData.error || jsonData.message || '未知错误');
+              if (jsonData.type) {
+                console.log('JSON消息类型:', jsonData.type);
+
+                switch (jsonData.type) {
+                  case 'init':
+                    console.log('收到初始化消息:', jsonData);
+                    break;
+
+                  case 'error':
+                    console.error('JSON错误消息:', jsonData.error || jsonData.message);
+                    setError(jsonData.error || jsonData.message || '未知错误');
+                    message.error(jsonData.error || jsonData.message || '未知错误');
+                    break;
+
+                  case 'screenshot':
+                    console.log('收到JSON格式屏幕截图消息');
+                    if (jsonData.data && jsonData.width && jsonData.height) {
+                      drawScreenshot(jsonData.data, jsonData.width, jsonData.height);
+                      setLoading(false);
+                    }
+                    break;
+                }
               }
             } catch (e) {
               // 不是JSON格式
-              console.log('不是JSON格式的消息');
+              console.log('不是JSON格式的消息:', e);
+
+              // 检查消息是否包含base64编码的图像数据
+              if (data.includes('data:image')) {
+                console.log('检测到内联图像数据');
+                try {
+                  // 尝试直接从内联数据中提取图像
+                  const img = new Image();
+                  img.onload = () => {
+                    if (canvasRef.current) {
+                      const ctx = canvasRef.current.getContext('2d');
+                      if (ctx) {
+                        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                        ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
+                      }
+                      setLoading(false);
+                    }
+                  };
+                  img.src = data;
+                } catch (imgErr) {
+                  console.error('处理内联图像数据失败:', imgErr);
+                }
+              }
             }
           }
         } else if (data instanceof ArrayBuffer) {
@@ -192,65 +262,155 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
         console.error('处理WebSocket消息出错:', err);
       }
     };
-    
+
     // 绘制屏幕截图
     const drawScreenshot = (base64Image: string, width: number, height: number) => {
-      if (!canvasRef.current) return;
-      
+      if (!canvasRef.current) {
+        console.error('Canvas引用不存在，无法绘制屏幕截图');
+        return;
+      }
+
+      console.log(`尝试绘制屏幕截图，图像数据长度: ${base64Image.length}`);
+
       const ctx = canvasRef.current.getContext('2d');
-      if (!ctx) return;
-      
+      if (!ctx) {
+        console.error('无法获取Canvas 2D上下文，请检查浏览器支持');
+        setError('无法绘制远程屏幕，浏览器可能不支持Canvas 2D');
+        return;
+      }
+
       // 创建新图像
       const img = new Image();
+
+      // 设置加载超时
+      const timeoutId = setTimeout(() => {
+        console.error('图像加载超时');
+        setError('加载远程屏幕图像超时，请尝试刷新');
+      }, 10000);
+
       img.onload = () => {
+        clearTimeout(timeoutId);
+        console.log(`图像加载成功，实际尺寸: ${img.width}x${img.height}`);
+
         // 清除画布
         ctx.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
-        
-        // 在canvas中居中显示图像
-        const canvas = canvasRef.current!;
-        const canvasRatio = canvas.width / canvas.height;
-        const imageRatio = width / height;
-        
-        let drawWidth, drawHeight, offsetX, offsetY;
-        
-        if (canvasRatio > imageRatio) {
-          // Canvas更宽，图像高度适应Canvas
-          drawHeight = canvas.height;
-          drawWidth = drawHeight * imageRatio;
-          offsetX = (canvas.width - drawWidth) / 2;
-          offsetY = 0;
-        } else {
-          // Canvas更高，图像宽度适应Canvas
-          drawWidth = canvas.width;
-          drawHeight = drawWidth / imageRatio;
-          offsetX = 0;
-          offsetY = (canvas.height - drawHeight) / 2;
+
+        try {
+          // 在canvas中居中显示图像
+          const canvas = canvasRef.current!;
+          const canvasRatio = canvas.width / canvas.height;
+          const imageRatio = width / height;
+
+          let drawWidth, drawHeight, offsetX, offsetY;
+
+          if (canvasRatio > imageRatio) {
+            // Canvas更宽，图像高度适应Canvas
+            drawHeight = canvas.height;
+            drawWidth = drawHeight * imageRatio;
+            offsetX = (canvas.width - drawWidth) / 2;
+            offsetY = 0;
+          } else {
+            // Canvas更高，图像宽度适应Canvas
+            drawWidth = canvas.width;
+            drawHeight = drawWidth / imageRatio;
+            offsetX = 0;
+            offsetY = (canvas.height - drawHeight) / 2;
+          }
+
+          // 绘制图像
+          ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+          console.log(`图像绘制完成，绘制尺寸: ${drawWidth}x${drawHeight}, 偏移: (${offsetX},${offsetY})`);
+
+          // 清除任何可能存在的错误状态
+          if (error) {
+            setError(null);
+          }
+
+          // 确保加载状态已更新
+          if (loading) {
+            setLoading(false);
+          }
+        } catch (drawError) {
+          console.error('绘制图像时发生错误:', drawError);
+          setError('绘制远程屏幕时出错: ' + (drawError instanceof Error ? drawError.message : String(drawError)));
         }
-        
-        // 绘制图像
-        ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
       };
-      
-      img.onerror = () => {
-        console.error('加载图像失败');
-        setError('加载远程屏幕图像失败');
+
+      img.onerror = (errorEvent) => {
+        clearTimeout(timeoutId);
+        console.error('加载图像失败:', errorEvent);
+        setError('加载远程屏幕图像失败，请检查连接或刷新重试');
+
+        // 记录更详细的错误信息以便调试
+        console.error('图像加载错误详情:', {
+          imgSrc: base64Image.length > 100 ? base64Image.substring(0, 100) + '...' : base64Image,
+          width,
+          height,
+          canvasWidth: canvasRef.current?.width,
+          canvasHeight: canvasRef.current?.height,
+          errorEvent
+        });
       };
-      
-      // 设置图像源
-      img.src = `data:image/png;base64,${base64Image}`;
+
+      // 检查base64数据格式
+      let imgSrc = '';
+      try {
+        if (base64Image.startsWith('data:image')) {
+          // 已经是完整的Data URL
+          imgSrc = base64Image;
+        } else {
+          // 需要添加Data URL前缀
+          imgSrc = `data:image/png;base64,${base64Image}`;
+        }
+
+        // 验证base64数据有效性
+        if (base64Image.length < 100) {
+          console.warn('base64图像数据过短，可能无效:', base64Image);
+        }
+
+        // 设置图像源
+        console.log(`设置图像源，长度: ${imgSrc.length}`);
+        img.src = imgSrc;
+      } catch (encodeError) {
+        console.error('处理图像数据时出错:', encodeError);
+        setError('处理远程屏幕数据时出错，请刷新重试');
+      }
     };
-    
+
     // 添加WebSocket消息监听器
     if (webSocketRef.current) {
       webSocketRef.current.addEventListener('message', handleWebSocketMessage);
-      
+
       // 请求初始屏幕截图
       if (webSocketRef.current.readyState === WebSocket.OPEN) {
-        const requestMessage = { type: 'init', protocol };
+        // 发送详细的初始化消息
+        const requestMessage = {
+          type: 'init',
+          protocol,
+          width: canvasRef.current.width,
+          height: canvasRef.current.height,
+          options: {
+            colorDepth: 16,
+            compression: true
+          }
+        };
+        console.log('发送图形终端初始化消息:', requestMessage);
         webSocketRef.current.send(JSON.stringify(requestMessage));
+
+        // 延迟1秒后，如果还在加载状态，发送屏幕截图请求
+        setTimeout(() => {
+          if (loading && webSocketRef.current?.readyState === WebSocket.OPEN) {
+            console.log('发送屏幕截图请求');
+            const screenshotRequest = {
+              type: 'screenshot',
+              timestamp: new Date().getTime()
+            };
+            webSocketRef.current.send(JSON.stringify(screenshotRequest));
+          }
+        }, 1000);
       }
     }
-    
+
     // 清理函数
     return () => {
       window.removeEventListener('resize', resizeCanvas);
@@ -259,29 +419,29 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
       }
     };
   }, [protocol, webSocketRef.current]);
-  
+
   // 处理鼠标事件
   const handleMouseEvent = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current || !webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) return;
-    
+
     // 获取canvas相对位置
     const rect = canvasRef.current.getBoundingClientRect();
-    
+
     // 计算相对于canvas的坐标
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    
+
     // 计算相对于远程屏幕的坐标
     const relX = Math.floor((x / canvasRef.current.width) * screenInfo.width);
     const relY = Math.floor((y / canvasRef.current.height) * screenInfo.height);
-    
+
     // 更新鼠标状态
     mouseStateRef.current = {
       ...mouseStateRef.current,
       x: relX,
       y: relY
     };
-    
+
     // 发送鼠标移动消息
     const message = new Uint8Array(6);
     message[0] = 2; // 鼠标事件的类型标识
@@ -290,91 +450,91 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
     message[3] = (relY >> 8) & 0xFF;
     message[4] = relY & 0xFF;
     message[5] = mouseStateRef.current.buttons;
-    
+
     webSocketRef.current.send(message);
   };
-  
+
   // 处理鼠标按下
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) return;
-    
+
     // 更新按钮状态
     let buttonMask = 0;
-    
+
     // 左键 = 1, 中键 = 2, 右键 = 4
     if (e.button === 0) buttonMask |= 1;
     else if (e.button === 1) buttonMask |= 2;
     else if (e.button === 2) buttonMask |= 4;
-    
+
     mouseStateRef.current.buttons = buttonMask;
     mouseStateRef.current.isDown = true;
-    
+
     // 处理鼠标事件以发送消息
     handleMouseEvent(e);
   };
-  
+
   // 处理鼠标释放
   const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) return;
-    
+
     // 更新按钮状态
     mouseStateRef.current.buttons = 0;
     mouseStateRef.current.isDown = false;
-    
+
     // 处理鼠标事件以发送消息
     handleMouseEvent(e);
   };
-  
+
   // 处理键盘事件
   const handleKeyEvent = (e: React.KeyboardEvent<HTMLCanvasElement>, isDown: boolean) => {
     if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) return;
-    
+
     // 阻止默认行为
     e.preventDefault();
-    
+
     // 获取键码
     const keyCode = e.keyCode || e.which;
-    
+
     // 创建键盘事件消息
     const message = new Uint8Array(4);
     message[0] = 1; // 键盘事件的类型标识
     message[1] = isDown ? 1 : 0;
     message[2] = (keyCode >> 8) & 0xFF;
     message[3] = keyCode & 0xFF;
-    
+
     webSocketRef.current.send(message);
   };
-  
+
   // 请求屏幕刷新
   const requestScreenRefresh = () => {
     if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) return;
-    
+
     // 发送屏幕刷新请求
-    const message = new Uint8Array(1);
-    message[0] = 3; // 屏幕刷新请求的类型标识
-    
-    webSocketRef.current.send(message);
+    const messageData = new Uint8Array(1);
+    messageData[0] = 3; // 屏幕刷新请求的类型标识
+
+    webSocketRef.current.send(messageData);
     message.success('已请求刷新远程屏幕');
   };
-  
+
   // 切换全屏模式
   const toggleFullscreen = () => {
     setFullscreen(!fullscreen);
-    
+
     // 调整全屏后的canvas尺寸
     setTimeout(() => {
       if (containerRef.current && canvasRef.current) {
         const containerWidth = containerRef.current.clientWidth;
         const containerHeight = containerRef.current.clientHeight;
-        
+
         canvasRef.current.width = containerWidth;
         canvasRef.current.height = containerHeight;
-        
+
         // 通知尺寸变化
         if (onResize) {
           onResize(containerWidth, containerHeight);
         }
-        
+
         // 请求屏幕刷新
         requestScreenRefresh();
       }
@@ -382,7 +542,7 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
   };
 
   return (
-    <div 
+    <div
       ref={containerRef}
       className={`${styles.graphicalTerminal} ${fullscreen ? styles.fullscreen : ''}`}
       tabIndex={0} // 使div可以接收焦点和键盘事件
@@ -395,8 +555,8 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
       ) : error ? (
         <div className={styles.error}>
           <div className={styles.errorText}>{error}</div>
-          <Button 
-            type="primary" 
+          <Button
+            type="primary"
             onClick={requestScreenRefresh}
             icon={<ReloadOutlined />}
           >
@@ -405,7 +565,7 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
         </div>
       ) : (
         <>
-          <canvas 
+          <canvas
             ref={canvasRef}
             className={styles.canvas}
             onMouseDown={handleMouseDown}
@@ -418,13 +578,13 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
           />
           <div className={styles.controls}>
             <Space>
-              <Button 
-                icon={<ReloadOutlined />} 
+              <Button
+                icon={<ReloadOutlined />}
                 onClick={requestScreenRefresh}
                 title="刷新屏幕"
               />
-              <Button 
-                icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} 
+              <Button
+                icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
                 onClick={toggleFullscreen}
                 title={fullscreen ? "退出全屏" : "全屏"}
               />
