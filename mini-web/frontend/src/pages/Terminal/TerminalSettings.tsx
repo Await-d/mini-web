@@ -33,7 +33,7 @@ const defaultSettings: TerminalSettings = {
     cursorBlink: true,
     scrollback: 3000,
     backendUrl: window.location.hostname,
-    backendPort: 8081,  // 尝试使用8081端口
+    backendPort: 8080,  // 使用8080端口，与后端服务配置一致，不要修改
     wsTestEnabled: false
 };
 
@@ -49,41 +49,109 @@ const fontFamilyOptions = [
 const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, onApply }) => {
     const [form] = Form.useForm();
     const [currentSettings, setCurrentSettings] = useState<TerminalSettings>({ ...defaultSettings });
-
-    // 加载已保存的设置
-    useEffect(() => {
+    
+    // 加载设置函数 - 将其提取为单独函数以提高可读性
+    const loadSettings = () => {
         const savedSettings = localStorage.getItem('terminal_settings');
         if (savedSettings) {
             try {
                 const parsedSettings = JSON.parse(savedSettings);
-                setCurrentSettings({ ...defaultSettings, ...parsedSettings });
-                form.setFieldsValue({ ...defaultSettings, ...parsedSettings });
+                // 强制使用8080端口，不管localStorage里存的是什么
+                const mergedSettings = { 
+                    ...defaultSettings, 
+                    ...parsedSettings,
+                    backendPort: 8080  // 强制使用8080端口
+                };
+                
+                // 处理颜色值，确保为字符串格式
+                const formattedSettings = {
+                    ...mergedSettings,
+                    background: typeof mergedSettings.background === 'object' ? 
+                        mergedSettings.background.toHexString() : mergedSettings.background,
+                    foreground: typeof mergedSettings.foreground === 'object' ? 
+                        mergedSettings.foreground.toHexString() : mergedSettings.foreground
+                };
+                
+                setCurrentSettings(formattedSettings);
+                return formattedSettings;
             } catch (e) {
                 console.error('读取保存的设置失败:', e);
             }
         }
-    }, [form]);
+        
+        // 返回默认设置
+        return { ...defaultSettings };
+    };
+    
+    // 当弹窗可见性变化时，加载设置
+    useEffect(() => {
+        if (visible) {
+            // 加载设置
+            const settings = loadSettings();
+            
+            // 设置表单值
+            form.setFieldsValue(settings);
+        }
+    }, [visible, form]);
 
     // 处理设置应用
     const handleApply = () => {
-        form.validateFields().then(values => {
-            const newSettings: TerminalSettings = {
-                ...currentSettings,
-                ...values,
-            };
+        // 手动获取表单值而不是使用validateFields，避免表单验证问题
+        const values = form.getFieldsValue();
+        
+        // 处理可能的空值，使用默认值
+        const processedValues = {
+            fontSize: values.fontSize || defaultSettings.fontSize,
+            fontFamily: values.fontFamily || defaultSettings.fontFamily,
+            scrollback: values.scrollback || defaultSettings.scrollback,
+            cursorBlink: typeof values.cursorBlink === 'boolean' ? values.cursorBlink : defaultSettings.cursorBlink,
+            backendUrl: values.backendUrl || defaultSettings.backendUrl,
+            backendPort: values.backendPort || defaultSettings.backendPort,
+            wsTestEnabled: typeof values.wsTestEnabled === 'boolean' ? values.wsTestEnabled : defaultSettings.wsTestEnabled,
+        };
+        
+        // 转换ColorPicker的值为十六进制字符串
+        const formattedValues = {
+            ...processedValues,
+            background: values.background ? 
+                (typeof values.background === 'object' ? values.background.toHexString() : values.background) 
+                : defaultSettings.background,
+            foreground: values.foreground ? 
+                (typeof values.foreground === 'object' ? values.foreground.toHexString() : values.foreground) 
+                : defaultSettings.foreground
+        };
+        
+        const newSettings: TerminalSettings = {
+            ...currentSettings,
+            ...formattedValues,
+        };
 
-            // 保存设置到localStorage
-            localStorage.setItem('terminal_settings', JSON.stringify(newSettings));
+        // 确保值的类型正确
+        if (typeof newSettings.backendPort === 'string') {
+            newSettings.backendPort = parseInt(newSettings.backendPort, 10);
+        }
+        
+        // 强制使用8080端口，确保WebSocket连接成功
+        newSettings.backendPort = 8080;
 
-            setCurrentSettings(newSettings);
-            onApply(newSettings);
-            onClose();
-        });
+        // 保存设置到localStorage
+        localStorage.setItem('terminal_settings', JSON.stringify(newSettings));
+
+        console.log('应用新设置:', newSettings);
+        setCurrentSettings(newSettings);
+        onApply(newSettings);
+        onClose();
     };
 
     // 重置为默认设置
     const handleReset = () => {
-        form.setFieldsValue(defaultSettings);
+        // 使用setTimeout确保在下一个事件循环中设置表单值
+        setTimeout(() => {
+            if (form) {
+                form.setFieldsValue({...defaultSettings});
+                console.log('重置表单为默认设置');
+            }
+        }, 0);
         setCurrentSettings({ ...defaultSettings });
     };
 
@@ -154,7 +222,8 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
                     </Form.Item>
 
                     <Form.Item label="后端服务端口" name="backendPort">
-                        <InputNumber min={1} max={65535} placeholder="例如：8080" />
+                        <InputNumber min={1} max={65535} placeholder="例如：8080" disabled />
+                        <div style={{ marginTop: 4, color: '#666' }}>端口固定为8080，不可修改</div>
                     </Form.Item>
 
                     <Form.Item label="启用WebSocket测试模式" name="wsTestEnabled" valuePropName="checked">
@@ -167,14 +236,13 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
                             onClick={async () => {
                                 const values = form.getFieldsValue();
                                 const backendUrl = values.backendUrl || window.location.hostname;
-                                const backendPort = values.backendPort || 8081;
+                                const backendPort = values.backendPort || 8080; // 默认使用8080端口
 
                                 // 定义测试URL
                                 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
                                 // 测试不同的路径
                                 const paths = [
-                                    '/api/ws/ping',
                                     '/ws/ping',
                                     '/api/health',
                                     '/health'
@@ -249,12 +317,31 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
         }
     ];
 
+    // 仅在对话框可见时才渲染内容，减少不必要的渲染
+    const renderContent = () => {
+        if (!visible) {
+            return null;
+        }
+        
+        return (
+            <Form
+                form={form}
+                layout="vertical"
+                name="terminalSettingsForm"
+                preserve={false}
+            >
+                <Tabs defaultActiveKey="appearance" items={tabItems} />
+            </Form>
+        );
+    };
+    
     return (
         <Modal
             title="终端设置"
             open={visible}
             onCancel={onClose}
             width={600}
+            destroyOnClose={true}
             footer={[
                 <Button key="reset" onClick={handleReset}>
                     重置默认
@@ -267,13 +354,7 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
                 </Button>,
             ]}
         >
-            <Form
-                form={form}
-                layout="vertical"
-                initialValues={currentSettings}
-            >
-                <Tabs defaultActiveKey="appearance" items={tabItems} />
-            </Form>
+            {renderContent()}
         </Modal>
     );
 };

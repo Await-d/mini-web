@@ -18,9 +18,13 @@ export interface TerminalTab {
   xtermRef: RefObject<XTerm | null>;
   fitAddonRef: RefObject<FitAddon | null>;
   searchAddonRef: RefObject<SearchAddon | null>;
+  messageQueueRef: RefObject<any>; // 消息队列引用
   webSocketRef: RefObject<WebSocket | null>;
   isConnected: boolean;
   isGraphical: boolean; // 是否为图形化终端（RDP或VNC）
+  networkLatency?: number | null; // 网络延迟数据
+  terminalMode?: string; // 终端模式(如vim、nano等)
+  lastActivityTime?: number; // 最后活动时间戳
 }
 
 // 终端状态接口
@@ -35,6 +39,7 @@ interface TerminalContextType {
   addTab: (connectionId: number, sessionId: number, connection: Connection) => void;
   closeTab: (tabKey: string) => void;
   setActiveTab: (tabKey: string) => void;
+  updateTab: (tabKey: string, updates: Partial<TerminalTab>) => void;
 }
 
 // 创建上下文
@@ -138,6 +143,7 @@ export const TerminalProvider: React.FC<TerminalProviderProps> = ({ children }) 
       xtermRef: React.createRef<XTerm | null>(),
       fitAddonRef: React.createRef<FitAddon | null>(),
       searchAddonRef: React.createRef<SearchAddon | null>(),
+      messageQueueRef: React.createRef<any>(),
       webSocketRef: React.createRef<WebSocket | null>(),
       isConnected: false,
       isGraphical: isGraphical
@@ -171,12 +177,18 @@ export const TerminalProvider: React.FC<TerminalProviderProps> = ({ children }) 
     dispatch({ type: 'SET_ACTIVE_TAB', payload: { tabKey } });
   };
 
+  // 更新标签数据
+  const updateTab = (tabKey: string, updates: Partial<TerminalTab>) => {
+    dispatch({ type: 'UPDATE_TAB', payload: { tabKey, updates } });
+  };
+
   // 上下文值
   const contextValue: TerminalContextType = {
     state,
     addTab,
     closeTab,
-    setActiveTab
+    setActiveTab,
+    updateTab
   };
 
   return (

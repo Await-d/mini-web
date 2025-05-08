@@ -4,6 +4,7 @@ import { Spin } from 'antd';
 
 import AppLayout from './layouts/AppLayout';
 import AuthLayout from './layouts/AuthLayout';
+import OperationLayout from './layouts/OperationLayout';
 import NotFound from './pages/NotFound';
 import { RequireAuth } from './contexts/AuthContext';
 
@@ -82,14 +83,7 @@ export const routes: RouteObject[] = [
           </Suspense>
         ),
       },
-      {
-        path: 'terminal/:connectionId',
-        element: (
-          <Suspense fallback={<PageLoader />}>
-            <Terminal />
-          </Suspense>
-        ),
-      },
+      
       {
         path: '*',
         element: <NotFound />,
@@ -105,6 +99,47 @@ export const routes: RouteObject[] = [
         element: (
           <Suspense fallback={<PageLoader />}>
             <Login />
+          </Suspense>
+        ),
+      },
+    ],
+  },
+  {
+    path: '/',
+    element: (
+      <RequireAuth>
+        <OperationLayout />
+      </RequireAuth>
+    ),
+    children: [
+      {
+        path: 'terminal',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <div style={{ 
+              height: '100%', 
+              display: 'flex', 
+              justifyContent: 'center', 
+              alignItems: 'center',
+              background: '#f7f7f7' 
+            }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>
+                  从左侧设备树选择一个连接开始操作
+                </div>
+                <div style={{ color: '#666' }}>
+                  或点击左上角"新建连接"按钮添加新的连接
+                </div>
+              </div>
+            </div>
+          </Suspense>
+        ),
+      },
+      {
+        path: 'terminal/:connectionId',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <Terminal />
           </Suspense>
         ),
       },

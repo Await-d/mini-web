@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-// API基础URL
+// API基础URL - 确保所有HTTP请求使用8080端口
 const API_BASE_URL = 'http://localhost:8080/api';
 
 // 创建axios实例

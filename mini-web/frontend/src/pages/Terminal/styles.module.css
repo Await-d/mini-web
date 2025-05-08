@@ -1,9 +1,14 @@
 .terminalContainer {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 64px);
+  height: 100vh; /* 使用视口高度确保占满整个可见区域 */
   background-color: #f0f2f5;
   transition: all 0.3s;
+  position: relative;
+  overflow: hidden; /* 防止内容溢出 */
+  /* 防止滚动条反复横跳 */
+  scrollbar-gutter: stable;
+  padding-right: 0; /* 保留滚动条的空间，即使没有滚动 */
 }
 
 .fullscreen {
@@ -21,14 +26,16 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  padding: 1px 8px; /* 最小化内边距 */
   background-color: #fff;
   border-bottom: 1px solid #e8e8e8;
+  height: 28px; /* 进一步减小高度，最小化UI元素 */
 }
 
 .terminalInfo {
   display: flex;
   align-items: center;
+  font-size: 13px; /* 减小字体 */
 }
 
 .terminalControls {
@@ -39,8 +46,115 @@
 .terminalWrapper {
   flex: 1;
   overflow: hidden;
-  padding: 4px;
+  padding: 0; /* 移除内边距以获得更多空间 */
   background-color: #1e1e1e;
+  width: 100%;
+  height: 100%;
+  position: relative; /* 相对定位 */
+  z-index: 5; /* 提高z-index确保终端内容在最上层 */
+  display: flex; /* 添加flex布局以确保子元素填充 */
+  flex-direction: column; /* 纵向排列 */
+  min-width: 0; /* 防止子元素溢出 */
+  isolation: isolate; /* 创建新的堆叠上下文，隔离子元素 */
+}
+
+/* 修复xterm.js层级显示问题 */
+.terminalWrapper :global(.xterm) {
+  height: 100%;
+  width: 100%;
+  display: block !important;
+}
+
+/* 修复xterm的屏幕容器 */
+.terminalWrapper :global(.xterm-screen) {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+}
+
+/* 确保行容器正确显示 */
+.terminalWrapper :global(.xterm-rows) {
+  width: 100% !important;
+  display: block !important;
+}
+
+.terminalWrapper :global(.xterm-viewport) {
+  z-index: 10 !important;
+}
+
+.terminalWrapper :global(.xterm-screen) {
+  z-index: 1;
+}
+
+/* 确保文本层在最上层 */
+.terminalWrapper :global(.xterm-text-layer) {
+  z-index: 20 !important;
+  opacity: 1 !important;
+}
+
+/* 确保光标可见 */
+.terminalWrapper :global(.xterm-cursor-layer) {
+  z-index: 25 !important;
+  opacity: 1 !important;
+}
+
+/* 完全隐藏链接层 */
+.terminalWrapper :global(.xterm-link-layer) {
+  display: none !important; /* 完全隐藏链接层 */
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important; /* 允许点击穿透到下层 */
+}
+
+/* 全局应用：确保任何位置的xterm-link-layer都被隐藏 */
+:global(.xterm-link-layer) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+/* 修复xterm-helpers定位问题 */
+:global(.xterm-helpers) {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  z-index: -10 !important; /* 非常低的z-index确保不会干扰其他元素 */
+  width: 0 !important;
+  height: 0 !important;
+  overflow: visible !important; /* 允许子元素溢出 */
+  pointer-events: none !important; /* 不捕获鼠标事件 */
+}
+
+/* 确保helper-textarea不会干扰布局但仍能接收输入 */
+.terminalWrapper :global(.xterm-helper-textarea) {
+  position: fixed !important; /* 使用fixed定位完全脱离文档流 */
+  z-index: -1 !important; /* 将z-index设为负值，但确保事件仍能捕获 */
+  opacity: 0 !important;
+  pointer-events: auto !important; /* 保持能够接收事件 */
+  width: 0 !important;
+  height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  border: 0 !important;
+  outline: none !important;
+  resize: none !important;
+  top: 0 !important; /* 固定在左上角 */
+  left: 0 !important;
+  transform: translateZ(0) !important; /* 启用硬件加速 */
+}
+
+/* 修复终端文本选择问题 */
+.terminalWrapper :global(.xterm-selection-layer) {
+  z-index: 15 !important; /* 确保选择层位于文本层之下但在背景层之上 */
+  pointer-events: none !important; /* 防止干扰鼠标事件 */
+  mix-blend-mode: difference !important; /* 使选择区域始终可见 */
+}
+
+/* 修复选择区域样式 */
+.terminalWrapper :global(.xterm-selection) {
+  background-color: rgba(255, 255, 255, 0.3) !important; /* 半透明白色 */
+  position: absolute !important;
 }
 
 .terminalContent {
@@ -52,20 +166,198 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 16px;
+  padding: 0 12px;
   background-color: #fff;
   border-top: 1px solid #e8e8e8;
-  font-size: 12px;
+  font-size: 14px;
+  height: 32px;
+  min-height: 32px; /* 确保最小高度 */
+  line-height: 32px;
+  white-space: nowrap;
+  position: relative;
+  z-index: 10;
+  box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.05);
+  flex-shrink: 0; /* 防止被压缩 */
+}
+
+.footerLeftSection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 50%;
+  overflow: visible; /* 允许溢出显示 */
+}
+
+.footerRightSection {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
+  overflow: visible; /* 允许溢出显示 */
+  padding-left: 12px;
+}
+
+.footerDivider {
+  width: 1px;
+  height: 70%;
+  background-color: #e8e8e8;
+  margin: 0 12px;
+  flex-shrink: 0;
+}
+
+.footerItem {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.footerLabel {
+  font-weight: bold;
+  margin-right: 4px;
+  color: #666;
+}
+
+.hostInfo {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
 }
 
 .statusConnected {
   color: #52c41a;
   font-weight: bold;
+  padding: 1px 4px;
+  background-color: rgba(82, 196, 26, 0.1);
+  border-radius: 2px;
+  white-space: nowrap;
+  display: inline-block;
+  font-size: 13px;
 }
 
 .statusDisconnected {
   color: #ff4d4f;
   font-weight: bold;
+  padding: 1px 4px;
+  background-color: rgba(255, 77, 79, 0.1);
+  border-radius: 2px;
+  white-space: nowrap;
+  display: inline-block;
+  font-size: 13px;
+}
+
+.latencyUnknown {
+  color: #999;
+  font-weight: bold;
+  display: inline-block;
+  font-size: 13px;
+}
+
+.latencyGood {
+  color: #52c41a;
+  font-weight: bold;
+  padding: 1px 3px;
+  background-color: rgba(82, 196, 26, 0.1);
+  border-radius: 2px;
+  display: inline-block;
+  font-size: 13px;
+}
+
+.latencyMedium {
+  color: #faad14;
+  font-weight: bold;
+  padding: 1px 3px;
+  background-color: rgba(250, 173, 20, 0.1);
+  border-radius: 2px;
+  display: inline-block;
+  font-size: 13px;
+}
+
+.latencyPoor {
+  color: #ff4d4f;
+  font-weight: bold;
+  padding: 1px 3px;
+  background-color: rgba(255, 77, 79, 0.1);
+  border-radius: 2px;
+  display: inline-block;
+  font-size: 13px;
+}
+
+.terminalMode {
+  color: #1677ff;
+  font-weight: bold;
+}
+
+.protocolType {
+  font-weight: bold;
+}
+
+/* 移除命令工具区域样式，因为已合并到终端底部 */
+
+/* 标签标题容器 */
+.tabTitleContainer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative; /* 用于绝对定位标签指示器 */
+}
+
+.tabTitleText {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tabInfo {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 标签页延迟指示器 */
+.tabLatencyGood {
+  color: #52c41a;
+  font-size: 10px;
+  margin-left: 4px;
+  font-weight: bold;
+  padding: 1px 3px;
+  border-radius: 2px;
+  background-color: rgba(82, 196, 26, 0.1);
+}
+
+.tabLatencyMedium {
+  color: #faad14;
+  font-size: 10px;
+  margin-left: 4px;
+  font-weight: bold;
+  padding: 1px 3px;
+  border-radius: 2px;
+  background-color: rgba(250, 173, 20, 0.1);
+}
+
+.tabLatencyPoor {
+  color: #ff4d4f;
+  font-size: 10px;
+  margin-left: 4px;
+  font-weight: bold;
+  padding: 1px 3px;
+  border-radius: 2px;
+  background-color: rgba(255, 77, 79, 0.1);
+}
+
+/* 标签页模式指示器 */
+.tabMode {
+  color: #1677ff;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 1px 3px;
+  border-radius: 2px;
+  background-color: rgba(22, 119, 255, 0.1);
+  margin-left: 2px;
 }
 
 /* 标签式样式 */
@@ -73,15 +365,52 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  height: calc(100% - 30px - 32px); /* 减去头部和底部的高度 */
+  min-height: 0; /* 允许容器收缩 */
+  position: relative; /* 为子元素绝对定位提供参考 */
+  overflow: hidden; /* 防止内容溢出 */
+  z-index: 3; /* 提高z-index确保在父容器上层 */
+  background-color: #1e1e1e; /* 设置背景色 */
+  width: 100%; /* 确保宽度100% */
 }
 
 .terminalTabs :global(.ant-tabs-content) {
   height: 100%;
   flex: 1;
+  overflow: hidden; /* 防止内容溢出 */
+  position: relative; /* 为绝对定位的终端提供参考 */
+  display: flex; /* 确保子元素完全填充 */
+  width: 100%; /* 确保宽度100% */
+}
+
+/* 确保Ant Design Tab内容区域正确显示 */
+.terminalTabs :global(.ant-tabs-content-holder) {
+  flex: 1;
+  height: 100%;
+  width: 100%; /* 确保宽度100% */
+  overflow: hidden;
+  display: flex; /* 使用flex布局 */
+}
+
+/* 修复Tab面板激活状态 */
+.terminalTabs :global(.ant-tabs-tabpane-active) {
+  height: 100%;
+  width: 100%; /* 确保宽度100% */
+  visibility: visible !important;
+  position: relative;
+  z-index: 3;
+  display: flex; /* 确保子元素填充 */
+  flex: 1; /* 填充可用空间 */
 }
 
 .terminalTabs :global(.ant-tabs-tabpane) {
   height: 100%;
+  width: 100%; /* 确保宽度100% */
+  overflow: hidden; /* 防止内容溢出 */
+  position: relative; /* 为绝对定位的内容提供参考 */
+  display: flex;
+  flex-direction: column;
+  flex: 1; /* 填充可用空间 */
 }
 
 .terminalTabs :global(.ant-tabs-nav) {
@@ -175,4 +504,15 @@
 .closeIcon:hover {
   opacity: 1;
   color: #f5222d;
+}
+
+/* 额外添加: 防止关闭会话按钮悬停导致布局变化 */
+:global(.close-session-btn) {
+  width: 32px !important;
+  height: 32px !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  margin-right: 0 !important;
+  padding: 0 !important;
 }

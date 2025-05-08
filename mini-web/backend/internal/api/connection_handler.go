@@ -439,23 +439,23 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 		}
 	}
 	log.Printf("==========================================")
-	
+
 	// 设置CORS头
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Sec-WebSocket-Key, Sec-WebSocket-Extensions, Sec-WebSocket-Version")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
-	
+
 	// 使用全局定义的upgrader，不再定义本地upgrader
-	
+
 	// 简化逻辑：直接尝试升级WebSocket连接
 	log.Printf("尝试直接升级WebSocket连接...")
-	
+
 	// 首先检查URL查询参数中的令牌
 	urlToken := r.URL.Query().Get("token")
 	var userID uint
 	var ok bool
-	
+
 	if urlToken != "" {
 		log.Printf("从URL查询参数中获取到令牌")
 		// 验证URL中的令牌
@@ -468,7 +468,7 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 			log.Printf("URL令牌验证失败: %v", err)
 		}
 	}
-	
+
 	// 如果URL中没有有效令牌，尝试从请求头获取
 	if !ok {
 		userID, ok = middleware.GetUserID(r)
@@ -524,25 +524,25 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 
 	// 升级HTTP连接为WebSocket
 	log.Printf("尝试升级HTTP连接为WebSocket...")
-	
+
 	// 设置响应头，确保CORS支持
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
-	
+
 	// 打印请求头信息以便调试
 	log.Printf("请求头信息:")
 	for name, values := range r.Header {
 		log.Printf("  %s: %v", name, values)
 	}
-	
+
 	// 配置升级器，明确允许所有来源
 	upgrader.CheckOrigin = func(r *http.Request) bool {
 		log.Printf("WebSocket CheckOrigin被调用，来源: %s", r.Header.Get("Origin"))
 		return true // 允许所有来源
 	}
-	
+
 	wsConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("升级WebSocket连接失败: %v", err)
@@ -574,15 +574,15 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, terminal service.TerminalSession) {
 	var once sync.Once
 	done := make(chan struct{})
-	errChan := make(chan error, 2) // 用于传递错误
+	errChan := make(chan error, 2)       // 用于传递错误
 	activeChan := make(chan struct{}, 2) // 用于活跃性检测
-	
+
 	log.Printf("开始处理终端会话WebSocket通信")
-	
+
 	// 向终端发送一条测试消息
 	log.Printf("向终端发送测试消息")
 	terminal.Write([]byte{0}) // 发送空消息
-	
+
 	// 从终端读取初始响应
 	buf := make([]byte, 512)
 	n, err := terminal.Read(buf)
@@ -594,15 +594,15 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			log.Printf("初始响应内容预览: %s", string(buf[:min(n, 100)]))
 		}
 	}
-	
+
 	// 判断是否为图形协议
 	isGraphical := false
 	protocol := ""
-	
+
 	if n > 4 {
 		prefix := string(buf[:4])
 		log.Printf("终端响应前缀: %s", prefix)
-		
+
 		if prefix == "RDP_" {
 			isGraphical = true
 			protocol = model.ProtocolRDP
@@ -613,7 +613,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			log.Printf("检测到VNC图形协议")
 		}
 	}
-	
+
 	log.Printf("处理终端会话: 协议=%s, 图形模式=%v", protocol, isGraphical)
 
 	// 如果是图形协议，发送一个初始化消息
@@ -625,10 +625,10 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			Type:     "init",
 			Protocol: protocol,
 		}
-		
+
 		initData, _ := json.Marshal(initMsg)
 		log.Printf("发送图形协议初始化消息: %s", string(initData))
-		
+
 		if err := wsConn.WriteMessage(websocket.TextMessage, initData); err != nil {
 			log.Printf("发送初始化消息失败: %v", err)
 			return
@@ -640,24 +640,24 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 	// 设置超时检测器
 	timeout := 3 * time.Minute // 3分钟无活动则超时
 	lastActivity := time.Now()
-	
+
 	// 活动检测计时器
 	activityTimer := time.NewTicker(10 * time.Second)
 	defer activityTimer.Stop()
 
 	// 从WebSocket读取数据并写入终端
 	go func() {
-		defer once.Do(func() { 
+		defer once.Do(func() {
 			log.Printf("WebSocket读取协程结束")
-			close(done) 
+			close(done)
 		})
-		
+
 		log.Printf("启动WebSocket读取协程")
 
 		for {
 			// 设置读取超时
 			wsConn.SetReadDeadline(time.Now().Add(1 * time.Minute))
-			
+
 			messageType, p, err := wsConn.ReadMessage()
 			if err != nil {
 				log.Printf("读取WebSocket消息错误: %v", err)
@@ -680,29 +680,45 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 				} else {
 					log.Printf("文本消息内容过长，仅记录前1000字节: %s...", string(p[:1000]))
 				}
-				
+
 				// 尝试解析JSON命令
 				var cmd struct {
 					Type string          `json:"type"`
 					Data json.RawMessage `json:"data"`
 				}
-				
+
 				if err := json.Unmarshal(p, &cmd); err == nil {
 					log.Printf("解析JSON命令成功: %s", cmd.Type)
-					
+
 					// 处理特殊命令
 					switch cmd.Type {
 					case "resize":
+						// 支持两种不同格式的调整大小命令
+						// 1. {type: "resize", width: X, height: Y}
+						// 2. {type: "resize", cols: X, rows: Y}
 						var resizeData struct {
 							Width  int `json:"width"`
 							Height int `json:"height"`
+							Cols   int `json:"cols"`
+							Rows   int `json:"rows"`
 						}
+
 						if err := json.Unmarshal(cmd.Data, &resizeData); err == nil {
-							log.Printf("收到终端调整大小命令: 宽度=%d, 高度=%d", 
-								resizeData.Width, resizeData.Height)
-							terminal.WindowResize(uint16(resizeData.Height), uint16(resizeData.Width))
+							// 优先使用cols/rows格式
+							if resizeData.Cols > 0 && resizeData.Rows > 0 {
+								log.Printf("收到终端调整大小命令: 列=%d, 行=%d",
+									resizeData.Cols, resizeData.Rows)
+								terminal.WindowResize(uint16(resizeData.Rows), uint16(resizeData.Cols))
+							} else if resizeData.Width > 0 && resizeData.Height > 0 {
+								// 兼容width/height格式
+								log.Printf("收到终端调整大小命令: 宽度=%d, 高度=%d",
+									resizeData.Width, resizeData.Height)
+								terminal.WindowResize(uint16(resizeData.Height), uint16(resizeData.Width))
+							} else {
+								log.Printf("收到的调整大小命令数据不完整: %+v", resizeData)
+							}
 						} else {
-							log.Printf("解析调整大小命令失败: %v", err)
+							log.Printf("解析调整大小命令失败: %v, 原始消息: %s", err, string(cmd.Data))
 						}
 					case "screenshot":
 						log.Printf("收到屏幕截图请求")
@@ -739,7 +755,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			} else if messageType == websocket.BinaryMessage {
 				// 二进制消息处理
 				log.Printf("收到二进制消息: %d字节，前几个字节值: %v", len(p), p[:min(len(p), 16)])
-				
+
 				// 将二进制数据直接传递给终端
 				n, err := terminal.Write(p)
 				if err != nil {
@@ -754,11 +770,11 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 
 	// 从终端读取数据并写入WebSocket
 	go func() {
-		defer once.Do(func() { 
+		defer once.Do(func() {
 			log.Printf("终端读取协程结束")
-			close(done) 
+			close(done)
 		})
-		
+
 		log.Printf("启动终端读取协程")
 
 		buf := make([]byte, 1024*1024*2) // 增加缓冲区大小到2MB以处理大型图形数据
@@ -768,7 +784,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			if err := wsConn.SetReadDeadline(deadline); err != nil {
 				log.Printf("设置WebSocket写入超时失败: %v", err)
 			}
-			
+
 			n, err := terminal.Read(buf)
 			if err != nil {
 				if err != io.EOF {
@@ -780,28 +796,28 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 				}
 				return
 			}
-			
+
 			// 更新活动时间
 			select {
 			case activeChan <- struct{}{}:
 			default:
 			}
-			
+
 			if n > 0 {
 				log.Printf("从终端读取了 %d 字节数据", n)
-				
+
 				// 检查数据前缀用于调试
 				if n > 4 {
 					prefix := string(buf[:min(4, n)])
 					log.Printf("终端数据前缀: %s", prefix)
-					
+
 					// 对于图形协议消息，记录更详细的信息
 					if prefix == "RDP_" || prefix == "VNC_" {
 						parts := bytes.SplitN(buf[:n], []byte(":"), 2)
 						if len(parts) > 0 {
 							msgType := string(parts[0])
 							log.Printf("终端输出图形消息: 类型=%s, 总长度=%d字节", msgType, n)
-							
+
 							// 对于屏幕截图消息，额外记录信息
 							if msgType == "RDP_SCREENSHOT" || msgType == "VNC_SCREENSHOT" {
 								parts := bytes.SplitN(buf[:n], []byte(":"), 4)
@@ -809,7 +825,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 									width := string(parts[1])
 									height := string(parts[2])
 									dataLen := n - len(parts[0]) - len(parts[1]) - len(parts[2]) - 3 // 减去分隔符的长度
-									log.Printf("屏幕截图数据: 类型=%s, 宽度=%s, 高度=%s, 数据长度=%d字节", 
+									log.Printf("屏幕截图数据: 类型=%s, 宽度=%s, 高度=%s, 数据长度=%d字节",
 										msgType, width, height, dataLen)
 								}
 							}
@@ -820,10 +836,10 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 					}
 				}
 			}
-			
+
 			// 确定发送的消息类型
 			msgType := websocket.BinaryMessage
-			
+
 			// 对于图形协议，使用文本消息传输特定前缀的数据
 			if n > 4 {
 				prefix := string(buf[:min(4, n)])
@@ -840,7 +856,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 				errChan <- err
 				return
 			}
-			
+
 			log.Printf("成功发送 %d 字节数据到WebSocket客户端", n)
 		}
 	}()

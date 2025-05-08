@@ -20,22 +20,31 @@ Mini Web是一个基于Web的远程连接平台，支持SSH、RDP、VNC和Telnet
 
 1. 从[FreeRDP官方GitHub](https://github.com/FreeRDP/FreeRDP/releases)下载最新版本
 2. 安装到默认位置（通常是`C:\Program Files\FreeRDP`）
-3. 确保`wfreerdp.exe`在系统PATH中，或通过环境变量`FREERDP_PATH`指定其路径
+3. 使用`start.bat`启动服务，它会自动设置FreeRDP环境变量
 
 #### Linux
 
-使用包管理器安装：
+1. 安装FreeRDP客户端：
+   ```bash
+   # Debian/Ubuntu
+   sudo apt install freerdp2-x11
+   
+   # Fedora/RHEL
+   sudo dnf install freerdp
+   
+   # Arch Linux
+   sudo pacman -S freerdp
+   ```
 
-```bash
-# Debian/Ubuntu
-sudo apt install freerdp2-x11
+2. 赋予启动脚本执行权限：
+   ```bash
+   chmod +x start.sh
+   ```
 
-# Fedora/RHEL
-sudo dnf install freerdp
-
-# Arch Linux
-sudo pacman -S freerdp
-```
+3. 使用启动脚本运行服务：
+   ```bash
+   ./start.sh
+   ```
 
 #### macOS
 
@@ -43,15 +52,21 @@ sudo pacman -S freerdp
 
 ```bash
 brew install freerdp
+export FREERDP_PATH=$(which xfreerdp)
 ```
 
-### 配置环境变量
+### 手动配置环境变量
 
-如果FreeRDP不在系统PATH中，请设置以下环境变量：
+如果自动探测失败，可以手动设置环境变量：
 
+#### Windows
 ```
-FREERDP_PATH=C:\Program Files\FreeRDP\wfreerdp.exe  # Windows示例
-FREERDP_PATH=/usr/bin/xfreerdp                      # Linux示例
+set FREERDP_PATH=C:\Program Files\FreeRDP\wfreerdp.exe
+```
+
+#### Linux/macOS
+```
+export FREERDP_PATH=/usr/bin/xfreerdp  # 路径可能因系统而异
 ```
 
 ### 性能调整
@@ -59,8 +74,13 @@ FREERDP_PATH=/usr/bin/xfreerdp                      # Linux示例
 可以通过以下环境变量调整RDP连接性能：
 
 ```
-RDP_SCREENSHOT_INTERVAL=2000  # 屏幕截图间隔，单位毫秒（默认1000）
-RDP_JPEG_QUALITY=75           # JPEG压缩质量（默认80）
+# Windows
+set RDP_SCREENSHOT_INTERVAL=2000
+set RDP_JPEG_QUALITY=75
+
+# Linux/macOS
+export RDP_SCREENSHOT_INTERVAL=2000
+export RDP_JPEG_QUALITY=75
 ```
 
 ### 故障排除
@@ -69,7 +89,7 @@ RDP_JPEG_QUALITY=75           # JPEG压缩质量（默认80）
 
 1. **连接停留在"正在连接..."状态**
    - 检查FreeRDP是否正确安装
-   - 确认您设置了正确的`FREERDP_PATH`环境变量
+   - 确认环境变量正确设置（可在日志中查看）
    - 查看服务器日志中的错误信息
 
 2. **连接失败或频繁断开**
@@ -94,8 +114,11 @@ yarn build
 ### 后端
 
 ```bash
-cd backend
-go build -o mini-web ./cmd/server
+# Windows
+start.bat
+
+# Linux/macOS
+./start.sh
 ```
 
 ### Docker部署

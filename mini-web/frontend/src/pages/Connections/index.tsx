@@ -100,8 +100,21 @@ const ConnectionsPage: React.FC = () => {
         if (response.data && response.data.code === 200) {
           const sessionId = response.data.data.id;
           
-          // 直接跳转到终端页面
-          // 新的标签处理逻辑将在Terminal组件中处理
+          // 保存更详细的会话信息到localStorage，便于页面刷新时恢复
+          localStorage.setItem('current_terminal_session', JSON.stringify({
+            connectionId: connection.id,
+            sessionId: sessionId,
+            connectionProtocol: connection.protocol,
+            connectionName: connection.name,
+            host: connection.host,
+            port: connection.port,
+            username: connection.username,
+            isConnected: false,
+            lastActive: new Date().toISOString(),
+            timestamp: new Date().getTime()
+          }));
+          
+          // 使用操作模式布局路由
           navigate(`/terminal/${connection.id}?session=${sessionId}`);
         } else {
           message.error('创建会话失败');
@@ -289,16 +302,28 @@ const ConnectionsPage: React.FC = () => {
     <div className={styles.container}>
       <div className={styles.header}>
         <Title level={3}>远程连接</Title>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setCurrentConnection(null);
-            setEditModalVisible(true);
-          }}
-        >
-          添加连接
-        </Button>
+        <Space>
+          <Tooltip title="在专注模式下操作远程连接，提供更多工作空间">
+          <Button
+            icon={<DesktopOutlined />}
+            onClick={() => navigate('/terminal')}
+            type="primary"
+            ghost
+          >
+            操作模式
+          </Button>
+        </Tooltip>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setCurrentConnection(null);
+              setEditModalVisible(true);
+            }}
+          >
+            添加连接
+          </Button>
+        </Space>
       </div>
 
       <Card variant="borderless">

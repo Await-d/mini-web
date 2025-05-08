@@ -5,6 +5,7 @@ import { Spin } from 'antd';
 import AppLayout from './layouts/AppLayout';
 import AuthLayout from './layouts/AuthLayout';
 import RootLayout from './layouts/RootLayout';
+import OperationLayout from './layouts/OperationLayout';
 import NotFound from './pages/NotFound';
 import { RequireAuth } from './contexts/AuthContext';
 
@@ -39,6 +40,33 @@ export const router = createBrowserRouter(
       {
         index: true,
         element: <Navigate to="/dashboard" replace />,
+      },
+      // 操作模式路由 - 使用OperationLayout
+      {
+        path: '/',
+        element: (
+          <RequireAuth>
+            <OperationLayout />
+          </RequireAuth>
+        ),
+        children: [
+          {
+            path: 'terminal',
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <Terminal />
+              </Suspense>
+            ),
+          },
+          {
+            path: 'terminal/:connectionId',
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <Terminal />
+              </Suspense>
+            ),
+          },
+        ],
       },
       {
         path: '/',
@@ -88,8 +116,17 @@ export const router = createBrowserRouter(
               </Suspense>
             ),
           },
+          // 以下路由为正常模式下的终端页面，已废弃，保留用于兼容
           {
-            path: 'terminal/:connectionId',
+            path: 'terminal-old',
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <Terminal />
+              </Suspense>
+            ),
+          },
+          {
+            path: 'terminal-old/:connectionId',
             element: (
               <Suspense fallback={<PageLoader />}>
                 <Terminal />
