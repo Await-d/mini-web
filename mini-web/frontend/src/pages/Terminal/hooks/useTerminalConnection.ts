@@ -92,13 +92,24 @@ export const useTerminalConnection = () => {
     // 获取当前路径名
     const currentPath = window.location.pathname;
 
-    // 检查当前活动的标签页
-    const activeTab = tabs.find(tab => tab.key === activeTabKey);
+    // 优先使用引用状态
+    const hasTabsInRef = terminalStateRef.current.tabs.length > 0;
+    const activeTabKeyToUse = terminalStateRef.current.activeTabKey !== 'no-tabs' 
+      ? terminalStateRef.current.activeTabKey 
+      : activeTabKey;
+    
+    // 先从引用中查找活动标签
+    let activeTab = terminalStateRef.current.tabs.find(tab => tab.key === activeTabKeyToUse);
+    // 如果引用中没找到，从上下文中查找
+    if (!activeTab && tabs.length > 0) {
+      activeTab = tabs.find(tab => tab.key === activeTabKey);
+    }
 
     // 标签信息调试
     console.log("【连接流程】清理URL时的标签状态:", {
-      activeTabKey,
-      tabsCount: tabs.length,
+      activeTabKey: activeTabKeyToUse,
+      refTabsCount: terminalStateRef.current.tabs.length,
+      contextTabsCount: tabs.length,
       hasActiveTab: !!activeTab,
       activeTabDetails: activeTab ? {
         connectionId: activeTab.connectionId,
@@ -118,18 +129,37 @@ export const useTerminalConnection = () => {
         isConnected: activeTab.isConnected
       }));
       console.log("【连接流程】会话信息已保存到localStorage");
+      
+      // 使用replace模式导航，不会新增历史记录
+      console.log("【连接流程】执行URL清理，导航到:", currentPath);
+      navigate(currentPath, { replace: true });
     } else {
-      console.warn("【连接流程】无法保存会话信息，activeTab不存在");
+      console.warn("【连接流程】无法保存会话信息，活动标签不存在");
       // 保留URL参数直到标签创建成功
-      if (tabs.length === 0) {
-        console.log("【连接流程】标签列表为空，暂不清理URL参数");
+      if (!hasTabsInRef && tabs.length === 0) {
+        console.log("【连接流程】无标签，暂不清理URL参数");
         return;
+      } else {
+        // 如果有标签但找不到活动标签，尝试保存第一个标签的信息
+        const firstTab = terminalStateRef.current.tabs[0] || tabs[0];
+        if (firstTab) {
+          console.log("【连接流程】使用第一个标签保存会话信息");
+          localStorage.setItem('current_terminal_session', JSON.stringify({
+            connectionId: firstTab.connectionId,
+            sessionId: firstTab.sessionId,
+            tabKey: firstTab.key,
+            connectionProtocol: firstTab.connection?.protocol,
+            connectionName: firstTab.connection?.name,
+            isConnected: firstTab.isConnected
+          }));
+          
+          console.log("【连接流程】执行URL清理，导航到:", currentPath);
+          navigate(currentPath, { replace: true });
+        } else {
+          console.log("【连接流程】找不到任何标签，暂不清理URL参数");
+        }
       }
     }
-
-    // 使用replace模式导航，不会新增历史记录
-    console.log("【连接流程】执行URL清理，导航到:", currentPath);
-    navigate(currentPath, { replace: true });
   }, [activeTabKey, navigate, tabs]);
 
   // 加载连接信息并创建标签
@@ -256,16 +286,23 @@ export const useTerminalConnection = () => {
           console.log("【连接流程】执行延迟创建新标签操作");
           // 创建新标签页
           fetchConnectionAndCreateTab().then(() => {
-            console.log("【连接流程】创建标签页完成，标签数量:", tabs.length);
+            // 使用引用状态判断标签是否创建成功，而不是上下文状态
+            console.log("【连接流程】创建标签页完成，状态:", {
+              contextTabs: tabs.length,
+              refTabs: terminalStateRef.current.tabs.length
+            });
             
-            // 再次验证标签是否成功创建
-            if (tabs.length > 0) {
-              console.log("【连接流程】标签创建成功，清理URL");
+            // 重要：使用引用状态判断标签是否成功创建
+            if (terminalStateRef.current.tabs.length > 0) {
+              console.log("【连接流程】标签创建成功（引用验证），清理URL");
+              cleanURL();
+            } else if (tabs.length > 0) {
+              console.log("【连接流程】标签创建成功（上下文验证），清理URL");
               cleanURL();
             } else {
-              console.error("【连接流程】标签未成功创建，将重试");
-              // 添加重试逻辑
-              setTimeout(() => fetchConnectionAndCreateTab(), 1000);
+              console.error("【连接流程】标签未成功创建（引用和上下文都为空），将重试");
+              // 添加重试逻辑，延迟更长时间
+              setTimeout(() => fetchConnectionAndCreateTab(), 1500);
             }
           }).catch(err => {
             console.error("【连接流程】创建标签页失败:", err);
@@ -285,18 +322,37 @@ export const useTerminalConnection = () => {
     // 检查是否有存储在localStorage中的会话信息
     const savedSession = localStorage.getItem('current_terminal_session');
 
-    // 如果URL中没有connectionId但有保存的会话信息，则恢复会话
-    if (tabs.length === 0 && !connectionId && savedSession) {
+    // 优先使用引用状态判断是否有标签
+    const hasTabsInRef = terminalStateRef.current.tabs.length > 0;
+    const hasTabsInContext = tabs.length > 0;
+    
+    console.log('【连接流程】检查恢复会话条件:', {
+      refTabs: terminalStateRef.current.tabs.length,
+      contextTabs: tabs.length,
+      hasConnectionId: !!connectionId,
+      hasSavedSession: !!savedSession
+    });
+
+    // 如果引用和上下文都没有标签，且URL中没有connectionId但有保存的会话信息，则恢复会话
+    if (!hasTabsInRef && !hasTabsInContext && !connectionId && savedSession) {
       try {
         const sessionInfo = JSON.parse(savedSession);
         if (sessionInfo.connectionId && sessionInfo.sessionId) {
-          console.log('从本地存储恢复会话:', sessionInfo);
+          console.log('【连接流程】从本地存储恢复会话:', sessionInfo);
+          
+          // 检查是否正在处理URL参数中的连接
+          if (processedRef.current) {
+            console.log('【连接流程】已有连接处理中，不恢复保存的会话');
+            return;
+          }
+          
           // 导航到保存的会话
+          console.log('【连接流程】导航到保存的会话');
           navigate(`/terminal/${sessionInfo.connectionId}?session=${sessionInfo.sessionId}`);
           return;
         }
       } catch (e) {
-        console.error('解析保存的会话信息失败:', e);
+        console.error('【连接流程】解析保存的会话信息失败:', e);
         localStorage.removeItem('current_terminal_session');
       }
     }

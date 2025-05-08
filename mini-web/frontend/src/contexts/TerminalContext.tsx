@@ -60,12 +60,29 @@ type TerminalAction =
 // 终端状态Reducer
 function terminalReducer(state: TerminalState, action: TerminalAction): TerminalState {
   switch (action.type) {
-    case 'ADD_TAB':
+    case 'ADD_TAB': {
+      // 检查是否已存在相同标签（避免重复添加）
+      const existingTab = state.tabs.find(tab => 
+        tab.sessionId === action.payload.sessionId && 
+        tab.connectionId === action.payload.connectionId
+      );
+      
+      // 如果已存在相同标签，只激活它
+      if (existingTab) {
+        console.log(`【TerminalContext】避免重复添加标签，已存在标签 ${existingTab.key} 将被激活`);
+        return {
+          ...state,
+          activeTabKey: existingTab.key
+        };
+      }
+      
+      // 正常添加新标签
       return {
         ...state,
         tabs: [...state.tabs, action.payload],
         activeTabKey: action.payload.key,
       };
+    }
 
     case 'CLOSE_TAB': {
       // 找到要关闭的标签的索引
