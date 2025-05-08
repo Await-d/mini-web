@@ -1,20 +1,13 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, lazy, Suspense, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { Spin } from 'antd';
+import { Spin, Empty } from 'antd';
+import { useTerminal } from '../../contexts/TerminalContext';
 
 // 组件 - 静态导入基本组件
 import TerminalHeader from './components/TerminalHeader';
 import TerminalFooter from './components/TerminalFooter';
 import TerminalTabs from './components/TerminalTabs';
 import TerminalGuide from './components/TerminalGuide';
-
-// 懒加载连接包装器组件
-const TerminalConnectionWrapper = lazy(() => 
-  import('./components/TerminalConnectionWrapper')
-);
-
-// 自定义Hooks - 静态导入关键Hooks
-import { useTerminalEvents } from './hooks/useTerminalEvents';
 
 // 终端设置组件
 import TerminalSettings from './TerminalSettings';
@@ -24,8 +17,17 @@ import type { TerminalSettings as TermSettings } from './TerminalSettings';
 import QuickCommands from '../../components/QuickCommands';
 import BatchCommands from '../../components/BatchCommands';
 
+// 自定义Hooks - 静态导入关键Hooks
+import { useTerminalEvents } from './hooks/useTerminalEvents';
+
+// 懒加载连接包装器组件
+const TerminalConnectionWrapper = lazy(() =>
+  import('./components/TerminalConnectionWrapper')
+);
+
 // 样式
 import styles from './styles.module.css';
+import './Terminal.css'; // 引入额外的终端样式
 
 /**
  * 终端组件
@@ -35,35 +37,15 @@ const Terminal: React.FC = () => {
   const { connectionId } = useParams<{ connectionId: string }>();
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [loading, setLoading] = useState(true);
-  
-  // 使用状态存储连接实例
-  const [connectionProps, setConnectionProps] = useState<any>(null);
-  
-  // 处理连接组件就绪时的回调
-  const handleConnectionReady = React.useCallback((props: any) => {
-    console.log('【主组件调试】终端连接组件就绪，接收到的属性:', {
-      hasConnection: !!props.connection,
-      tabsCount: props.tabs?.length || 0,
-      activeTabKey: props.activeTabKey,
-      isConnected: props.isConnected
-    });
-    setConnectionProps(props);
-    setLoading(false);
-  }, []);
+  const [quickCommandsVisible, setQuickCommandsVisible] = useState(false);
+  const [batchCommandsVisible, setBatchCommandsVisible] = useState(false);
 
-  // 解构连接实例中的属性
-  const connection = connectionProps?.connection;
-  const tabs = connectionProps?.tabs || [];
-  const activeTabKey = connectionProps?.activeTabKey;
-  const fullscreen = connectionProps?.fullscreen || false;
-  const isConnected = connectionProps?.isConnected || false;
-  const terminalSize = connectionProps?.terminalSize;
-  const networkLatency = connectionProps?.networkLatency;
-  const terminalMode = connectionProps?.terminalMode || 'normal';
-  const sidebarCollapsed = connectionProps?.sidebarCollapsed || false;
-  const toggleFullscreen = connectionProps?.toggleFullscreen;
-  const sendDataToServer = connectionProps?.sendDataToServer;
+  // 使用状态存储连接参数
+  const connectionParams = connectionId ? {
+    connectionId: parseInt(connectionId, 10)
+  } : undefined;
 
+  // 终端事件处理
   const {
     handleCloseSession,
     handleCopyContent,
@@ -75,15 +57,62 @@ const Terminal: React.FC = () => {
     getActiveTab
   } = useTerminalEvents();
 
+  const [sessionParams, setSessionParams] = useState({});
+  const [hasConnection, setHasConnection] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+
+  // 从useTerminal中获取状态
+  const { state: terminalState, closeTab, setActiveTab, updateTab } = useTerminal();
+
+  const { tabs, activeTabKey } = terminalState;
+
+  // 添加ref记录已处理的标签
+  const initializedTabs = useRef<Set<string>>(new Set());
+
+  // 监听标签变化，强制重新初始化DOM
+  useEffect(() => {
+    if (!activeTabKey || activeTabKey === 'no-tabs' || tabs.length === 0) return;
+
+    // 强制重新验证所有标签的terminalRef
+    tabs.forEach((tab: any) => {
+      if (!tab.terminalRef?.current) {
+        console.log(`【DOM初始化】检测到标签 ${tab.key} 的terminalRef未初始化，尝试触发DOM更新`);
+
+        // 查找DOM元素并手动设置ref
+        const element = document.querySelector(`.terminal-element-${tab.key}`);
+        if (element && tab.terminalRef) {
+          console.log(`【DOM初始化】手动设置标签 ${tab.key} 的terminalRef`);
+          tab.terminalRef.current = element as HTMLDivElement;
+
+          // 如果是当前激活的标签，尝试触发终端初始化
+          if (tab.key === activeTabKey && !initializedTabs.current.has(tab.key)) {
+            console.log(`【DOM初始化】尝试为激活标签 ${tab.key} 触发终端初始化`);
+            initializedTabs.current.add(tab.key);
+
+            // 派发一个全局事件，通知标签准备好了
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('terminal-ready', { detail: { tabKey: tab.key } }));
+            }
+          }
+        }
+      }
+    });
+  }, [tabs, activeTabKey]);
+
+  // 模拟组件加载
+  useEffect(() => {
+    // 短暂延迟后设置加载完成，确保连接包装器已加载
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   /**
    * 应用终端设置
    */
-  const handleApplySettings = (settings: TermSettings) => {
-    // 获取当前活动标签的终端引用
-    const activeTab = tabs.find((tab: any) => tab.key === activeTabKey);
-    const terminalInstance = activeTab?.xtermRef.current;
-    const fitAddon = activeTab?.fitAddonRef.current;
-
+  const handleApplySettings = (settings: TermSettings, activeTab: any, terminalInstance: any, fitAddon: any) => {
     if (terminalInstance) {
       try {
         // 应用外观设置 - 兼容不同版本的xterm.js API
@@ -98,12 +127,12 @@ const Terminal: React.FC = () => {
           terminalInstance.setOption('fontSize', settings.fontSize);
           terminalInstance.setOption('fontFamily', settings.fontFamily);
           terminalInstance.setOption('cursorBlink', settings.cursorBlink);
-          
+
           // 应用滚动行数设置
           if (settings.scrollback) {
             terminalInstance.setOption('scrollback', settings.scrollback);
           }
-        } 
+        }
         // 直接设置options对象 (新版方法)
         else if (terminalInstance.options) {
           terminalInstance.options.theme = {
@@ -114,13 +143,13 @@ const Terminal: React.FC = () => {
           terminalInstance.options.fontSize = settings.fontSize;
           terminalInstance.options.fontFamily = settings.fontFamily;
           terminalInstance.options.cursorBlink = settings.cursorBlink;
-          
+
           // 应用滚动行数设置
           if (settings.scrollback) {
             terminalInstance.options.scrollback = settings.scrollback;
           }
         }
-        
+
         console.log('成功应用终端设置:', {
           fontSize: settings.fontSize,
           fontFamily: settings.fontFamily,
@@ -142,167 +171,205 @@ const Terminal: React.FC = () => {
     }
   };
 
-  // 增强的终端全局键盘处理和焦点管理
-  useEffect(() => {
-    // 只有当存在活动标签页时才执行
-    if (!activeTabKey || tabs.length === 0) return;
-    
-    const activeTab = tabs.find((tab: any) => tab.key === activeTabKey);
-    if (!activeTab) return;
-    
-    console.log('设置终端全局键盘处理...');
-    
-    // 全局键盘事件处理
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // 如果处于输入框中，不处理
-      if (
-        e.target instanceof HTMLInputElement || 
-        e.target instanceof HTMLTextAreaElement
-      ) {
-        return;
-      }
-      
-      // 检查终端引用
-      if (!activeTab.xtermRef?.current) return;
-      
-      // 处理特殊键
-      if (e.key === 'Enter') {
-        console.log('全局捕获到Enter键');
-        
-        // 如果终端未获取焦点，先设置焦点再发送回车
-        try {
-          activeTab.xtermRef.current.focus();
-          setTimeout(() => {
-            console.log('模拟回车输入');
-            sendDataToServer('\\r\\n');
-          }, 50);
-        } catch (err) {
-          console.error('焦点设置或发送回车失败:', err);
-        }
-        
-        // 阻止事件冒泡
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    
-    // 定期检查并确保终端获得焦点
-    const focusInterval = setInterval(() => {
-      // 每10秒检查一次终端焦点
-      if (activeTab.xtermRef?.current && isConnected) {
-        try {
-          // 尝试重新获取焦点
-          activeTab.xtermRef.current.focus();
-          console.log('自动重新获取终端焦点');
-        } catch (e) {
-          // 静默处理错误
-        }
-      }
-    }, 10000);
-    
-    // 添加全局键盘事件监听
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    
-    // 组件卸载时清理
-    return () => {
-      window.removeEventListener('keydown', handleGlobalKeyDown);
-      clearInterval(focusInterval);
-    };
-  }, [activeTabKey, tabs, isConnected, sendDataToServer]);
-
-  // 如果正在加载，显示加载指示器，同时在后台加载连接组件
+  // 如果正在加载，显示加载指示器
   if (loading) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
         height: '100vh',
         flexDirection: 'column'
       }}>
         <Spin size="large" />
         <div style={{ marginTop: '20px' }}>正在加载终端组件...</div>
-        
-        {/* 在后台加载连接组件，但不显示 */}
-        <div style={{ display: 'none' }}>
-          <Suspense fallback={null}>
-            <TerminalConnectionWrapper onConnectionReady={handleConnectionReady} />
-          </Suspense>
-        </div>
       </div>
     );
   }
-  
+
   return (
-    <div className={`${styles.terminalContainer} ${fullscreen ? styles.fullscreen : ''}`}>
-      {/* 无连接ID时显示引导页面，否则显示终端 */}
-      {!connectionId && tabs.length === 0 ? (
-        <TerminalGuide
-          onToggleSidebar={handleToggleSidebar}
-          sidebarCollapsed={sidebarCollapsed}
-        />
-      ) : (
-        <>
-          <TerminalHeader
-            connection={connection}
-            fullscreen={fullscreen}
-            onToggleFullscreen={toggleFullscreen}
-            onOpenSettings={() => setSettingsVisible(true)}
-            onCopyContent={handleCopyContent}
-            onDownloadLog={handleDownloadLog}
-            onAddTab={handleAddNewTab}
-            onCloseSession={handleCloseSession}
-          />
+    <Suspense fallback={
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <Spin size="large" />
+      </div>
+    }>
+      <TerminalConnectionWrapper connectionParams={connectionParams}>
+        {({
+          hasConnection,
+          tabsCount,
+          activeTabKey,
+          isConnected,
+          tabs = [],
+          connection,
+          fullscreen = false,
+          terminalSize,
+          networkLatency,
+          terminalMode = 'normal',
+          sidebarCollapsed = false,
+          toggleFullscreen,
+          sendDataToServer
+        }) => {
+          console.log('【主组件调试】终端连接组件就绪，接收到的属性:', {
+            hasConnection, tabsCount, activeTabKey, isConnected
+          });
 
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
-            <TerminalTabs
-              tabs={tabs}
-              activeTabKey={activeTabKey}
-              onTabChange={handleTabChange}
-              onTabEdit={handleTabEdit}
-              onTabClose={(key) => handleTabEdit(key, 'remove')}
-            />
-          </div>
-        </>
-      )}
-
-      <TerminalFooter
-        isConnected={isConnected}
-        terminalSize={terminalSize}
-        networkLatency={networkLatency}
-        terminalMode={terminalMode}
-        activeConnection={getActiveTab()?.connection || connection}
-      >
-        {activeTabKey && tabs.length > 0 && isConnected && getActiveTab()?.connection?.protocol && (
-          <>
-            {/* 批量命令组件 - 仅在SSH或Telnet协议时显示 */}
-            {['ssh', 'telnet'].includes(getActiveTab()?.connection?.protocol || '') && (
-              <BatchCommands
-                onSendCommand={sendDataToServer}
-                protocol={getActiveTab()?.connection?.protocol as 'ssh' | 'telnet' | 'rdp' | 'vnc'}
+          // 无连接ID时显示引导页面
+          if (!connectionId && tabsCount === 0) {
+            return (
+              <TerminalGuide
+                onToggleSidebar={handleToggleSidebar}
+                sidebarCollapsed={sidebarCollapsed}
               />
-            )}
+            );
+          }
 
-            {/* 快捷命令组件 - 仅在SSH或Telnet协议时显示 */}
-            {['ssh', 'telnet'].includes(getActiveTab()?.connection?.protocol || '') && (
+          // 获取当前活动标签
+          const activeTab = tabs.find((tab: any) => tab.key === activeTabKey);
+
+          return (
+            <div className={`${styles.terminalContainer} ${fullscreen ? styles.fullscreen : ''}`}>
+              <TerminalHeader
+                connection={connection}
+                fullscreen={fullscreen}
+                onToggleFullscreen={toggleFullscreen}
+                onOpenSettings={() => setSettingsVisible(true)}
+                onOpenQuickCommands={() => setQuickCommandsVisible(true)}
+                onOpenBatchCommands={() => setBatchCommandsVisible(true)}
+                terminalMode={terminalMode}
+                networkLatency={networkLatency}
+                isConnected={isConnected}
+                onCopyContent={handleCopyContent}
+                onDownloadLog={handleDownloadLog}
+                onAddTab={handleAddNewTab}
+                onCloseSession={handleCloseSession}
+              />
+
+              <div className={styles.terminalContent}>
+                <TerminalTabs
+                  tabs={tabs}
+                  activeKey={activeTabKey}
+                  onTabChange={handleTabChange}
+                  onTabEdit={handleTabEdit}
+                  onAddTab={handleAddNewTab}
+                  onTabClose={(key) => handleTabEdit(key, 'remove')}
+                />
+
+                <div className={styles.terminalArea}>
+                  {hasConnection && tabs.length > 0 ? (
+                    tabs.map((tab: any) => {
+                      // 添加调试信息
+                      console.log(`【DOM调试】渲染标签 ${tab.key}, terminalRef存在: ${!!tab.terminalRef}`);
+
+                      return (
+                        <div
+                          key={tab.key}
+                          className={styles.terminalTabContent}
+                          style={{
+                            display: tab.key === activeTabKey ? 'flex' : 'none',
+                            flex: 1,
+                            height: '100%',
+                            position: 'relative'
+                          }}
+                        >
+                          <div
+                            className={`${styles.terminalWrapper} terminal-element-${tab.key}`}
+                            ref={(element) => {
+                              // 更明确的ref绑定方式
+                              if (element && tab.terminalRef) {
+                                console.log(`【DOM调试】成功绑定terminalRef到DOM元素, 标签: ${tab.key}`);
+                                // 直接设置current属性，确保引用被正确设置
+                                tab.terminalRef.current = element;
+
+                                // 派发一个DOM就绪事件，通知系统terminalRef已准备好
+                                if (typeof window !== 'undefined' && !initializedTabs.current.has(tab.key)) {
+                                  initializedTabs.current.add(tab.key);
+                                  console.log(`【DOM初始化】触发终端准备事件，标签: ${tab.key}`);
+                                  window.dispatchEvent(new CustomEvent('terminal-ready', {
+                                    detail: { tabKey: tab.key }
+                                  }));
+                                }
+                              }
+                            }}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              position: 'relative',
+                              display: 'flex',
+                              flex: '1'
+                            }}
+                          ></div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className={styles.emptyTerminal}>
+                      <Empty description="请选择或创建一个连接" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <TerminalFooter
+                isConnected={isConnected}
+                terminalSize={terminalSize}
+                networkLatency={networkLatency}
+                terminalMode={terminalMode || 'normal'}
+                activeConnection={connection}
+                onCopyContent={handleCopyContent}
+                onDownloadLog={handleDownloadLog}
+                onCloseSession={handleCloseSession}
+              />
+
+              {/* 设置弹窗 */}
+              <TerminalSettings
+                visible={settingsVisible}
+                onCancel={() => setSettingsVisible(false)}
+                onApply={(settings) => {
+                  if (activeTab?.xtermRef?.current) {
+                    handleApplySettings(
+                      settings,
+                      activeTab,
+                      activeTab.xtermRef.current,
+                      activeTab.fitAddonRef?.current
+                    );
+                  }
+                  setSettingsVisible(false);
+                }}
+              />
+
+              {/* 快速命令面板 */}
               <QuickCommands
-                onSendCommand={sendDataToServer}
-                protocol={getActiveTab()?.connection?.protocol as 'ssh' | 'telnet' | 'rdp' | 'vnc'}
+                visible={quickCommandsVisible}
+                onClose={() => setQuickCommandsVisible(false)}
+                onSendCommand={(command) => {
+                  if (sendDataToServer && command) {
+                    sendDataToServer(command + '\r\n');
+                    setQuickCommandsVisible(false);
+                  }
+                }}
               />
-            )}
-          </>
-        )}
-      </TerminalFooter>
 
-      {/* 仅在对话框可见时才渲染终端设置 */}
-      {settingsVisible && (
-        <TerminalSettings
-          visible={settingsVisible}
-          onClose={() => setSettingsVisible(false)}
-          onApply={handleApplySettings}
-        />
-      )}
-    </div>
+              {/* 批量命令面板 */}
+              <BatchCommands
+                visible={batchCommandsVisible}
+                onClose={() => setBatchCommandsVisible(false)}
+                onSendCommands={(commands) => {
+                  if (sendDataToServer && commands.length > 0) {
+                    // 逐个发送命令，每个命令之间间隔500ms
+                    commands.forEach((cmd, index) => {
+                      setTimeout(() => {
+                        sendDataToServer(cmd + '\r\n');
+                      }, index * 500);
+                    });
+                    setBatchCommandsVisible(false);
+                  }
+                }}
+              />
+            </div>
+          );
+        }}
+      </TerminalConnectionWrapper>
+    </Suspense>
   );
 };
 

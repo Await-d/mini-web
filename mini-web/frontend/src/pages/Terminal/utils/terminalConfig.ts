@@ -1,3 +1,10 @@
+/*
+ * @Author: Await
+ * @Date: 2025-05-08 18:19:21
+ * @LastEditors: Await
+ * @LastEditTime: 2025-05-08 19:31:59
+ * @Description: 请填写简介
+ */
 // 终端配置常量和类型
 
 // 终端配置常量
@@ -13,7 +20,7 @@ export interface WindowSize {
 
 // WebSocket消息类型扩展
 export interface TerminalMessage {
-    type: 'resize' | 'data' | 'error' | 'ping' | 'pong';
+    type: 'resize' | 'data' | 'error' | 'ping' | 'pong' | 'auth' | 'system' | 'control' | 'latency' | 'config';
     data?: any;
     cols?: number;
     rows?: number;
@@ -21,4 +28,12 @@ export interface TerminalMessage {
     timestamp?: number;
     width?: number;
     height?: number;
+    token?: string;
+    connectionInfo?: {
+        protocol?: string;
+        host?: string;
+        port?: number;
+        username?: string;
+        sessionId?: number;
+    };
 } 

@@ -1,0 +1,297 @@
+/* Terminal.css - 终端基础样式 */
+
+.terminal-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 终端加载状态样式 */
+.terminal-loading {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  width: 100%;
+  background-color: #1e1e1e;
+  color: #fff;
+}
+
+.terminal-loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255, 255, 255, 0.1);
+  border-left-color: #1677ff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+.terminal-loading-text {
+  font-size: 16px;
+}
+
+/* 旋转动画 */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* 未连接状态样式 */
+.terminal-not-connected {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  width: 100%;
+  background-color: #f5f5f5;
+}
+
+.terminal-not-connected-content {
+  text-align: center;
+  padding: 30px;
+  background-color: #fff;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  max-width: 400px;
+}
+
+.terminal-not-connected-actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+/* 已连接状态样式 */
+.terminal-connected-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: #1e1e1e;
+  color: #ffffff;
+}
+
+.terminal-connected-content {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 终端区域样式 */
+.terminal-area {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+  background-color: #1e1e1e;
+  height: 100%;
+}
+
+.terminal-tab-content {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.terminal-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  background-color: #1e1e1e;
+}
+
+.empty-terminal {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  background-color: #f0f2f5;
+  color: #666;
+}
+
+/* 使所有 xterm 元素正确显示 */
+.xterm {
+  height: 100%;
+  width: 100%;
+  display: block !important;
+}
+
+.xterm-screen {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+}
+
+.xterm-rows {
+  width: 100% !important;
+  display: block !important;
+}
+
+.xterm-viewport {
+  z-index: 10 !important;
+}
+
+.xterm-screen {
+  z-index: 1;
+}
+
+/* 确保文本层在最上层 */
+.xterm-text-layer {
+  z-index: 20 !important;
+  opacity: 1 !important;
+}
+
+/* 确保光标可见 */
+.xterm-cursor-layer {
+  z-index: 25 !important;
+  opacity: 1 !important;
+}
+
+/* 完全隐藏链接层 */
+.xterm-link-layer {
+  display: none !important; 
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 隐藏 xterm-helpers */
+.xterm-helpers {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  z-index: -10 !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+}
+
+/* 终端组件样式 */
+.terminal-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: #1e1e1e;
+  color: #f0f0f0;
+}
+
+/* 确保xterm组件正确显示 */
+.xterm {
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.xterm-viewport {
+  overflow-y: auto !important;
+  width: 100% !important;
+}
+
+.xterm-screen {
+  width: 100% !important;
+}
+
+/* 终端内容区域 */
+.terminal-tab-content {
+  height: calc(100vh - 120px);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 终端包装器 */
+.terminal-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* 标签页内容占位符 */
+.terminal-tab-placeholder {
+  display: none;
+}
+
+/* 终端全屏模式 */
+.terminal-fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  background: #000;
+}
+
+/* 隐藏xterm链接层 */
+.xterm-link-layer {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 终端工具按钮 */
+.terminal-tools {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 100;
+  display: flex;
+  gap: 5px;
+}
+
+.terminal-tool-button {
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.terminal-tool-button:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+/* 重连界面样式 */
+#retry-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 100;
+  padding: 8px 16px;
+  background-color: #1677ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#connection-help {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(0,0,0,0.9);
+  color: white;
+  padding: 20px;
+  border-radius: 8px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  max-width: 500px;
+} 

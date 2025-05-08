@@ -6,9 +6,9 @@ const { Option } = Select;
 
 // 终端设置接口
 export interface TerminalSettingsProps {
-    visible: boolean;
-    onClose: () => void;
-    onApply: (settings: TerminalSettings) => void;
+    visible?: boolean;
+    onCancel?: () => void;
+    onApply?: (settings: TerminalSettings) => void;
 }
 
 // 终端设置数据接口
@@ -46,10 +46,14 @@ const fontFamilyOptions = [
     'monospace',
 ];
 
-const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, onApply }) => {
+const TerminalSettings: React.FC<TerminalSettingsProps> = ({
+    visible = false,
+    onCancel,
+    onApply
+}) => {
     const [form] = Form.useForm();
     const [currentSettings, setCurrentSettings] = useState<TerminalSettings>({ ...defaultSettings });
-    
+
     // 加载设置函数 - 将其提取为单独函数以提高可读性
     const loadSettings = () => {
         const savedSettings = localStorage.getItem('terminal_settings');
@@ -57,38 +61,38 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
             try {
                 const parsedSettings = JSON.parse(savedSettings);
                 // 强制使用8080端口，不管localStorage里存的是什么
-                const mergedSettings = { 
-                    ...defaultSettings, 
+                const mergedSettings = {
+                    ...defaultSettings,
                     ...parsedSettings,
                     backendPort: 8080  // 强制使用8080端口
                 };
-                
+
                 // 处理颜色值，确保为字符串格式
                 const formattedSettings = {
                     ...mergedSettings,
-                    background: typeof mergedSettings.background === 'object' ? 
+                    background: typeof mergedSettings.background === 'object' ?
                         mergedSettings.background.toHexString() : mergedSettings.background,
-                    foreground: typeof mergedSettings.foreground === 'object' ? 
+                    foreground: typeof mergedSettings.foreground === 'object' ?
                         mergedSettings.foreground.toHexString() : mergedSettings.foreground
                 };
-                
+
                 setCurrentSettings(formattedSettings);
                 return formattedSettings;
             } catch (e) {
                 console.error('读取保存的设置失败:', e);
             }
         }
-        
+
         // 返回默认设置
         return { ...defaultSettings };
     };
-    
+
     // 当弹窗可见性变化时，加载设置
     useEffect(() => {
         if (visible) {
             // 加载设置
             const settings = loadSettings();
-            
+
             // 设置表单值
             form.setFieldsValue(settings);
         }
@@ -98,7 +102,7 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
     const handleApply = () => {
         // 手动获取表单值而不是使用validateFields，避免表单验证问题
         const values = form.getFieldsValue();
-        
+
         // 处理可能的空值，使用默认值
         const processedValues = {
             fontSize: values.fontSize || defaultSettings.fontSize,
@@ -109,18 +113,18 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
             backendPort: values.backendPort || defaultSettings.backendPort,
             wsTestEnabled: typeof values.wsTestEnabled === 'boolean' ? values.wsTestEnabled : defaultSettings.wsTestEnabled,
         };
-        
+
         // 转换ColorPicker的值为十六进制字符串
         const formattedValues = {
             ...processedValues,
-            background: values.background ? 
-                (typeof values.background === 'object' ? values.background.toHexString() : values.background) 
+            background: values.background ?
+                (typeof values.background === 'object' ? values.background.toHexString() : values.background)
                 : defaultSettings.background,
-            foreground: values.foreground ? 
-                (typeof values.foreground === 'object' ? values.foreground.toHexString() : values.foreground) 
+            foreground: values.foreground ?
+                (typeof values.foreground === 'object' ? values.foreground.toHexString() : values.foreground)
                 : defaultSettings.foreground
         };
-        
+
         const newSettings: TerminalSettings = {
             ...currentSettings,
             ...formattedValues,
@@ -130,7 +134,7 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
         if (typeof newSettings.backendPort === 'string') {
             newSettings.backendPort = parseInt(newSettings.backendPort, 10);
         }
-        
+
         // 强制使用8080端口，确保WebSocket连接成功
         newSettings.backendPort = 8080;
 
@@ -139,8 +143,12 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
 
         console.log('应用新设置:', newSettings);
         setCurrentSettings(newSettings);
-        onApply(newSettings);
-        onClose();
+        if (onApply) {
+            onApply(newSettings);
+        }
+        if (onCancel) {
+            onCancel();
+        }
     };
 
     // 重置为默认设置
@@ -148,11 +156,17 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
         // 使用setTimeout确保在下一个事件循环中设置表单值
         setTimeout(() => {
             if (form) {
-                form.setFieldsValue({...defaultSettings});
+                form.setFieldsValue({ ...defaultSettings });
                 console.log('重置表单为默认设置');
             }
         }, 0);
         setCurrentSettings({ ...defaultSettings });
+        if (onApply) {
+            onApply(defaultSettings);
+        }
+        if (onCancel) {
+            onCancel();
+        }
     };
 
     // 定义Tabs的items
@@ -322,7 +336,7 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
         if (!visible) {
             return null;
         }
-        
+
         return (
             <Form
                 form={form}
@@ -334,19 +348,19 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({ visible, onClose, o
             </Form>
         );
     };
-    
+
     return (
         <Modal
             title="终端设置"
             open={visible}
-            onCancel={onClose}
+            onCancel={onCancel}
             width={600}
             destroyOnClose={true}
             footer={[
                 <Button key="reset" onClick={handleReset}>
                     重置默认
                 </Button>,
-                <Button key="cancel" onClick={onClose}>
+                <Button key="cancel" onClick={onCancel}>
                     取消
                 </Button>,
                 <Button key="apply" type="primary" onClick={handleApply}>

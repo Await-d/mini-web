@@ -160,6 +160,31 @@
 .terminalContent {
   width: 100%;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* 终端区域容器 */
+.terminalArea {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  height: calc(100vh - 60px); /* 减去头部和底部的高度 */
+  position: relative;
+  overflow: hidden;
+  background-color: #1e1e1e;
+}
+
+/* 终端标签内容 */
+.terminalTabContent {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex: 1;
+  position: relative;
+  overflow: hidden;
 }
 
 .terminalFooter {

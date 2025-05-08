@@ -2,29 +2,40 @@ import React from 'react';
 import { Button, Tooltip, Space, Typography } from 'antd';
 import {
   FullscreenOutlined, FullscreenExitOutlined, SettingOutlined,
-  CloseOutlined, CopyOutlined, DownloadOutlined, PlusOutlined
+  CloseOutlined, CopyOutlined, DownloadOutlined, PlusOutlined,
+  CodeOutlined, BuildOutlined
 } from '@ant-design/icons';
 import type { Connection } from '../../../services/api';
 import styles from '../styles.module.css';
 
 const { Text } = Typography;
 
-interface TerminalHeaderProps {
-  connection: Connection | null;
-  fullscreen: boolean;
-  onToggleFullscreen: () => void;
-  onOpenSettings: () => void;
-  onCopyContent: () => void;
-  onDownloadLog: () => void;
+export interface TerminalHeaderProps {
+  connection?: any;
+  fullscreen?: boolean;
+  terminalMode?: string;
+  networkLatency?: number;
+  isConnected?: boolean;
+  onToggleFullscreen?: () => void;
+  onOpenSettings?: () => void;
+  onOpenQuickCommands?: () => void;
+  onOpenBatchCommands?: () => void;
+  onCopyContent: (activeTab?: any) => void;
+  onDownloadLog: (activeTab?: any) => void;
   onAddTab: () => void;
-  onCloseSession: () => void;
+  onCloseSession: (activeTab?: any) => void;
 }
 
 const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   connection,
-  fullscreen,
+  fullscreen = false,
+  terminalMode = 'normal',
+  networkLatency,
+  isConnected = false,
   onToggleFullscreen,
   onOpenSettings,
+  onOpenQuickCommands,
+  onOpenBatchCommands,
   onCopyContent,
   onDownloadLog,
   onAddTab,
@@ -39,6 +50,11 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
             {connection?.host}:{connection?.port} - {connection?.protocol.toUpperCase()}
           </Text>
         </span>
+        {connection && (
+          <span className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
+            {isConnected ? '已连接' : '未连接'}
+          </span>
+        )}
       </div>
       <div className={styles.terminalControls}>
         <Space>
@@ -55,7 +71,7 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
               type="text"
               size="small"
               icon={<CopyOutlined />}
-              onClick={onCopyContent}
+              onClick={() => onCopyContent(null)}
             />
           </Tooltip>
           <Tooltip title="下载日志">
@@ -63,7 +79,35 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
               type="text"
               size="small"
               icon={<DownloadOutlined />}
-              onClick={onDownloadLog}
+              onClick={() => onDownloadLog(null)}
+            />
+          </Tooltip>
+          <Tooltip title="终端模式">
+            <div className={`terminal-mode ${terminalMode}`}>
+              {terminalMode}
+            </div>
+          </Tooltip>
+          {networkLatency !== undefined && (
+            <Tooltip title="网络延迟">
+              <div className={`network-latency ${networkLatency > 200 ? 'high' : networkLatency > 100 ? 'medium' : 'low'}`}>
+                {networkLatency}ms
+              </div>
+            </Tooltip>
+          )}
+          <Tooltip title="快速命令">
+            <Button
+              type="text"
+              size="small"
+              icon={<CodeOutlined />}
+              onClick={onOpenQuickCommands}
+            />
+          </Tooltip>
+          <Tooltip title="批量命令">
+            <Button
+              type="text"
+              size="small"
+              icon={<BuildOutlined />}
+              onClick={onOpenBatchCommands}
             />
           </Tooltip>
           <Tooltip title="终端设置">
@@ -87,8 +131,7 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
             danger
             size="small"
             icon={<CloseOutlined />}
-            onClick={onCloseSession}
-            title="关闭会话"
+            onClick={() => onCloseSession(null)}
             className="close-session-btn"
           />
         </Space>

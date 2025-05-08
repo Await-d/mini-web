@@ -1,0 +1,27 @@
+.quick-commands-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.add-command-form {
+  margin-bottom: 16px;
+}
+
+.commands-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.command-item {
+  display: flex;
+  align-items: center;
+}
+
+.command-item code {
+  flex: 1;
+  background-color: #f5f5f5;
+  padding: 4px 8px;
+  border-radius: 4px;
+  word-break: break-all;
+} 
