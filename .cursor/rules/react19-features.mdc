@@ -1,0 +1,250 @@
+---
+description: React 19新特性应用指南
+globs: frontend/src/**/*.tsx,frontend/src/**/*.ts
+alwaysApply: true
+---
+
+# React 19新特性应用指南
+
+## Actions
+
+Actions是React 19中的核心新特性，用于处理数据变更和状态更新，自动管理待定状态、错误处理、乐观更新和表单提交。
+
+### 最佳实践
+
+```typescript
+// 使用useTransition和异步函数处理数据提交
+function UpdateProfile() {
+  const [formData, setFormData] = useState({
+    name: "",
+    email: ""
+  });
+  const [error, setError] = useState(null);
+  const [isPending, startTransition] = useTransition();
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    startTransition(async () => {
+      try {
+        await updateUserProfile(formData);
+        navigate("/profile");
+      } catch (err) {
+        setError(err.message);
+      }
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* 表单内容 */}
+      <button type="submit" disabled={isPending}>
+        {isPending ? "更新中..." : "更新"}
+      </button>
+      {error && <p className="error">{error}</p>}
+    </form>
+  );
+}
+```
+
+## useActionState Hook
+
+useActionState是React 19中的新Hook，简化了Actions的使用。
+
+### 最佳实践
+
+```typescript
+function UpdateProfile() {
+  const [error, submitAction, isPending] = useActionState(
+    async (prevState, formData) => {
+      try {
+        const name = formData.get("name");
+        const email = formData.get("email");
+        await updateUserProfile({ name, email });
+        navigate("/profile");
+        return null;
+      } catch (err) {
+        return err.message;
+      }
+    },
+    null
+  );
+
+  return (
+    <form action={submitAction}>
+      <input type="text" name="name" />
+      <input type="email" name="email" />
+      <button type="submit" disabled={isPending}>
+        {isPending ? "更新中..." : "更新"}
+      </button>
+      {error && <p className="error">{error}</p>}
+    </form>
+  );
+}
+```
+
+## useOptimistic
+
+useOptimistic用于实现乐观更新，在服务器响应前先更新UI，提升用户体验。
+
+### 最佳实践
+
+```typescript
+function TodoList({ todos }) {
+  const [optimisticTodos, addOptimisticTodo] = useOptimistic(
+    todos,
+    (state, newTodo) => [...state, { ...newTodo, pending: true }]
+  );
+
+  const addTodo = async (formData) => {
+    const title = formData.get("title");
+    const newTodo = { id: Date.now(), title, completed: false };
+    
+    // 乐观地将新待办事项添加到列表中
+    addOptimisticTodo(newTodo);
+    
+    // 发送请求到服务器
+    await createTodo(newTodo);
+  };
+
+  return (
+    <>
+      <form action={addTodo}>
+        <input name="title" />
+        <button type="submit">添加</button>
+      </form>
+      <ul>
+        {optimisticTodos.map(todo => (
+          <li key={todo.id} className={todo.pending ? "pending" : ""}>
+            {todo.title}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+```
+
+## 表单Actions
+
+React 19增强了原生表单元素，支持直接传递函数给action属性。
+
+### 最佳实践
+
+```typescript
+function LoginForm() {
+  const loginAction = async (formData) => {
+    const email = formData.get("email");
+    const password = formData.get("password");
+    
+    try {
+      const result = await login(email, password);
+      if (result.success) {
+        navigate("/dashboard");
+      } else {
+        return result.error;
+      }
+    } catch (error) {
+      return "登录失败，请稍后再试";
+    }
+  };
+
+  return (
+    <form action={loginAction}>
+      <input type="email" name="email" required />
+      <input type="password" name="password" required />
+      <button type="submit">登录</button>
+    </form>
+  );
+}
+```
+
+## 资源预加载API
+
+React 19提供了新的资源预加载API，用于优化资源加载，提高应用性能。
+
+### 最佳实践
+
+```typescript
+import { prefetchDNS, preconnect, preload, preinit } from 'react-dom';
+
+function ResourceOptimizer() {
+  // 预解析DNS
+  prefetchDNS('https://api.example.com');
+  
+  // 预先建立连接
+  preconnect('https://api.example.com');
+  
+  // 预加载字体
+  preload('https://fonts.example.com/font.woff2', { as: 'font' });
+  
+  // 预初始化脚本
+  preinit('https://cdn.example.com/script.js', { as: 'script' });
+  
+  return <div>应用内容</div>;
+}
+```
+
+## 异步脚本支持
+
+React 19改进了对异步脚本的支持，使在组件中使用脚本更加容易。
+
+### 最佳实践
+
+```typescript
+function MapComponent() {
+  return (
+    <div>
+      {/* 异步加载地图脚本 */}
+      <script async src="https://maps.example.com/api.js" />
+      <div id="map" style={{ height: '400px' }}></div>
+    </div>
+  );
+}
+```
+
+## 自定义元素支持
+
+React 19全面支持Web Components自定义元素。
+
+### 最佳实践
+
+```typescript
+// 使用第三方Web Component
+function CustomElementExample() {
+  return (
+    <div>
+      <my-custom-element
+        name="React 19"
+        count={5}
+        onCustomEvent={(e) => console.log(e.detail)}
+      />
+    </div>
+  );
+}
+```
+
+## 改进的错误处理
+
+React 19提供了更好的错误处理机制。
+
+### 最佳实践
+
+```typescript
+// 根组件中使用改进的错误处理
+const root = createRoot(document.getElementById('root'), {
+  onCaughtError: (error, errorInfo) => {
+    // 处理被错误边界捕获的错误
+    logErrorToService(error, errorInfo);
+  },
+  onUncaughtError: (error, errorInfo) => {
+    // 处理未被捕获的错误
+    logFatalErrorToService(error, errorInfo);
+  },
+  onRecoverableError: (error, errorInfo) => {
+    // 处理可恢复的错误
+    logWarningToService(error, errorInfo);
+  }
+});
+
+root.render(<App />);
+```

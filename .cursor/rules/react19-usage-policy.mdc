@@ -1,0 +1,209 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+
+# React 19 使用政策
+
+## 核心原则
+
+- **必须使用React 19**：前端开发必须使用React 19，不允许降级到早期版本
+- **按官方解决方案修复**：遇到React 19相关错误时，必须按照React官方文档提供的解决方案修复
+- **拥抱新特性**：应充分利用React 19的新特性和改进，如Actions、Hooks、资源预加载API等
+
+## 常见错误及解决方案
+
+### 1. 路由相关错误
+
+当使用React Router时可能遇到的警告：
+
+```
+Warning: You're using React 19 with an older version of React Router...
+```
+
+**解决方案**：
+
+- 添加React Router v7兼容性标志，在入口文件中：
+
+```tsx
+import { 
+  BrowserRouter, 
+  Routes, 
+  Route 
+} from 'react-router-dom';
+import { 
+  startTransition,
+  experimental_useProjectingOptOut as useProjectingOptOut
+} from 'react';
+
+// 添加v7兼容性标志
+// @ts-ignore - 这些标志在TypeScript类型中可能不存在
+window.ROUTER_FLAGS = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true
+};
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* 路由配置 */}
+      </Routes>
+    </BrowserRouter>
+  );
+}
+```
+
+### 2. 状态更新相关错误
+
+```
+Warning: Cannot update a component while rendering a different component...
+```
+
+**解决方案**：
+
+- 使用`useTransition`或新的Actions API：
+
+```tsx
+import { useTransition } from 'react';
+
+function MyComponent() {
+  const [isPending, startTransition] = useTransition();
+  
+  const handleClick = () => {
+    startTransition(() => {
+      // 状态更新逻辑
+    });
+  };
+  
+  return (
+    <button onClick={handleClick} disabled={isPending}>
+      {isPending ? '处理中...' : '点击'}
+    </button>
+  );
+}
+```
+
+### 3. 第三方库兼容性问题
+
+**解决方案**：
+
+- 优先寻找兼容React 19的版本
+- 检查GitHub Issues或官方文档中的兼容性说明
+- 使用React兼容性层：
+
+```tsx
+import { experimental_useCompatibility as useCompatibility } from 'react';
+
+function ThirdPartyComponentWrapper() {
+  useCompatibility({
+    mode: 'v18'
+  });
+  
+  return <ThirdPartyComponent />;
+}
+```
+
+## 推荐使用的React 19新特性
+
+### 1. Actions API
+
+优先使用Actions处理表单提交和数据读取：
+
+```tsx
+import { useActionState } from 'react';
+
+function LoginForm() {
+  const [error, formAction, isPending] = useActionState(
+    async (prevState, formData) => {
+      try {
+        // 处理表单提交
+        return null; // 成功时返回null
+      } catch (err) {
+        return err.message; // 错误时返回错误信息
+      }
+    },
+    null
+  );
+  
+  return (
+    <form action={formAction}>
+      {/* 表单内容 */}
+      {error && <p className="error">{error}</p>}
+      <button disabled={isPending}>
+        {isPending ? '提交中...' : '提交'}
+      </button>
+    </form>
+  );
+}
+```
+
+### 2. 资源预加载API
+
+```tsx
+import { prefetchDNS, preconnect, preload, preinit } from 'react-dom';
+
+function AppRoot() {
+  // 预解析DNS
+  prefetchDNS('https://api.example.com');
+  
+  // 预先建立连接
+  preconnect('https://api.example.com');
+  
+  // 预加载关键资源
+  preload('/fonts/main.woff2', { as: 'font' });
+  
+  // 预初始化脚本
+  preinit('/scripts/critical.js', { as: 'script' });
+  
+  return <App />;
+}
+```
+
+### 3. 乐观更新
+
+```tsx
+import { useOptimistic } from 'react';
+
+function TodoList({ todos }) {
+  const [optimisticTodos, addOptimisticTodo] = useOptimistic(
+    todos,
+    (state, newTodo) => [...state, { ...newTodo, pending: true }]
+  );
+  
+  const addTodo = async (formData) => {
+    const title = formData.get('title');
+    const newTodo = { id: Date.now(), title, completed: false };
+    
+    // 立即更新UI
+    addOptimisticTodo(newTodo);
+    
+    // 执行实际API调用
+    await saveTodoToServer(newTodo);
+  };
+  
+  return (
+    <>
+      <form action={addTodo}>
+        <input name="title" />
+        <button type="submit">添加</button>
+      </form>
+      <ul>
+        {optimisticTodos.map(todo => (
+          <li key={todo.id} className={todo.pending ? 'pending' : ''}>
+            {todo.title}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+```
+
+## 官方资源
+
+- [React 19 文档](mdc:https:/react.dev)
+- [React 19 迁移指南](mdc:https:/react.dev/blog/2023/03/16/introducing-react-19)
+- [React RFC仓库](mdc:https:/github.com/reactjs/rfcs)
+- [React 19 讨论区](mdc:https:/github.com/facebook/react/discussions)

@@ -1,0 +1,310 @@
+---
+description: 开发规范指南
+globs: 
+alwaysApply: true
+---
+
+# 开发规范指南
+
+## 文件路径
+
+### MCP工具使用规范
+- **绝对路径原则**：使用MCP工具操作文件时，必须使用绝对路径
+- **正确格式**：Windows系统下使用`D:/01项目/9998其他项目/Mini web/路径/文件名`格式
+
+```typescript
+// ❌ 错误示例
+mcp_desktop-commander_read_file({ path: "frontend/src/App.tsx" })
+
+// ✅ 正确示例
+mcp_desktop-commander_read_file({ path: "D:/01项目/9998其他项目/Mini web/frontend/src/App.tsx" })
+```
+
+## Git提交规范
+
+### 自动提交策略
+- 完成以下类型的更改后应自动创建Git提交：
+  1. 添加新的功能模块
+  2. 修复重大bug
+  3. 重构代码结构
+  4. 更新依赖版本
+
+### 提交信息格式
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+- **type**: 提交类型，如feat, fix, docs, style, refactor, test, chore
+- **scope**: 变更范围，如component, page, service
+- **subject**: 简短描述
+- **body**: 详细描述
+- **footer**: 关闭Issue等信息
+
+### 示例
+```
+feat(auth): 实现用户登录功能
+
+添加登录表单和验证逻辑，集成后端API，支持记住密码功能
+
+Closes #123
+```
+
+### 自动更新记录
+
+每次Git提交都需要自动更新本地的变更记录文档，确保项目历史清晰可追溯。
+
+#### 更新记录文档设置
+
+- 在项目根目录创建`CHANGELOG.md`文件，记录所有项目变更
+- 在每个主要模块目录创建`UPDATES.md`文件，记录该模块的变更
+
+#### 更新记录格式
+
+```markdown
+# 更新记录
+
+## [未发布]
+
+### 新增功能
+- 添加用户登录界面 (2024-06-10, @开发者名)
+
+### 修复
+- 修复表单验证逻辑错误 (2024-06-09, @开发者名)
+
+### 优化
+- 优化首页加载性能 (2024-06-08, @开发者名)
+
+## [v0.1.0] - 2024-06-01
+
+### 初始版本
+- 项目基础架构搭建
+- 实现用户登录和注册功能
+```
+
+#### 自动化实现
+
+在项目根目录创建`.husky/post-commit`脚本：
+
+```bash
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# 获取最新提交信息
+COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+COMMIT_BODY=$(git log -1 --pretty=format:"%b")
+COMMIT_AUTHOR=$(git log -1 --pretty=format:"%an")
+COMMIT_DATE=$(git log -1 --pretty=format:"%ad" --date=short)
+
+# 解析提交类型和范围
+if [[ $COMMIT_MSG =~ ^([a-z]+)(\(([a-z-]+)\))?:\ (.+)$ ]]; then
+  TYPE=${BASH_REMATCH[1]}
+  SCOPE=${BASH_REMATCH[3]}
+  SUBJECT=${BASH_REMATCH[4]}
+  
+  # 根据提交类型确定更新类别
+  CATEGORY=""
+  case $TYPE in
+    feat)
+      CATEGORY="新增功能"
+      ;;
+    fix)
+      CATEGORY="修复"
+      ;;
+    perf|refactor)
+      CATEGORY="优化"
+      ;;
+    docs)
+      CATEGORY="文档"
+      ;;
+    style)
+      CATEGORY="样式"
+      ;;
+    test)
+      CATEGORY="测试"
+      ;;
+    chore)
+      CATEGORY="其他"
+      ;;
+    *)
+      CATEGORY="其他"
+      ;;
+  esac
+  
+  # 新的更新项
+  NEW_ENTRY="- $SUBJECT ($COMMIT_DATE, @$COMMIT_AUTHOR)"
+  
+  # 更新项目根目录的CHANGELOG.md
+  CHANGELOG="CHANGELOG.md"
+  if [ ! -f $CHANGELOG ]; then
+    echo "# 更新记录\n\n## [未发布]\n" > $CHANGELOG
+  fi
+  
+  # 检查是否存在对应类别的标题
+  if grep -q "### $CATEGORY" $CHANGELOG; then
+    # 在类别下添加新条目
+    sed -i "/### $CATEGORY/a $NEW_ENTRY" $CHANGELOG
+  else
+    # 添加新类别和条目
+    sed -i "/## \[未发布\]/a \n### $CATEGORY\n$NEW_ENTRY" $CHANGELOG
+  fi
+  
+  # 如果有范围，更新对应模块的UPDATES.md
+  if [ ! -z "$SCOPE" ]; then
+    MODULE_DIR=""
+    case $SCOPE in
+      frontend|ui)
+        MODULE_DIR="frontend"
+        ;;
+      backend|api)
+        MODULE_DIR="backend"
+        ;;
+      component)
+        MODULE_DIR="frontend/src/components"
+        ;;
+      *)
+        # 默认使用scope作为目录名
+        MODULE_DIR=$SCOPE
+        ;;
+    esac
+    
+    if [ -d "$MODULE_DIR" ]; then
+      MODULE_CHANGELOG="$MODULE_DIR/UPDATES.md"
+      if [ ! -f $MODULE_CHANGELOG ]; then
+        echo "# $SCOPE 模块更新记录\n\n## [未发布]\n" > $MODULE_CHANGELOG
+      fi
+      
+      # 在模块更新记录中添加条目
+      if grep -q "### $CATEGORY" $MODULE_CHANGELOG; then
+        sed -i "/### $CATEGORY/a $NEW_ENTRY" $MODULE_CHANGELOG
+      else
+        sed -i "/## \[未发布\]/a \n### $CATEGORY\n$NEW_ENTRY" $MODULE_CHANGELOG
+      fi
+    fi
+  fi
+  
+  # 添加更新的文件到Git
+  git add $CHANGELOG
+  if [ ! -z "$SCOPE" ] && [ -d "$MODULE_DIR" ]; then
+    git add "$MODULE_DIR/UPDATES.md"
+  fi
+  
+  # 自动提交更新记录
+  git commit --amend --no-edit
+fi
+```
+
+#### 更新记录维护指南
+
+1. **版本发布时**：创建新的版本标记，将"未发布"改为具体版本号和发布日期
+2. **每周回顾**：团队应每周检查更新记录，确保完整性和准确性
+3. **冲突解决**：如遇合并冲突，保留所有更新项，按时间排序
+4. **自动化检查**：在CI流程中添加检查，确保每个提交都有对应的更新记录
+
+## 测试规范
+
+### 单元测试
+- 所有组件、Hook和工具函数必须有单元测试
+- 使用React Testing Library编写组件测试
+- 测试文件与源文件放在同一目录下，命名为`*.test.tsx`或`*.test.ts`
+
+### 浏览器测试
+- 重要功能必须进行浏览器兼容性测试
+- 支持的浏览器：Chrome, Firefox, Safari, Edge最新版
+- 测试流程：
+  1. 本地开发完成后，使用`npm run dev`启动开发服务器
+  2. 在浏览器中测试功能
+  3. 记录问题并修复
+  4. 再次测试确认修复
+
+## 文件拆分策略
+
+当单个文件接近1000行限制时，应考虑以下拆分策略：
+
+### 组件拆分
+- 将大型组件拆分为多个小型组件
+- 提取可复用的UI元素为独立组件
+- 使用组合模式构建复杂UI
+
+```typescript
+// ❌ 过大的组件
+function Dashboard() {
+  // 1000多行代码...
+}
+
+// ✅ 拆分后
+function Dashboard() {
+  return (
+    <DashboardLayout>
+      <Header />
+      <Sidebar />
+      <MainContent>
+        <StatisticsPanel />
+        <RecentActivities />
+        <UserList />
+      </MainContent>
+      <Footer />
+    </DashboardLayout>
+  );
+}
+```
+
+### 逻辑分离
+- 将业务逻辑提取到自定义Hook中
+- 将工具函数移至utils目录
+- 将类型定义移至单独的types文件
+
+```typescript
+// ❌ 混合UI和业务逻辑
+function UserProfile() {
+  // 大量状态逻辑和业务处理...
+  // UI渲染代码...
+}
+
+// ✅ 分离逻辑
+function useUserProfile(userId) {
+  // 提取的业务逻辑和状态管理...
+}
+
+function UserProfile({ userId }) {
+  const { user, isLoading, error, updateUser } = useUserProfile(userId);
+  // 只保留UI渲染代码...
+}
+```
+
+### 文件模块化
+- 根据功能模块拆分文件
+- 使用index.ts导出公共API
+- 保持每个文件的单一职责
+
+```
+components/UserManagement/
+├── index.ts           # 导出公共API
+├── UserList.tsx       # 用户列表组件
+├── UserItem.tsx       # 用户列表项组件
+├── UserForm.tsx       # 用户表单组件
+├── UserFilter.tsx     # 用户筛选组件
+└── hooks/
+    ├── useUsers.ts    # 用户数据Hook
+    └── useUserForm.ts # 表单逻辑Hook
+```
+
+## 性能优化
+
+### React优化
+- 使用React.memo防止不必要的重渲染
+- 使用useMemo和useCallback优化性能
+- 使用React 19的异步渲染和Suspense优化用户体验
+
+### 代码分割
+- 使用React.lazy和Suspense实现代码分割
+- 路由级别的代码分割
+- 大型依赖的动态导入
+
+### 资源优化
+- 使用React 19的资源预加载API
+- 图片压缩和适当尺寸
+- CSS优化和最小化

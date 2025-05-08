@@ -1,0 +1,165 @@
+---
+description: 包管理规范
+globs: frontend/**/*,package.json,yarn.lock
+alwaysApply: true
+---
+
+# 包管理规范
+
+## Yarn的使用规范
+
+### 为什么选择Yarn
+- 更快的依赖安装速度
+- 确定性的依赖解析
+- 更好的缓存机制
+- 工作区(Workspaces)支持，适合Monorepo架构
+- 安全性更高的依赖管理
+
+### 必要命令
+
+```bash
+# 安装所有依赖
+yarn
+
+# 添加依赖
+yarn add <package-name>
+
+# 添加开发依赖
+yarn add -D <package-name>
+
+# 移除依赖
+yarn remove <package-name>
+
+# 运行脚本
+yarn <script-name>
+
+# 清除缓存
+yarn cache clean
+```
+
+### 项目初始化
+
+```bash
+# 创建新项目
+mkdir my-project && cd my-project
+
+# 初始化项目
+yarn init -y
+
+# 添加React
+yarn create vite . --template react-ts
+
+# 安装基础依赖
+yarn add react react-dom
+yarn add antd @ant-design/icons @ant-design/cssinjs dayjs
+
+# 安装开发依赖
+yarn add -D typescript @types/react @types/react-dom vite
+yarn add -D vitest @testing-library/react @testing-library/jest-dom
+```
+
+### 锁定文件
+
+- 必须提交`yarn.lock`文件到版本控制系统
+- 不要手动修改`yarn.lock`文件
+- 团队成员间共享相同的`yarn.lock`文件确保依赖一致性
+
+### 脚本规范
+
+在`package.json`中的`scripts`部分定义常用命令：
+
+```json
+{
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "lint": "eslint src --ext .ts,.tsx",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css,less}\""
+  }
+}
+```
+
+### CI/CD配置
+
+GitHub Actions的配置应使用yarn：
+
+```yaml
+- name: 安装依赖
+  run: |
+    cd frontend
+    yarn install --frozen-lockfile
+    
+- name: 运行测试
+  run: |
+    cd frontend
+    yarn test
+    
+- name: 构建前端
+  run: |
+    cd frontend
+    yarn build
+```
+
+### Monorepo配置（如适用）
+
+对于大型项目，使用Yarn Workspaces管理多个包：
+
+```json
+// 根目录package.json
+{
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}
+```
+
+### 依赖管理最佳实践
+
+1. **明确版本**：尽量指定确切的依赖版本，避免使用`^`或`~`
+2. **定期更新**：使用`yarn upgrade-interactive --latest`定期检查并更新依赖
+3. **减少依赖数量**：只添加必要的依赖，减少项目复杂性
+4. **审核安全性**：使用`yarn audit`检查依赖中的安全问题
+5. **依赖分组**：将依赖按功能或类型分组，便于管理
+
+### 禁止使用NPM
+
+为保持依赖一致性和避免`package-lock.json`与`yarn.lock`冲突，项目中禁止使用npm命令：
+
+```bash
+# ❌ 禁止使用
+npm install
+npm i <package>
+npm run <script>
+
+# ✅ 使用yarn替代
+yarn
+yarn add <package>
+yarn <script>
+```
+
+## 保持依赖更新
+
+### 更新流程
+
+1. 每两周检查依赖更新
+2. 在feature分支中进行依赖更新测试
+3. 更新后运行完整测试套件
+4. 创建单独的PR用于依赖更新
+
+### 更新命令
+
+```bash
+# 检查过时依赖
+yarn outdated
+
+# 交互式更新
+yarn upgrade-interactive --latest
+
+# 更新单个包到最新版本
+yarn upgrade <package-name> --latest
+```

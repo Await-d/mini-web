@@ -1,0 +1,858 @@
+---
+description: 组件模式与实现指南
+globs: frontend/src/components/**/*.tsx,frontend/src/hooks/**/*.ts
+alwaysApply: true
+---
+
+# 组件模式与实现指南
+
+## 基础组件结构
+
+### 函数组件模板
+
+```tsx
+import React from 'react';
+import type { FC } from 'react';
+import { Card, Typography } from 'antd';
+
+const { Title } = Typography;
+
+interface MyComponentProps {
+  title: string;
+  content?: string;
+  onAction?: () => void;
+}
+
+const MyComponent: FC<MyComponentProps> = ({ 
+  title, 
+  content = '默认内容', 
+  onAction 
+}) => {
+  return (
+    <Card title={<Title level={4}>{title}</Title>} bordered={false}>
+      <div className="component-content">
+        {content}
+      </div>
+      {onAction && (
+        <div className="component-footer">
+          <Button onClick={onAction}>操作</Button>
+        </div>
+      )}
+    </Card>
+  );
+};
+
+export default MyComponent;
+```
+
+### 组件导出模式
+
+优先使用命名导出，便于自动导入和代码分割：
+
+```tsx
+// 推荐
+export const ComponentName = () => { ... };
+
+// 或者默认导出但提供命名
+const ComponentName = () => { ... };
+export default ComponentName;
+```
+
+## 数据获取模式
+
+### 使用React 19的Actions
+
+```tsx
+// UserList.tsx
+import { useTransition } from 'react';
+import { Table, Button, message } from 'antd';
+import type { User } from '@/types';
+
+const UserList = () => {
+  const [users, setUsers] = useState<User[]>([]);
+  const [isPending, startTransition] = useTransition();
+  
+  const fetchUsers = () => {
+    startTransition(async () => {
+      try {
+        const response = await fetch('/api/users');
+        const data = await response.json();
+        setUsers(data);
+      } catch (error) {
+        message.error('获取用户列表失败');
+      }
+    });
+  };
+  
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+  
+  return (
+    <div>
+      <div className="table-header">
+        <Button 
+          onClick={fetchUsers} 
+          loading={isPending}
+          type="primary"
+        >
+          刷新
+        </Button>
+      </div>
+      <Table 
+        dataSource={users} 
+        columns={columns} 
+        loading={isPending}
+        rowKey="id"
+      />
+    </div>
+  );
+};
+```
+
+### 使用自定义Hook封装数据获取
+
+```tsx
+// useUserData.ts
+import { useState, useTransition } from 'react';
+import type { User } from '@/types';
+
+export const useUserData = () => {
+  const [users, setUsers] = useState<User[]>([]);
+  const [isPending, startTransition] = useTransition();
+  
+  const fetchUsers = () => {
+    startTransition(async () => {
+      try {
+        const response = await fetch('/api/users');
+        const data = await response.json();
+        setUsers(data);
+        return null;
+      } catch (error) {
+        return error.message;
+      }
+    });
+  };
+  
+  return {
+    users,
+    isPending,
+    fetchUsers
+  };
+};
+
+// 使用自定义Hook
+const UserList = () => {
+  const { users, isPending, fetchUsers } = useUserData();
+  
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+  
+  return (
+    <Table 
+      dataSource={users} 
+      columns={columns} 
+      loading={isPending}
+    />
+  );
+};
+```
+
+## 表单处理模式
+
+### 使用React 19表单Actions
+
+```tsx
+// LoginForm.tsx
+import { Form, Input, Button } from 'antd';
+import { useActionState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+const LoginForm = () => {
+  const navigate = useNavigate();
+  
+  const [error, loginAction, isPending] = useActionState(
+    async (prevState, formData) => {
+      const email = formData.get('email');
+      const password = formData.get('password');
+      
+      try {
+        const response = await fetch('/api/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ email, password }),
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          navigate('/dashboard');
+          return null;
+        } else {
+          return data.message || '登录失败';
+        }
+      } catch (err) {
+        return '服务器错误，请稍后再试';
+      }
+    },
+    null
+  );
+  
+  return (
+    <Form 
+      name="login" 
+      layout="vertical"
+      action={loginAction}
+    >
+      <Form.Item
+        label="邮箱"
+        name="email"
+        rules={[{ required: true, message: '请输入邮箱' }]}
+      >
+        <Input type="email" />
+      </Form.Item>
+      
+      <Form.Item
+        label="密码"
+        name="password"
+        rules={[{ required: true, message: '请输入密码' }]}
+      >
+        <Input.Password />
+      </Form.Item>
+      
+      {error && (
+        <div className="login-error">
+          {error}
+        </div>
+      )}
+      
+      <Form.Item>
+        <Button 
+          type="primary" 
+          htmlType="submit"
+          loading={isPending}
+          block
+        >
+          登录
+        </Button>
+      </Form.Item>
+    </Form>
+  );
+};
+```
+
+### 表单验证和提交
+
+```tsx
+// RegistrationForm.tsx
+import { Form, Input, Button, message } from 'antd';
+import { useActionState } from 'react';
+
+const formItemLayout = {
+  labelCol: { span: 6 },
+  wrapperCol: { span: 18 },
+};
+
+const tailFormItemLayout = {
+  wrapperCol: { span: 24 },
+};
+
+const RegistrationForm = () => {
+  const [form] = Form.useForm();
+  
+  const [error, registerAction, isPending] = useActionState(
+    async (prevState, formData) => {
+      // 处理注册逻辑
+      const values = Object.fromEntries(formData.entries());
+      
+      try {
+        const response = await fetch('/api/register', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(values),
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          message.success('注册成功！');
+          form.resetFields();
+          return null;
+        } else {
+          return data.message || '注册失败';
+        }
+      } catch (err) {
+        return '服务器错误，请稍后再试';
+      }
+    },
+    null
+  );
+  
+  return (
+    <Form
+      {...formItemLayout}
+      form={form}
+      name="register"
+      action={registerAction}
+      scrollToFirstError
+    >
+      <Form.Item
+        name="email"
+        label="电子邮箱"
+        rules={[
+          {
+            type: 'email',
+            message: '请输入有效的电子邮箱!',
+          },
+          {
+            required: true,
+            message: '请输入电子邮箱!',
+          },
+        ]}
+      >
+        <Input />
+      </Form.Item>
+
+      <Form.Item
+        name="password"
+        label="密码"
+        rules={[
+          {
+            required: true,
+            message: '请输入密码!',
+          },
+          {
+            min: 8,
+            message: '密码长度不能少于8个字符',
+          },
+        ]}
+        hasFeedback
+      >
+        <Input.Password />
+      </Form.Item>
+
+      <Form.Item
+        name="confirm"
+        label="确认密码"
+        dependencies={['password']}
+        hasFeedback
+        rules={[
+          {
+            required: true,
+            message: '请确认密码!',
+          },
+          ({ getFieldValue }) => ({
+            validator(_, value) {
+              if (!value || getFieldValue('password') === value) {
+                return Promise.resolve();
+              }
+              return Promise.reject(new Error('两次输入的密码不匹配!'));
+            },
+          }),
+        ]}
+      >
+        <Input.Password />
+      </Form.Item>
+      
+      {error && (
+        <Form.Item wrapperCol={{ span: 24 }}>
+          <div className="register-error">
+            {error}
+          </div>
+        </Form.Item>
+      )}
+
+      <Form.Item {...tailFormItemLayout}>
+        <Button 
+          type="primary" 
+          htmlType="submit" 
+          loading={isPending}
+          block
+        >
+          注册
+        </Button>
+      </Form.Item>
+    </Form>
+  );
+};
+```
+
+## 模态框和抽屉模式
+
+### 使用Hook管理模态框状态
+
+```tsx
+// useModal.ts
+import { useState } from 'react';
+
+export const useModal = (defaultVisible = false) => {
+  const [visible, setVisible] = useState(defaultVisible);
+  const [data, setData] = useState(null);
+  
+  const open = (modalData = null) => {
+    setData(modalData);
+    setVisible(true);
+  };
+  
+  const close = () => {
+    setVisible(false);
+    // 延迟清除数据，等待关闭动画完成
+    setTimeout(() => setData(null), 300);
+  };
+  
+  return {
+    visible,
+    data,
+    open,
+    close
+  };
+};
+
+// 使用示例
+const UserManagement = () => {
+  const editModal = useModal();
+  const detailDrawer = useModal();
+  
+  const handleEdit = (user) => {
+    editModal.open(user);
+  };
+  
+  const handleViewDetails = (user) => {
+    detailDrawer.open(user);
+  };
+  
+  return (
+    <>
+      <Table 
+        dataSource={users}
+        columns={[
+          // ...其他列
+          {
+            title: '操作',
+            key: 'action',
+            render: (_, record) => (
+              <Space>
+                <Button onClick={() => handleViewDetails(record)}>详情</Button>
+                <Button onClick={() => handleEdit(record)}>编辑</Button>
+              </Space>
+            ),
+          },
+        ]}
+      />
+      
+      <Modal
+        title="编辑用户"
+        open={editModal.visible}
+        onCancel={editModal.close}
+        footer={null}
+        destroyOnClose
+      >
+        <UserForm initialValues={editModal.data} onFinish={editModal.close} />
+      </Modal>
+      
+      <Drawer
+        title="用户详情"
+        open={detailDrawer.visible}
+        onClose={detailDrawer.close}
+        width={480}
+      >
+        <UserDetail user={detailDrawer.data} />
+      </Drawer>
+    </>
+  );
+};
+```
+
+## 列表和表格实现
+
+### 带筛选和分页的表格
+
+```tsx
+// FilterableTable.tsx
+import React, { useState, useTransition } from 'react';
+import { Table, Card, Form, Input, Select, Button, Space } from 'antd';
+import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
+
+const FilterableTable = () => {
+  const [form] = Form.useForm();
+  const [data, setData] = useState([]);
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 10,
+    total: 0,
+  });
+  const [filters, setFilters] = useState({});
+  const [isPending, startTransition] = useTransition();
+  
+  const fetchData = (params = {}) => {
+    startTransition(async () => {
+      const { current, pageSize, ...rest } = params;
+      
+      try {
+        const response = await fetch('/api/data', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            page: current,
+            pageSize,
+            ...rest,
+          }),
+        });
+        
+        const result = await response.json();
+        
+        setData(result.data);
+        setPagination({
+          ...pagination,
+          current,
+          pageSize,
+          total: result.total,
+        });
+      } catch (error) {
+        message.error('获取数据失败');
+      }
+    });
+  };
+  
+  useEffect(() => {
+    fetchData({
+      current: pagination.current,
+      pageSize: pagination.pageSize,
+      ...filters,
+    });
+  }, []);
+  
+  const handleTableChange = (paginationParams, filters, sorter) => {
+    fetchData({
+      current: paginationParams.current,
+      pageSize: paginationParams.pageSize,
+      ...filters,
+      sortField: sorter.field,
+      sortOrder: sorter.order,
+    });
+  };
+  
+  const handleSearch = (values) => {
+    const newFilters = { ...values };
+    setFilters(newFilters);
+    fetchData({
+      current: 1,
+      pageSize: pagination.pageSize,
+      ...newFilters,
+    });
+  };
+  
+  const handleReset = () => {
+    form.resetFields();
+    setFilters({});
+    fetchData({
+      current: 1,
+      pageSize: pagination.pageSize,
+    });
+  };
+  
+  return (
+    <Card bordered={false}>
+      <Form
+        form={form}
+        layout="inline"
+        onFinish={handleSearch}
+        style={{ marginBottom: 24 }}
+      >
+        <Form.Item name="name" label="名称">
+          <Input placeholder="请输入" allowClear />
+        </Form.Item>
+        
+        <Form.Item name="status" label="状态">
+          <Select
+            placeholder="请选择"
+            allowClear
+            style={{ width: 200 }}
+            options={[
+              { value: 'active', label: '活跃' },
+              { value: 'inactive', label: '停用' },
+            ]}
+          />
+        </Form.Item>
+        
+        <Form.Item>
+          <Space>
+            <Button
+              type="primary"
+              htmlType="submit"
+              icon={<SearchOutlined />}
+              loading={isPending}
+            >
+              查询
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={handleReset}
+            >
+              重置
+            </Button>
+          </Space>
+        </Form.Item>
+      </Form>
+      
+      <Table
+        columns={columns}
+        rowKey="id"
+        dataSource={data}
+        pagination={pagination}
+        loading={isPending}
+        onChange={handleTableChange}
+        scroll={{ x: 'max-content' }}
+      />
+    </Card>
+  );
+};
+```
+
+## 状态管理模式
+
+### 使用Context管理全局状态
+
+```tsx
+// AppContext.tsx
+import React, { createContext, useContext, useReducer } from 'react';
+
+// 定义状态类型
+interface AppState {
+  user: any | null;
+  theme: 'light' | 'dark';
+  // 其他全局状态...
+}
+
+// 定义Action类型
+type AppAction =
+  | { type: 'SET_USER'; payload: any }
+  | { type: 'CLEAR_USER' }
+  | { type: 'TOGGLE_THEME' }
+  | { type: 'SET_THEME'; payload: 'light' | 'dark' };
+
+// 初始状态
+const initialState: AppState = {
+  user: null,
+  theme: 'light',
+};
+
+// 创建Context
+const AppContext = createContext<{
+  state: AppState;
+  dispatch: React.Dispatch<AppAction>;
+}>({
+  state: initialState,
+  dispatch: () => null,
+});
+
+// Reducer函数
+const appReducer = (state: AppState, action: AppAction): AppState => {
+  switch (action.type) {
+    case 'SET_USER':
+      return { ...state, user: action.payload };
+    case 'CLEAR_USER':
+      return { ...state, user: null };
+    case 'TOGGLE_THEME':
+      return { ...state, theme: state.theme === 'light' ? 'dark' : 'light' };
+    case 'SET_THEME':
+      return { ...state, theme: action.payload };
+    default:
+      return state;
+  }
+};
+
+// Provider组件
+export const AppProvider: React.FC<React.PropsWithChildren<{}>> = ({ children }) => {
+  const [state, dispatch] = useReducer(appReducer, initialState);
+  
+  return (
+    <AppContext.Provider value={{ state, dispatch }}>
+      {children}
+    </AppContext.Provider>
+  );
+};
+
+// 自定义Hook
+export const useAppContext = () => useContext(AppContext);
+
+// 使用示例
+const Header = () => {
+  const { state, dispatch } = useAppContext();
+  
+  const handleLogout = () => {
+    dispatch({ type: 'CLEAR_USER' });
+  };
+  
+  const toggleTheme = () => {
+    dispatch({ type: 'TOGGLE_THEME' });
+  };
+  
+  return (
+    <header>
+      {state.user ? (
+        <>
+          <span>欢迎, {state.user.name}</span>
+          <Button onClick={handleLogout}>退出</Button>
+        </>
+      ) : (
+        <Link to="/login">登录</Link>
+      )}
+      
+      <Switch
+        checked={state.theme === 'dark'}
+        onChange={toggleTheme}
+        checkedChildren="🌙"
+        unCheckedChildren="☀️"
+      />
+    </header>
+  );
+};
+```
+
+## 路由和导航模式
+
+### 路由配置
+
+```tsx
+// router.tsx
+import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+import { Spin } from 'antd';
+
+import AppLayout from '@/layouts/AppLayout';
+import AuthLayout from '@/layouts/AuthLayout';
+import ErrorPage from '@/pages/ErrorPage';
+import RequireAuth from '@/components/RequireAuth';
+
+// 懒加载页面组件
+const Dashboard = lazy(() => import('@/pages/Dashboard'));
+const UserManagement = lazy(() => import('@/pages/UserManagement'));
+const Profile = lazy(() => import('@/pages/Profile'));
+const Login = lazy(() => import('@/pages/Login'));
+const Register = lazy(() => import('@/pages/Register'));
+
+// 加载指示器
+const PageLoader = () => (
+  <div style={{ display: 'flex', justifyContent: 'center', padding: 100 }}>
+    <Spin size="large" tip="页面加载中..." />
+  </div>
+);
+
+// 路由配置
+export const router = createBrowserRouter([
+  {
+    path: '/',
+    element: <Navigate to="/dashboard" replace />,
+    errorElement: <ErrorPage />,
+  },
+  {
+    path: '/',
+    element: (
+      <RequireAuth>
+        <AppLayout />
+      </RequireAuth>
+    ),
+    children: [
+      {
+        path: 'dashboard',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <Dashboard />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'users',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <UserManagement />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'profile',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <Profile />
+          </Suspense>
+        ),
+      },
+    ],
+  },
+  {
+    path: '/',
+    element: <AuthLayout />,
+    children: [
+      {
+        path: 'login',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <Login />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'register',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <Register />
+          </Suspense>
+        ),
+      },
+    ],
+  },
+]);
+```
+
+### 面包屑导航
+
+```tsx
+// Breadcrumb.tsx
+import { Breadcrumb } from 'antd';
+import { Link, useLocation } from 'react-router-dom';
+import { HomeOutlined } from '@ant-design/icons';
+
+// 路由映射表
+const routeMap = {
+  '/dashboard': '控制台',
+  '/users': '用户管理',
+  '/profile': '个人资料',
+  // 其他路由...
+};
+
+const AppBreadcrumb = () => {
+  const location = useLocation();
+  const pathSnippets = location.pathname.split('/').filter(i => i);
+  
+  const extraBreadcrumbItems = pathSnippets.map((_, index) => {
+    const url = `/${pathSnippets.slice(0, index + 1).join('/')}`;
+    return {
+      key: url,
+      title: <Link to={url}>{routeMap[url] || url}</Link>,
+    };
+  });
+  
+  const breadcrumbItems = [
+    {
+      key: '/',
+      title: (
+        <Link to="/">
+          <HomeOutlined />
+        </Link>
+      ),
+    },
+  ].concat(extraBreadcrumbItems);
+  
+  return <Breadcrumb items={breadcrumbItems} />;
+};
+
+export default AppBreadcrumb;
+```

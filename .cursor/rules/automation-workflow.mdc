@@ -1,0 +1,477 @@
+---
+description: 自动化工作流与测试规范
+globs: frontend/**/*.test.ts,frontend/**/*.test.tsx
+alwaysApply: true
+---
+
+# 自动化工作流与测试规范
+
+## 开发自动化流程
+
+### 项目初始化
+
+```bash
+# 前端项目初始化
+cd frontend
+yarn create vite . --template react-ts
+yarn add antd @ant-design/icons @ant-design/cssinjs dayjs
+yarn add -D vitest @testing-library/react @testing-library/jest-dom
+```
+
+```bash
+# 后端项目初始化
+cd backend
+go mod init github.com/yourname/mini-web
+go get -u github.com/gin-gonic/gin
+go get -u gorm.io/gorm
+go get -u github.com/spf13/viper
+```
+
+### 代码格式化配置
+
+在项目根目录创建`.prettierrc.json`：
+
+```json
+{
+  "semi": true,
+  "tabWidth": 2,
+  "printWidth": 100,
+  "singleQuote": true,
+  "trailingComma": "es5",
+  "bracketSpacing": true
+}
+```
+
+### 提交前自动格式化代码
+
+在`package.json`中添加：
+
+```json
+{
+  "scripts": {
+    "lint": "eslint src --ext .ts,.tsx",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css,less}\"",
+    "prepare": "husky install"
+  }
+}
+```
+
+创建`.husky/pre-commit`：
+
+```bash
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+cd frontend && yarn lint && yarn format
+```
+
+## 浏览器测试自动化
+
+### 集成Playwright
+
+```bash
+# 安装Playwright
+yarn add -D @playwright/test
+
+# 初始化配置
+yarn playwright install
+```
+
+创建`playwright.config.ts`：
+
+```typescript
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests',
+  timeout: 30000,
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: 'html',
+  use: {
+    baseURL: 'http://localhost:5173',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+  },
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
+      name: 'Mobile Chrome',
+      use: { ...devices['Pixel 5'] },
+    },
+    {
+      name: 'Mobile Safari',
+      use: { ...devices['iPhone 12'] },
+    },
+  ],
+  webServer: {
+    command: 'yarn dev',
+    port: 5173,
+    reuseExistingServer: !process.env.CI,
+  },
+});
+```
+
+### 编写端到端测试
+
+创建`tests/login.spec.ts`：
+
+```typescript
+import { test, expect } from '@playwright/test';
+
+test.describe('登录功能', () => {
+  test('成功登录', async ({ page }) => {
+    await page.goto('/login');
+    
+    // 填写登录表单
+    await page.fill('input[name="email"]', 'test@example.com');
+    await page.fill('input[name="password"]', 'password123');
+    
+    // 点击登录按钮
+    await page.click('button[type="submit"]');
+    
+    // 验证是否成功登录并跳转到仪表盘
+    await expect(page).toHaveURL('/dashboard');
+    await expect(page.locator('.welcome-message')).toBeVisible();
+  });
+  
+  test('登录失败 - 错误凭证', async ({ page }) => {
+    await page.goto('/login');
+    
+    // 填写错误的登录信息
+    await page.fill('input[name="email"]', 'wrong@example.com');
+    await page.fill('input[name="password"]', 'wrongpassword');
+    
+    // 点击登录按钮
+    await page.click('button[type="submit"]');
+    
+    // 检查错误消息
+    await expect(page.locator('.login-error')).toBeVisible();
+    await expect(page.locator('.login-error')).toContainText('登录失败');
+  });
+});
+```
+
+## 组件测试
+
+### 使用Vitest进行组件测试
+
+创建`src/components/Button/Button.test.tsx`：
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import Button from './Button';
+
+describe('Button组件', () => {
+  it('渲染按钮文本', () => {
+    render(<Button>测试按钮</Button>);
+    expect(screen.getByText('测试按钮')).toBeInTheDocument();
+  });
+  
+  it('处理点击事件', () => {
+    const handleClick = vi.fn();
+    render(<Button onClick={handleClick}>点击我</Button>);
+    
+    fireEvent.click(screen.getByText('点击我'));
+    expect(handleClick).toHaveBeenCalledTimes(1);
+  });
+  
+  it('禁用状态正确', () => {
+    render(<Button disabled>禁用按钮</Button>);
+    expect(screen.getByText('禁用按钮')).toBeDisabled();
+  });
+  
+  it('加载状态正确显示', () => {
+    render(<Button loading>加载中</Button>);
+    expect(screen.getByText('加载中')).toBeDisabled();
+    expect(screen.getByRole('img', { name: /loading/i })).toBeInTheDocument();
+  });
+});
+```
+
+### 测试自定义Hook
+
+创建`src/hooks/useCounter/useCounter.test.ts`：
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import { renderHook, act } from '@testing-library/react';
+import { useCounter } from './useCounter';
+
+describe('useCounter Hook', () => {
+  it('初始值设置正确', () => {
+    const { result } = renderHook(() => useCounter(10));
+    expect(result.current.count).toBe(10);
+  });
+  
+  it('increment方法正确增加计数', () => {
+    const { result } = renderHook(() => useCounter(0));
+    
+    act(() => {
+      result.current.increment();
+    });
+    
+    expect(result.current.count).toBe(1);
+  });
+  
+  it('decrement方法正确减少计数', () => {
+    const { result } = renderHook(() => useCounter(5));
+    
+    act(() => {
+      result.current.decrement();
+    });
+    
+    expect(result.current.count).toBe(4);
+  });
+  
+  it('reset方法重置为初始值', () => {
+    const { result } = renderHook(() => useCounter(5));
+    
+    act(() => {
+      result.current.increment();
+      result.current.increment();
+      result.current.reset();
+    });
+    
+    expect(result.current.count).toBe(5);
+  });
+});
+```
+
+## 持续集成配置
+
+### GitHub Actions工作流
+
+创建`.github/workflows/ci.yml`：
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: 设置Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+        cache: 'yarn'
+        cache-dependency-path: frontend/yarn.lock
+        
+    - name: 安装依赖
+      run: |
+        cd frontend
+        yarn install --frozen-lockfile
+        
+    - name: 运行Lint
+      run: |
+        cd frontend
+        yarn lint
+        
+    - name: 运行单元测试
+      run: |
+        cd frontend
+        yarn test
+        
+    - name: 安装Playwright浏览器
+      run: |
+        cd frontend
+        yarn playwright install --with-deps chromium
+        
+    - name: 运行E2E测试
+      run: |
+        cd frontend
+        yarn test:e2e
+        
+    - name: 上传测试报告
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: playwright-report
+        path: frontend/playwright-report/
+        retention-days: 30
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: 设置Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+        cache: 'yarn'
+        cache-dependency-path: frontend/yarn.lock
+        
+    - name: 安装依赖
+      run: |
+        cd frontend
+        yarn install --frozen-lockfile
+        
+    - name: 构建前端
+      run: |
+        cd frontend
+        yarn build
+        
+    - name: 设置Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+        
+    - name: 构建后端
+      run: |
+        cd backend
+        go build -v ./...
+        
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-artifacts
+        path: |
+          frontend/dist
+          backend/bin
+        retention-days: 7
+```
+
+## 自动部署流程
+
+### 使用Netlify部署前端
+
+创建`frontend/netlify.toml`：
+
+```toml
+[build]
+  publish = "dist"
+  command = "yarn build"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+```
+
+### 使用Docker部署后端
+
+创建`backend/Dockerfile`：
+
+```dockerfile
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/server
+
+FROM alpine:latest
+
+WORKDIR /app
+
+COPY --from=builder /app/server .
+COPY --from=builder /app/configs ./configs
+
+EXPOSE 8080
+
+CMD ["/app/server"]
+```
+
+创建`docker-compose.yml`：
+
+```yaml
+version: '3.8'
+
+services:
+  frontend:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - backend
+      
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=mini_web
+    depends_on:
+      - db
+      
+  db:
+    image: postgres:14-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=mini_web
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      
+volumes:
+  postgres_data:
+```
+
+## 开发工作流最佳实践
+
+### 功能开发流程
+
+1. **创建新分支**：从`dev`分支创建功能分支，命名为`feature/功能名称`
+2. **本地开发**：完成开发并添加测试
+3. **运行测试**：确保单元测试和E2E测试通过
+4. **提交代码**：使用规范的提交信息，例如`feat(component): 添加用户列表组件`
+5. **创建Pull Request**：将功能分支合并到`dev`分支
+6. **代码审查**：由其他团队成员进行代码审查
+7. **自动化CI检查**：确保所有CI检查通过
+8. **合并代码**：合并到`dev`分支进行集成测试
+9. **发布**：定期将`dev`分支合并到`main`分支发布
+
+### 自动化测试流程
+
+1. **开发前编写测试**：采用测试驱动开发(TDD)方法
+2. **每日运行测试**：使用`yarn test`运行单元测试
+3. **提交前运行测试**：使用Husky在提交前自动运行测试
+4. **使用Mock数据**：为API请求创建Mock数据
+5. **定期运行E2E测试**：确保整体功能工作正常
+
+### 性能监控与改进
+
+1. **使用Lighthouse**：定期进行性能、可访问性和SEO检查
+2. **监控关键指标**：如首次内容绘制(FCP)、交互时间(TTI)等
+3. **性能预算**：设置性能预算并在CI中检查
+4. **代码分割优化**：使用React.lazy和Suspense优化加载
+5. **资源优化**：使用React 19的资源预加载API优化资源加载

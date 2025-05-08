@@ -1,0 +1,176 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# MCP工具使用指南
+
+## 1. MCP工具概述
+
+MCP（Model Control Protocol）工具集是一组强大的系统操作工具，专为自动化任务、系统配置和资源管理而设计。在Web远程连接平台中，MCP工具提供了一套统一的接口，用于文件操作、执行命令、管理系统资源和控制远程连接。
+
+### 1.1 主要工具类别
+
+- **文件操作工具**：读取、写入、编辑、删除文件
+- **命令执行工具**：执行系统命令、管理进程
+- **系统管理工具**：配置系统设置、管理服务
+- **连接控制工具**：建立和管理远程连接
+- **监控工具**：收集系统性能数据和日志
+
+## 2. 优先使用MCP工具的原则
+
+**核心原则：当MCP工具可用时，应优先使用MCP工具进行操作。**
+
+### 2.1 优先使用的原因
+
+- **一致性和可靠性**：MCP工具提供统一的接口和行为，确保操作结果的一致性
+- **优化的性能**：专为平台优化，提供更高效的执行路径
+- **增强的安全性**：内置权限检查和安全措施
+- **深度集成**：与系统其他组件无缝集成
+- **更好的错误处理**：提供详细的错误信息和恢复机制
+
+### 2.2 使用优先级
+
+1. 首先检查是否有适用的MCP工具
+2. 如果有，优先使用MCP工具完成任务
+3. 如无适用的MCP工具，或有特殊需求，可以使用其他工具
+
+## 3. MCP工具使用场景
+
+### 3.1 文件操作
+
+```javascript
+// 优先使用MCP文件操作工具
+mcp_desktop-commander_read_file({ path: "D:/absolute/path/to/file.txt" });
+mcp_desktop-commander_write_file({ path: "D:/absolute/path/to/file.txt", content: "新内容" });
+mcp_desktop-commander_edit_block({ file_path: "D:/absolute/path/to/file.txt", old_string: "旧文本", new_string: "新文本" });
+```
+
+### 3.2 命令执行
+
+```javascript
+// 优先使用MCP命令执行工具
+mcp_desktop-commander_execute_command({ command: "ls -la" });
+```
+
+### 3.3 系统管理
+
+```javascript
+// 优先使用MCP系统管理工具
+mcp_desktop-commander_list_processes({ random_string: "" });
+mcp_desktop-commander_kill_process({ pid: 1234 });
+```
+
+### 3.4 远程连接
+
+```javascript
+// 优先使用MCP远程连接工具
+mcp_playwright_browser_navigate({ url: "https://example.com" });
+// 其他远程操作工具...
+```
+
+## 4. 与其他工具结合使用
+
+### 4.1 灵活工具选择
+
+虽然优先使用MCP工具，但应保持工具选择的灵活性，可以使用任何工具来完成任务。在以下情况中，可以考虑使用其他工具：
+
+- MCP工具不支持特定功能
+- 特定场景下其他工具有明显优势
+- 集成第三方系统需要使用特定工具
+- 实验性功能需要非标准工具
+
+### 4.2 无缝切换策略
+
+```javascript
+// 优先尝试使用MCP工具
+try {
+  // 尝试使用MCP工具
+  result = mcp_desktop-commander_execute_command({ command: "specialized-command" });
+} catch (error) {
+  // 如果MCP工具不可用或失败，使用替代工具
+  result = alternativeToolExecution("specialized-command");
+}
+```
+
+## 5. 最佳实践和注意事项
+
+### 5.1 路径使用规范
+
+- **始终使用绝对路径**：所有MCP工具操作文件时，应使用绝对路径
+  ```javascript
+  // ✅ 正确
+  mcp_desktop-commander_read_file({ path: "D:/absolute/path/to/file.txt" });
+  
+  // ❌ 错误
+  mcp_desktop-commander_read_file({ path: "relative/path/to/file.txt" });
+  ```
+
+### 5.2 错误处理
+
+- 实现适当的错误捕获和处理
+- 提供有意义的错误信息
+- 设计合理的回退机制
+
+### 5.3 性能优化
+
+- 批量操作优先于多次单独操作
+- 避免不必要的文件读写
+- 合理使用缓存机制
+
+### 5.4 安全考虑
+
+- 遵循最小权限原则
+- 验证所有用户输入
+- 使用MCP工具内置的安全机制
+
+## 6. 实际应用示例
+
+### 6.1 文件管理模块
+
+```javascript
+// 文件列表获取
+const getFileList = async (directoryPath) => {
+  // 优先使用MCP工具
+  return await mcp_desktop-commander_list_directory({ path: directoryPath });
+};
+
+// 文件内容读取
+const readFileContent = async (filePath) => {
+  // 优先使用MCP工具
+  return await mcp_desktop-commander_read_file({ path: filePath });
+};
+
+// 文件搜索
+const searchInFiles = async (searchPath, pattern) => {
+  // 优先使用MCP工具
+  return await mcp_desktop-commander_search_code({
+    path: searchPath,
+    pattern: pattern,
+    ignoreCase: true
+  });
+};
+```
+
+### 6.2 远程连接模块
+
+```javascript
+// 建立SSH连接
+const establishSSHConnection = async (config) => {
+  // 优先使用MCP工具，如果存在的话
+  if (typeof mcp_ssh_connect !== 'undefined') {
+    return await mcp_ssh_connect(config);
+  } else {
+    // 使用替代方法
+    return await alternativeSSHConnect(config);
+  }
+};
+```
+
+## 7. 总结
+
+- **优先原则**：当MCP工具可用时，优先使用MCP工具进行操作
+- **灵活性**：可以使用任何工具完成任务，保持工具选择的灵活性
+- **最佳实践**：使用绝对路径，实现适当的错误处理，优化性能，注意安全
+- **持续更新**：随着MCP工具集的扩展，及时更新使用策略
+

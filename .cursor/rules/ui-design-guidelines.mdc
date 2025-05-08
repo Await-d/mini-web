@@ -1,0 +1,367 @@
+---
+description: UI设计规范与Ant Design 5最佳实践
+globs: frontend/src/**/*.tsx,frontend/src/**/*.ts,frontend/src/**/*.css,frontend/src/**/*.less
+alwaysApply: true
+---
+
+# UI设计规范与Ant Design 5使用指南
+
+## 设计原则
+
+### 简洁至上
+- 干净的界面设计，减少视觉噪音
+- 适当的留白，提高内容可读性
+- 避免不必要的装饰元素
+- 确保界面元素对齐一致
+
+### 实用性
+- 重要功能一目了然，易于发现
+- 操作流程简化，减少用户步骤
+- 提供清晰的反馈和状态指示
+- 确保适当的对比度和可访问性
+
+### 酷炫且有吸引力
+- 使用微妙的动效增强用户体验
+- 重要操作添加细致的过渡效果
+- 适当使用渐变色和阴影创造深度
+- 关键元素使用引人注目的设计
+
+## Ant Design 5集成
+
+### 安装与配置
+
+```bash
+# 安装Ant Design 5及相关依赖
+npm install antd @ant-design/icons @ant-design/cssinjs dayjs
+```
+
+### Vite配置
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  css: {
+    preprocessorOptions: {
+      less: {
+        javascriptEnabled: true,
+        // 自定义主题变量
+        modifyVars: {
+          'primary-color': '#1890ff',
+          'border-radius-base': '4px',
+        },
+      },
+    },
+  },
+});
+```
+
+### 基础组件使用规范
+
+- 使用`ConfigProvider`统一配置主题
+- 所有表单必须使用Form组件，利用其验证功能
+- 使用Space组件管理元素间距，保持布局一致性
+- 交互反馈使用Message、Notification或Modal组件
+
+```typescript
+// App.tsx 配置示例
+import { ConfigProvider } from 'antd';
+import zhCN from 'antd/locale/zh_CN';
+
+function App() {
+  return (
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        token: {
+          colorPrimary: '#1677ff',
+          borderRadius: 6,
+        },
+      }}
+    >
+      <AppContent />
+    </ConfigProvider>
+  );
+}
+```
+
+## 主题定制
+
+### 颜色系统
+
+- **主色调**: #1677ff (Ant Design默认蓝色)
+- **成功色**: #52c41a
+- **警告色**: #faad14
+- **错误色**: #ff4d4f
+- **中性色**: #00000073 (文本), #00000040 (次要文本), #00000014 (边框)
+
+### 自定义主题配置
+
+```typescript
+// theme.ts
+export const themeConfig = {
+  token: {
+    colorPrimary: '#1677ff',
+    colorSuccess: '#52c41a',
+    colorWarning: '#faad14',
+    colorError: '#ff4d4f',
+    colorTextBase: '#00000073',
+    fontSize: 14,
+    borderRadius: 6,
+    wireframe: false, // 开启无框风格
+  },
+  components: {
+    Button: {
+      colorPrimary: '#1677ff',
+      algorithm: true, // 启用算法
+    },
+    Card: {
+      colorBgContainer: '#ffffff',
+      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.03)',
+    },
+  },
+};
+```
+
+## 组件风格指南
+
+### 按钮
+
+- 主按钮使用`type="primary"`，用于页面主要操作
+- 次要按钮使用默认样式，用于辅助操作
+- 危险操作使用`danger`属性
+- 使用`size="large"`表示强调按钮
+
+```tsx
+<Button type="primary">主要操作</Button>
+<Button>次要操作</Button>
+<Button type="primary" danger>删除</Button>
+```
+
+### 表单
+
+- 使用垂直布局增强可读性
+- 表单项标签使用左对齐
+- 必填字段标记清晰
+- 验证错误提示具体明确
+
+```tsx
+<Form
+  layout="vertical"
+  requiredMark
+>
+  <Form.Item
+    label="用户名"
+    name="username"
+    rules={[{ required: true, message: '请输入用户名' }]}
+  >
+    <Input />
+  </Form.Item>
+</Form>
+```
+
+### 卡片与容器
+
+- 使用Card组件分组相关内容
+- 添加适当阴影增强层次感
+- 使用统一的圆角和边距
+
+```tsx
+<Card
+  title="数据统计"
+  bordered={false}
+  style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
+>
+  内容区域
+</Card>
+```
+
+### 表格
+
+- 使用斑马纹提高可读性
+- 关键列加粗或高亮显示
+- 操作列固定在右侧
+- 使用虚拟滚动优化大数据渲染
+
+```tsx
+<Table
+  columns={columns}
+  dataSource={dataSource}
+  rowKey="id"
+  pagination={{ pageSize: 10 }}
+  scroll={{ x: 'max-content' }}
+  style={{ borderRadius: 8, overflow: 'hidden' }}
+/>
+```
+
+## 响应式设计
+
+### 断点设置
+
+遵循Ant Design的响应式断点：
+- xs: < 576px (手机)
+- sm: ≥ 576px (平板)
+- md: ≥ 768px (小屏电脑)
+- lg: ≥ 992px (笔记本)
+- xl: ≥ 1200px (桌面)
+- xxl: ≥ 1600px (大屏)
+
+### Grid系统使用
+
+- 使用24栅格系统构建布局
+- 基于Row和Col组件实现响应式
+- 合理使用gutter设置栅格间距
+
+```tsx
+<Row gutter={[16, 16]}>
+  <Col xs={24} sm={12} md={8} lg={6} xl={4}>
+    <Card>内容1</Card>
+  </Col>
+  <Col xs={24} sm={12} md={8} lg={6} xl={4}>
+    <Card>内容2</Card>
+  </Col>
+</Row>
+```
+
+## 动效与交互
+
+### 微动效
+
+- 按钮点击使用波纹效果
+- 列表项添加hover效果
+- 内容加载使用骨架屏(Skeleton)
+- 重要数据变化使用数字滚动效果
+
+### 页面过渡
+
+- 页面切换使用淡入淡出效果
+- 模态框使用缩放效果
+- 抽屉使用滑动效果
+- 列表项使用动态进入/离开效果
+
+```tsx
+// 使用React 19的内置Transition
+import { Transition } from 'react';
+
+<Transition
+  appear={true}
+  in={visible}
+  timeout={300}
+  classNames="fade"
+  unmountOnExit
+>
+  <div className="modal-content">
+    内容区域
+  </div>
+</Transition>
+```
+
+## 图标使用
+
+### Ant Design图标库
+
+- 优先使用@ant-design/icons库中的图标
+- 保持图标风格统一
+- 合理设置图标大小和颜色
+
+```tsx
+import { HomeOutlined, UserOutlined, SettingFilled } from '@ant-design/icons';
+
+<HomeOutlined style={{ fontSize: '18px', color: '#1677ff' }} />
+```
+
+### 自定义图标
+
+- 使用SVG格式确保清晰度
+- 遵循官方设计规范
+- 自定义图标使用createFromIconfontCN方法
+
+```tsx
+import { createFromIconfontCN } from '@ant-design/icons';
+
+const IconFont = createFromIconfontCN({
+  scriptUrl: '//at.alicdn.com/t/font_8d5l8fzk5b87iudi.js',
+});
+
+<IconFont type="icon-example" />
+```
+
+## 布局方案
+
+### 常用布局
+
+- 后台管理系统：使用Layout组件实现侧边栏+顶栏+内容区
+- 数据展示页：使用卡片网格布局
+- 详情页：使用Descriptions、Steps等组件清晰展示信息
+
+```tsx
+// 管理系统布局示例
+import { Layout, Menu } from 'antd';
+const { Header, Sider, Content } = Layout;
+
+<Layout style={{ minHeight: '100vh' }}>
+  <Sider>
+    <Menu theme="dark" mode="inline" />
+  </Sider>
+  <Layout>
+    <Header />
+    <Content style={{ margin: '24px 16px', padding: 24, background: '#fff' }}>
+      页面内容
+    </Content>
+  </Layout>
+</Layout>
+```
+
+## 加载状态设计
+
+### 全局加载
+
+- 页面初始加载使用居中Spin
+- 区域加载使用骨架屏(Skeleton)
+- 按钮加载状态使用loading属性
+
+```tsx
+// 页面加载
+<div className="loading-container">
+  <Spin size="large" tip="加载中..." />
+</div>
+
+// 按钮加载
+<Button type="primary" loading={isLoading}>
+  提交
+</Button>
+```
+
+### 渐进式加载
+
+- 列表使用虚拟滚动
+- 图片使用懒加载
+- 大数据使用分页加载
+
+## 暗色模式支持
+
+使用Ant Design 5的暗色模式支持：
+
+```tsx
+import { ConfigProvider, theme } from 'antd';
+
+function App() {
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  
+  return (
+    <ConfigProvider
+      theme={{
+        algorithm: isDarkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
+      }}
+    >
+      <AppContent />
+      <Button onClick={() => setIsDarkMode(!isDarkMode)}>
+        切换{isDarkMode ? '亮色' : '暗色'}模式
+      </Button>
+    </ConfigProvider>
+  );
+}
+```
