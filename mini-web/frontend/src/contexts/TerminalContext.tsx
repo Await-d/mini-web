@@ -118,9 +118,21 @@ function terminalReducer(state: TerminalState, action: TerminalAction): Terminal
   }
 }
 
+// 创建一个全局引用，确保能够直接访问最新状态
+export const terminalStateRef = { 
+  current: { tabs: [], activeTabKey: 'no-tabs' }
+};
+
 // 终端上下文提供者
 export const TerminalProvider: React.FC<TerminalProviderProps> = ({ children }) => {
-  const [state, dispatch] = useReducer(terminalReducer, {
+  const [state, dispatch] = useReducer((state, action) => {
+    // 使用原始reducer处理状态
+    const newState = terminalReducer(state, action);
+    // 立即更新引用
+    terminalStateRef.current = newState;
+    console.log('【TerminalContext】状态已更新，当前标签数:', newState.tabs.length);
+    return newState;
+  }, {
     tabs: [],
     activeTabKey: 'no-tabs' // 使用一个不可能重复的初始key
   });
@@ -159,18 +171,31 @@ export const TerminalProvider: React.FC<TerminalProviderProps> = ({ children }) 
     console.log('【TerminalContext】派发添加标签动作，新标签Key:', newTabKey);
     dispatch({ type: 'ADD_TAB', payload: newTab });
     
-    // 添加此行确保状态立即更新并可访问
-    console.log('【TerminalContext】添加标签后，当前标签数:', state.tabs.length + 1);
+    // 重要：直接修改引用，确保其他组件可以立即访问最新状态
+    terminalStateRef.current.tabs = [...terminalStateRef.current.tabs, newTab];
+    terminalStateRef.current.activeTabKey = newTabKey;
+    
+    console.log('【TerminalContext】添加标签后，当前状态:', {
+      contextTabs: state.tabs.length + 1,
+      refTabs: terminalStateRef.current.tabs.length
+    });
     
     // 延迟验证标签是否成功添加
     setTimeout(() => {
-      const tabAdded = state.tabs.some(tab => tab.key === newTabKey);
+      // 使用引用检查，不依赖可能尚未更新的state
+      const tabAdded = terminalStateRef.current.tabs.some(tab => tab.key === newTabKey);
       console.log(`【TerminalContext】验证标签添加状态: ${tabAdded ? '成功' : '失败'}`);
       if (!tabAdded) {
         console.error('【TerminalContext】标签可能未成功添加，重试一次');
         dispatch({ type: 'ADD_TAB', payload: newTab });
+        // 强制更新引用
+        terminalStateRef.current.tabs = [...terminalStateRef.current.tabs, newTab];
+        terminalStateRef.current.activeTabKey = newTabKey;
       }
     }, 100);
+    
+    // 立即返回新创建的标签key
+    return newTabKey;
   };
 
   // 关闭标签

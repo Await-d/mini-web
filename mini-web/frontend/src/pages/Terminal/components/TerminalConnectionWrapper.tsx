@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { useTerminalConnection } from '../hooks/useTerminalConnection';
+import { terminalStateRef } from '../../../contexts/TerminalContext';
 
 interface TerminalConnectionWrapperProps {
   onConnectionReady: (connectionProps: any) => void;
@@ -18,14 +19,30 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
   // 当连接属性可用时通知父组件
   useEffect(() => {
     if (connectionProps) {
+      // 使用状态引用增强连接属性
+      const enhancedProps = {
+        ...connectionProps,
+        // 如果引用中有更多标签，使用引用中的状态
+        tabs: terminalStateRef.current.tabs.length > (connectionProps.tabs?.length || 0) 
+          ? terminalStateRef.current.tabs 
+          : connectionProps.tabs,
+        // 如果引用中有有效的activeTabKey而连接属性中没有，使用引用中的
+        activeTabKey: connectionProps.activeTabKey === 'no-tabs' && terminalStateRef.current.activeTabKey !== 'no-tabs'
+          ? terminalStateRef.current.activeTabKey
+          : connectionProps.activeTabKey
+      };
+      
       console.log('【连接包装器】连接属性准备就绪，传递给主组件', {
-        hasConnection: !!connectionProps.connection,
-        tabsCount: connectionProps.tabs?.length || 0,
-        activeTabKey: connectionProps.activeTabKey,
-        isConnected: connectionProps.isConnected,
-        allProperties: Object.keys(connectionProps)
+        hasConnection: !!enhancedProps.connection,
+        tabsCount: enhancedProps.tabs?.length || 0,
+        contextTabsCount: connectionProps.tabs?.length || 0,
+        refTabsCount: terminalStateRef.current.tabs.length,
+        activeTabKey: enhancedProps.activeTabKey,
+        isConnected: enhancedProps.isConnected,
+        allProperties: Object.keys(enhancedProps)
       });
-      onConnectionReady(connectionProps);
+      
+      onConnectionReady(enhancedProps);
     } else {
       console.log('【连接包装器】连接属性尚未就绪');
     }

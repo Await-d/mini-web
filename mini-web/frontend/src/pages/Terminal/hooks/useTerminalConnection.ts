@@ -4,6 +4,7 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { connectionAPI, sessionAPI } from '../../../services/api';
 import type { Connection } from '../../../services/api';
 import { useTerminal } from '../../../contexts/TerminalContext';
+import { terminalStateRef } from '../../../contexts/TerminalContext';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
 import type { WindowSize } from '../utils/terminalConfig';
 
@@ -182,15 +183,33 @@ export const useTerminalConnection = () => {
 
             if (!existingTab) {
               console.log(`【连接流程】调用addTab创建新标签，连接ID=${conn.id}，会话ID=${session.id}`);
-              // 使用上下文管理器添加标签
-              addTab(conn.id, session.id, conn);
+              // 使用上下文管理器添加标签，获取返回的标签key
+              const newTabKey = addTab(conn.id, session.id, conn);
               
-              console.log(`【连接流程】添加标签后，当前标签数量: ${tabs.length}`);
-              // 如果标签列表未更新，使用setTimeout验证
-              if (tabs.length === 0) {
+              // 使用全局引用直接检查状态
+              console.log(`【连接流程】添加标签后，当前状态:`, {
+                contextTabs: tabs.length,
+                refTabs: terminalStateRef.current.tabs.length,
+                newTabKey
+              });
+              
+              // 立即强制激活标签，不等待状态更新
+              if (newTabKey && terminalStateRef.current.tabs.length > 0) {
+                console.log(`【连接流程】立即强制激活标签: ${newTabKey}`);
+                setActiveTab(newTabKey);
+                
+                // 手动更新activeTabKey状态，以便后续处理
+                const tabRef = terminalStateRef.current.tabs.find(t => t.key === newTabKey);
+                if (tabRef) {
+                  console.log('【连接流程】已找到标签引用，可供后续处理');
+                }
+              } else if (tabs.length === 0) {
                 console.log('【连接流程】标签列表为空，将在1秒后检查状态');
                 setTimeout(() => {
-                  console.log(`【连接流程】延迟检查，当前标签数量: ${tabs.length}`);
+                  console.log(`【连接流程】延迟检查:`, {
+                    contextTabs: tabs.length, 
+                    refTabs: terminalStateRef.current.tabs.length
+                  });
                 }, 1000);
               }
             } else {
@@ -347,7 +366,20 @@ export const useTerminalConnection = () => {
   // 标签切换时初始化终端并连接WebSocket
   useEffect(() => {
     console.log(`【连接调试】检测到活动标签页变化，尝试执行初始化和连接: ${activeTabKey || 'no-tabs'}`);
-    console.log(`【连接调试】当前标签页列表:`, tabs.map(t => ({
+    
+    // 检查全局引用中的标签列表
+    const refTabs = terminalStateRef.current.tabs;
+    console.log(`【连接调试】状态比较:`, {
+      contextTabs: tabs.length,
+      refTabs: refTabs.length,
+      contextActiveKey: activeTabKey,
+      refActiveKey: terminalStateRef.current.activeTabKey
+    });
+    
+    // 优先使用引用中的标签列表，防止状态延迟更新问题
+    const tabsToUse = refTabs.length > tabs.length ? refTabs : tabs;
+    
+    console.log(`【连接调试】当前标签页列表:`, tabsToUse.map(t => ({
       key: t.key,
       connectionId: t.connectionId,
       sessionId: t.sessionId,
@@ -357,7 +389,15 @@ export const useTerminalConnection = () => {
       protocol: t.connection?.protocol
     })));
     
-    const activeTab = tabs.find(tab => tab.key === activeTabKey);
+    // 优先使用引用查找活动标签
+    let activeTab;
+    if (activeTabKey !== 'no-tabs') {
+      activeTab = tabsToUse.find(tab => tab.key === activeTabKey);
+    } else if (terminalStateRef.current.activeTabKey !== 'no-tabs') {
+      // 使用引用中的activeTabKey作为备选
+      activeTab = tabsToUse.find(tab => tab.key === terminalStateRef.current.activeTabKey);
+    }
+    
     if (!activeTab || !activeTab.terminalRef?.current) {
       console.log(`【连接调试】跳过初始化: activeTab ${activeTab ? '存在' : '不存在'}, terminalRef ${activeTab?.terminalRef?.current ? '存在' : '不存在'}`);
       
@@ -375,6 +415,7 @@ export const useTerminalConnection = () => {
         });
       } else {
         console.log(`【连接调试】未找到活动标签页，activeTabKey:`, activeTabKey);
+        console.log(`【连接调试】引用中的activeTabKey:`, terminalStateRef.current.activeTabKey);
       }
       return;
     }
