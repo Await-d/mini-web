@@ -279,11 +279,36 @@ export const useTerminalConnection = () => {
 
   // 标签切换时初始化终端并连接WebSocket
   useEffect(() => {
-    console.log(`检测到活动标签页变化，尝试执行初始化和连接: ${activeTabKey}`);
+    console.log(`【连接调试】检测到活动标签页变化，尝试执行初始化和连接: ${activeTabKey || 'no-tabs'}`);
+    console.log(`【连接调试】当前标签页列表:`, tabs.map(t => ({
+      key: t.key,
+      connectionId: t.connectionId,
+      sessionId: t.sessionId,
+      hasTerminalRef: !!t.terminalRef?.current,
+      hasXtermRef: !!t.xtermRef?.current,
+      isConnected: t.isConnected,
+      protocol: t.connection?.protocol
+    })));
     
     const activeTab = tabs.find(tab => tab.key === activeTabKey);
     if (!activeTab || !activeTab.terminalRef?.current) {
-      console.log(`跳过初始化: activeTab ${activeTab ? '存在' : '不存在'}, terminalRef ${activeTab?.terminalRef?.current ? '存在' : '不存在'}`);
+      console.log(`【连接调试】跳过初始化: activeTab ${activeTab ? '存在' : '不存在'}, terminalRef ${activeTab?.terminalRef?.current ? '存在' : '不存在'}`);
+      
+      if (activeTab) {
+        console.log(`【连接调试】活动标签页详情:`, {
+          key: activeTab.key,
+          connectionId: activeTab.connectionId,
+          sessionId: activeTab.sessionId,
+          hasRefs: {
+            terminalRef: !!activeTab.terminalRef?.current,
+            xtermRef: !!activeTab.xtermRef?.current,
+            webSocketRef: !!activeTab.webSocketRef?.current,
+            fitAddonRef: !!activeTab.fitAddonRef?.current
+          }
+        });
+      } else {
+        console.log(`【连接调试】未找到活动标签页，activeTabKey:`, activeTabKey);
+      }
       return;
     }
     

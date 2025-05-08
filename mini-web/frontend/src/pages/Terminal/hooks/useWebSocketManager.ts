@@ -19,7 +19,20 @@ export const useWebSocketManager = () => {
     onRetryInterface: () => void
   ) => {
     if (!activeTab || !activeTab.terminalRef?.current || !activeTab.xtermRef?.current) {
-      console.error('创建WebSocket连接失败：缺少必要参数');
+      console.error('【WebSocket调试】创建WebSocket连接失败：缺少必要参数');
+      console.log('【WebSocket调试】标签页详情:', {
+        key: activeTab?.key,
+        connectionId: activeTab?.connectionId,
+        sessionId: activeTab?.sessionId,
+        hasTerminalRef: !!activeTab?.terminalRef?.current,
+        hasXtermRef: !!activeTab?.xtermRef?.current,
+        hasWebSocketRef: !!activeTab?.webSocketRef?.current,
+        connectionInfo: activeTab?.connection ? {
+          protocol: activeTab.connection.protocol,
+          host: activeTab.connection.host,
+          port: activeTab.connection.port
+        } : 'connection不存在'
+      });
       return false;
     }
     
@@ -29,7 +42,11 @@ export const useWebSocketManager = () => {
       // 确保连接信息存在
       if (!activeTab.sessionId || !activeTab.connection) {
         const errorMsg = '无法连接：会话ID或连接信息不存在';
-        console.error(errorMsg, { sessionId: activeTab.sessionId });
+        console.error('【WebSocket调试】' + errorMsg, { 
+          sessionId: activeTab.sessionId,
+          connection: activeTab.connection ? '存在' : '不存在',
+          connectionDetails: activeTab.connection
+        });
         term.writeln(`\r\n\x1b[31m${errorMsg}\x1b[0m`);
         return false;
       }
@@ -57,7 +74,16 @@ export const useWebSocketManager = () => {
       let wsUrl = `${wsProtocol}//${backendUrl}:${backendPort}/ws/${protocol}/${activeTab.sessionId}`;
       wsUrl = `${wsUrl}?token=${encodeURIComponent(token)}`;
       
-      console.log('创建WebSocket连接:', wsUrl);
+      console.log('【WebSocket调试】创建WebSocket连接:', wsUrl);
+      console.log('【WebSocket调试】连接参数:', {
+        协议: protocol,
+        主机: activeTab.connection.host,
+        端口: activeTab.connection.port,
+        用户名: activeTab.connection.username,
+        会话ID: activeTab.sessionId,
+        后端地址: `${backendUrl}:${backendPort}`,
+        连接时间: new Date().toLocaleTimeString()
+      });
       term.writeln(`\r\n\x1b[33m连接到: ${wsUrl}\x1b[0m`);
       
       // 将URL保存到window对象便于调试

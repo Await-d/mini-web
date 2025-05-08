@@ -41,6 +41,12 @@ const Terminal: React.FC = () => {
   
   // 处理连接组件就绪时的回调
   const handleConnectionReady = React.useCallback((props: any) => {
+    console.log('【主组件调试】终端连接组件就绪，接收到的属性:', {
+      hasConnection: !!props.connection,
+      tabsCount: props.tabs?.length || 0,
+      activeTabKey: props.activeTabKey,
+      isConnected: props.isConnected
+    });
     setConnectionProps(props);
     setLoading(false);
   }, []);

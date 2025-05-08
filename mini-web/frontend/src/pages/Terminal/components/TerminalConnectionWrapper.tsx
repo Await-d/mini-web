@@ -18,7 +18,16 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
   // 当连接属性可用时通知父组件
   useEffect(() => {
     if (connectionProps) {
+      console.log('【连接包装器】连接属性准备就绪，传递给主组件', {
+        hasConnection: !!connectionProps.connection,
+        tabsCount: connectionProps.tabs?.length || 0,
+        activeTabKey: connectionProps.activeTabKey,
+        isConnected: connectionProps.isConnected,
+        allProperties: Object.keys(connectionProps)
+      });
       onConnectionReady(connectionProps);
+    } else {
+      console.log('【连接包装器】连接属性尚未就绪');
     }
   }, [connectionProps, onConnectionReady]);
   
