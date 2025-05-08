@@ -127,6 +127,13 @@ export const TerminalProvider: React.FC<TerminalProviderProps> = ({ children }) 
 
   // 添加新标签
   const addTab = (connectionId: number, sessionId: number, connection: Connection) => {
+    console.log('【TerminalContext】添加新标签:', {
+      connectionId,
+      sessionId,
+      connectionName: connection.name,
+      protocol: connection.protocol
+    });
+
     // 使用时间戳和随机数生成唯一的标签key
     const newTabKey = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -149,7 +156,21 @@ export const TerminalProvider: React.FC<TerminalProviderProps> = ({ children }) 
       isGraphical: isGraphical
     };
 
+    console.log('【TerminalContext】派发添加标签动作，新标签Key:', newTabKey);
     dispatch({ type: 'ADD_TAB', payload: newTab });
+    
+    // 添加此行确保状态立即更新并可访问
+    console.log('【TerminalContext】添加标签后，当前标签数:', state.tabs.length + 1);
+    
+    // 延迟验证标签是否成功添加
+    setTimeout(() => {
+      const tabAdded = state.tabs.some(tab => tab.key === newTabKey);
+      console.log(`【TerminalContext】验证标签添加状态: ${tabAdded ? '成功' : '失败'}`);
+      if (!tabAdded) {
+        console.error('【TerminalContext】标签可能未成功添加，重试一次');
+        dispatch({ type: 'ADD_TAB', payload: newTab });
+      }
+    }, 100);
   };
 
   // 关闭标签

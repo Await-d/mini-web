@@ -87,12 +87,24 @@ export const useTerminalConnection = () => {
 
   // 清理URL中的查询参数，但保留连接ID，以便刷新页面后能恢复会话
   const cleanURL = useCallback(() => {
-    console.log("清理URL参数...");
+    console.log("【连接流程】清理URL参数...");
     // 获取当前路径名
     const currentPath = window.location.pathname;
 
     // 检查当前活动的标签页
     const activeTab = tabs.find(tab => tab.key === activeTabKey);
+
+    // 标签信息调试
+    console.log("【连接流程】清理URL时的标签状态:", {
+      activeTabKey,
+      tabsCount: tabs.length,
+      hasActiveTab: !!activeTab,
+      activeTabDetails: activeTab ? {
+        connectionId: activeTab.connectionId,
+        sessionId: activeTab.sessionId,
+        key: activeTab.key
+      } : 'none'
+    });
 
     // 保存会话信息到localStorage，确保刷新页面时可以恢复
     if (activeTab) {
@@ -104,32 +116,58 @@ export const useTerminalConnection = () => {
         connectionName: activeTab.connection?.name,
         isConnected: activeTab.isConnected
       }));
+      console.log("【连接流程】会话信息已保存到localStorage");
+    } else {
+      console.warn("【连接流程】无法保存会话信息，activeTab不存在");
+      // 保留URL参数直到标签创建成功
+      if (tabs.length === 0) {
+        console.log("【连接流程】标签列表为空，暂不清理URL参数");
+        return;
+      }
     }
 
     // 使用replace模式导航，不会新增历史记录
+    console.log("【连接流程】执行URL清理，导航到:", currentPath);
     navigate(currentPath, { replace: true });
   }, [activeTabKey, navigate, tabs]);
 
   // 加载连接信息并创建标签
   useEffect(() => {
     const fetchConnectionAndCreateTab = async () => {
-      if (!connectionId) return;
+      if (!connectionId) {
+        console.log('【连接流程】无连接ID，跳过创建标签');
+        return;
+      }
+      
+      console.log(`【连接流程】开始获取连接信息和创建标签，连接ID=${connectionId}`);
 
       try {
+        console.log(`【连接流程】请求连接API获取连接信息，ID=${connectionId}`);
         const response = await connectionAPI.getConnection(Number(connectionId));
+        
         if (response.data && response.data.code === 200) {
           const conn = response.data.data;
+          console.log('【连接流程】成功获取连接信息:', {
+            id: conn.id,
+            name: conn.name,
+            protocol: conn.protocol,
+            host: conn.host
+          });
           setConnection(conn);
 
           // 如果URL中包含会话ID，使用它；否则创建新会话
           let session = null;
           if (sessionParam) {
+            console.log(`【连接流程】使用URL中的会话ID: ${sessionParam}`);
             session = { id: Number(sessionParam) };
           } else {
+            console.log(`【连接流程】为连接创建新会话, 连接ID=${conn.id}`);
             const sessResponse = await sessionAPI.createSession(conn.id);
             if (sessResponse.data && sessResponse.data.code === 200) {
               session = sessResponse.data.data;
+              console.log(`【连接流程】成功创建新会话，ID=${session.id}`);
             } else {
+              console.error('【连接流程】创建会话失败:', sessResponse.data);
               message.error('创建会话失败');
               return;
             }
@@ -137,24 +175,37 @@ export const useTerminalConnection = () => {
 
           if (session) {
             // 检查是否已存在相同的标签
+            console.log(`【连接流程】检查标签是否已存在，连接ID=${conn.id}，会话ID=${session.id}`);
             const existingTab = tabs.find(
               tab => tab.connectionId === conn.id && tab.sessionId === session?.id
             );
 
             if (!existingTab) {
+              console.log(`【连接流程】调用addTab创建新标签，连接ID=${conn.id}，会话ID=${session.id}`);
               // 使用上下文管理器添加标签
               addTab(conn.id, session.id, conn);
+              
+              console.log(`【连接流程】添加标签后，当前标签数量: ${tabs.length}`);
+              // 如果标签列表未更新，使用setTimeout验证
+              if (tabs.length === 0) {
+                console.log('【连接流程】标签列表为空，将在1秒后检查状态');
+                setTimeout(() => {
+                  console.log(`【连接流程】延迟检查，当前标签数量: ${tabs.length}`);
+                }, 1000);
+              }
             } else {
+              console.log(`【连接流程】已存在标签，激活标签，Key=${existingTab.key}`);
               // 如果已存在，只激活该标签
               setActiveTab(existingTab.key);
             }
           }
         } else {
+          console.error('【连接流程】获取连接信息失败:', response.data);
           message.error('获取连接信息失败');
           navigate('/connections');
         }
       } catch (error) {
-        console.error('获取连接信息失败:', error);
+        console.error('【连接流程】获取连接信息出现异常:', error);
         message.error('获取连接信息失败，请稍后再试');
         navigate('/connections');
       }
@@ -179,14 +230,30 @@ export const useTerminalConnection = () => {
       );
 
       if (!existingTab) {
-        console.log("未找到匹配的标签页，创建新标签...");
-        // 创建新标签页
-        fetchConnectionAndCreateTab().then(() => {
-          // 成功创建后清理URL中的查询参数，但保留连接ID
-          cleanURL();
-        });
+        console.log("【连接流程】未找到匹配的标签页，创建新标签...");
+        
+        // 延迟创建标签，确保组件已完全挂载
+        setTimeout(() => {
+          console.log("【连接流程】执行延迟创建新标签操作");
+          // 创建新标签页
+          fetchConnectionAndCreateTab().then(() => {
+            console.log("【连接流程】创建标签页完成，标签数量:", tabs.length);
+            
+            // 再次验证标签是否成功创建
+            if (tabs.length > 0) {
+              console.log("【连接流程】标签创建成功，清理URL");
+              cleanURL();
+            } else {
+              console.error("【连接流程】标签未成功创建，将重试");
+              // 添加重试逻辑
+              setTimeout(() => fetchConnectionAndCreateTab(), 1000);
+            }
+          }).catch(err => {
+            console.error("【连接流程】创建标签页失败:", err);
+          });
+        }, 500);
       } else {
-        console.log(`找到匹配的标签页: ${existingTab.key}，激活此标签`);
+        console.log(`【连接流程】找到匹配的标签页: ${existingTab.key}，激活此标签`);
         // 如果已存在，只激活该标签并清理URL
         setActiveTab(existingTab.key);
         cleanURL();
