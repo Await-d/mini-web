@@ -1,0 +1,39 @@
+{
+  "name": "mini-web-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.2.6",
+    "antd": "^5.12.5",
+    "axios": "^1.6.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.21.1",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
+    "xterm-addon-search": "^0.13.0",
+    "xterm-addon-web-links": "^0.9.0",
+    "xterm-addon-webgl": "^0.16.0"
+  },
+  "devDependencies": {
+    "@ant-design/compatible": "^5.1.4",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.14.0",
+    "@typescript-eslint/parser": "^6.14.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "@vitejs/plugin-react-swc": "^3.9.0",
+    "eslint": "^8.55.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.8"
+  }
+}

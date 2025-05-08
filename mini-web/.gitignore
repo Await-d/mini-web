@@ -1,0 +1,45 @@
+# 前端忽略文件
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+frontend/coverage/
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# 后端忽略文件
+backend/bin/
+backend/vendor/
+backend/node_modules/
+backend/.env
+backend/.env.local
+
+# 系统和IDE文件
+.DS_Store
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 日志文件
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 临时文件
+*.tmp
+tmp/
+temp/
+
+# 二进制文件
+*.exe
+*.dll
+*.so
+*.dylib

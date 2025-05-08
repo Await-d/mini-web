@@ -1,0 +1,47 @@
+.container {
+  width: 100%;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.statusBadge {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.statusActive {
+  background-color: #52c41a;
+  box-shadow: 0 0 0 2px rgba(82, 196, 26, 0.2);
+}
+
+.statusClosed {
+  background-color: #d9d9d9;
+}
+
+.sessionFilterBar {
+  margin-bottom: 16px;
+  display: flex;
+  gap: 8px;
+}
+
+.sessionCard {
+  margin-bottom: 16px;
+}
+
+.sessionMeta {
+  margin-top: 8px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+
+.sessionDetails {
+  margin-top: 16px;
+}

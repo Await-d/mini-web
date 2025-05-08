@@ -1,0 +1,69 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+}
+
+.loginContainer {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+}
+
+.loginCard {
+  width: 100%;
+  max-width: 400px;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+}
+
+.logoContainer {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.logo {
+  font-size: 28px;
+  font-weight: bold;
+  color: #1677ff;
+  background: -webkit-linear-gradient(315deg, #1677ff 0%, #69c0ff 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.title {
+  text-align: center;
+  margin-bottom: 8px !important;
+}
+
+.subtitle {
+  display: block;
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.loginForm {
+  margin-top: 24px;
+}
+
+.forgotContainer {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.otherLogin {
+  display: flex;
+  justify-content: center;
+}
+
+.copyright {
+  text-align: center;
+  padding: 24px;
+  color: rgba(0, 0, 0, 0.45);
+}
