@@ -455,7 +455,7 @@ export const useTerminalConnection = () => {
     }
 
     // 清理URL参数后仍然保持终端连接
-    if (!hasTabsInRef && !hasTabsInContext && !connectionId && savedSession && (idsFromUrl.connectionId || connectionParams?.connectionId)) {
+    if (!hasTabsInRef && !hasTabsInContext && !connectionId && savedSession) {
       console.log('【连接流程】URL清理后发现连接丢失，尝试恢复连接');
 
       // 从本地存储获取会话信息
@@ -636,7 +636,11 @@ export const useTerminalConnection = () => {
                 // 定义重连函数，确保它被正确定义
                 const reconnectFunction = () => {
                   console.log('执行重连函数...');
-                  createWebSocketConnection(currentActiveTab, onConnectionHelp, onRetryInterface);
+                  createWebSocketConnection(
+                    currentActiveTab.connectionId,
+                    currentActiveTab.sessionId,
+                    currentActiveTab.key
+                  );
                 };
 
                 // 保存重连函数到全局，确保可被其他地方调用
@@ -644,15 +648,41 @@ export const useTerminalConnection = () => {
                   (window as any).reconnectTerminal = reconnectFunction;
                 }
 
-                const onConnectionHelp = () => createConnectionHelp(currentActiveTab, reconnectFunction);
+                const onConnectionHelp = () => {
+                  createConnectionHelp(currentActiveTab, () => {
+                    createWebSocketConnection(
+                      currentActiveTab.connectionId,
+                      currentActiveTab.sessionId,
+                      currentActiveTab.key
+                    );
+                  });
+                };
 
-                const onRetryInterface = () => createRetryInterface(currentActiveTab,
-                  reconnectFunction,
-                  () => createConnectionHelp(currentActiveTab, reconnectFunction)
-                );
+                const onRetryInterface = () => {
+                  createRetryInterface(
+                    currentActiveTab,
+                    () => createWebSocketConnection(
+                      currentActiveTab.connectionId,
+                      currentActiveTab.sessionId,
+                      currentActiveTab.key
+                    ),
+                    () => createConnectionHelp(
+                      currentActiveTab,
+                      () => createWebSocketConnection(
+                        currentActiveTab.connectionId,
+                        currentActiveTab.sessionId,
+                        currentActiveTab.key
+                      )
+                    )
+                  );
+                };
 
                 // 立即尝试连接
-                createWebSocketConnection(currentActiveTab, onConnectionHelp, onRetryInterface);
+                createWebSocketConnection(
+                  currentActiveTab.connectionId,
+                  currentActiveTab.sessionId,
+                  currentActiveTab.key
+                );
 
                 // 更新标签状态
                 const updatedTab = {
@@ -791,21 +821,42 @@ export const useTerminalConnection = () => {
     registerGlobalHelpers(activeTab);
 
     // 尝试建立WebSocket连接
-    const onConnectionHelp = () => createConnectionHelp(activeTab, () => {
-      createWebSocketConnection(activeTab,
-        () => createConnectionHelp(activeTab, () => createWebSocketConnection(activeTab, onConnectionHelp, onRetryInterface)),
-        onRetryInterface
-      );
-    });
+    const onConnectionHelp = () => {
+      createConnectionHelp(activeTab, () => {
+        createWebSocketConnection(
+          activeTab.connectionId,
+          activeTab.sessionId,
+          activeTab.key
+        );
+      });
+    };
 
-    const onRetryInterface = () => createRetryInterface(activeTab,
-      () => createWebSocketConnection(activeTab, onConnectionHelp, onRetryInterface),
-      () => createConnectionHelp(activeTab, () => createWebSocketConnection(activeTab, onConnectionHelp, onRetryInterface))
-    );
+    const onRetryInterface = () => {
+      createRetryInterface(
+        activeTab,
+        () => createWebSocketConnection(
+          activeTab.connectionId,
+          activeTab.sessionId,
+          activeTab.key
+        ),
+        () => createConnectionHelp(
+          activeTab,
+          () => createWebSocketConnection(
+            activeTab.connectionId,
+            activeTab.sessionId,
+            activeTab.key
+          )
+        )
+      );
+    };
 
     // 立即尝试连接
     console.log('尝试建立WebSocket连接...');
-    createWebSocketConnection(activeTab, onConnectionHelp, onRetryInterface);
+    createWebSocketConnection(
+      activeTab.connectionId,
+      activeTab.sessionId,
+      activeTab.key
+    );
 
     // 清理函数
     return () => {
@@ -990,7 +1041,7 @@ export const useTerminalConnection = () => {
           if (initialized) {
             console.log(`【事件响应】终端初始化成功，准备连接`);
 
-            // 准备连接
+            // 准备连接 - 使用参数形式2: connectionId, sessionId, tabKey
             createWebSocketConnection(
               tab.connectionId,
               tab.sessionId,
