@@ -1,0 +1,83 @@
+---
+description: 远程连接终端标签页问题修复指南
+globs: 
+alwaysApply: true
+---
+
+# 远程连接终端标签页问题修复指南
+
+## 问题描述
+
+在点击左侧树形结构数据（连接）后，系统应该在右侧创建一个新的标签页（tab），但当前这个功能存在问题。该问题主要出现在用户与树形连接列表交互时，点击后无法正确创建和显示标签页。
+
+## 相关组件
+
+### 关键文件
+
+1. [前端连接包装器组件](/home/await/project/mini-web/mini-web/frontend/src/pages/Terminal/components/TerminalConnectionWrapper.tsx)
+   - 负责连接数据的传递和状态管理
+   - 确保tabs数组正确传递给子组件
+
+2. [标签页定义类型](/home/await/project/mini-web/mini-web/frontend/src/pages/Terminal/Terminal.d.ts)
+   - 定义了标签页相关的接口和类型
+   - 包含`TerminalConnectionWrapperProps`接口
+
+3. [主终端组件](/home/await/project/mini-web/mini-web/frontend/src/pages/Terminal/index.tsx)
+   - 使用`TerminalConnectionWrapper`组件
+   - 渲染终端标签页和内容
+
+4. [标签页组件](/home/await/project/mini-web/mini-web/frontend/src/pages/Terminal/components/TerminalTabs.tsx)
+   - 负责标签页的实际渲染和交互
+
+5. [终端上下文](/home/await/project/mini-web/mini-web/frontend/src/contexts/TerminalContext.tsx)
+   - 管理终端标签的状态
+   - 提供标签页增删改查的操作接口
+
+## 问题修复方案
+
+关键修复点在于确保`TerminalConnectionWrapper`组件正确地将`tabs`数组从`useTerminalConnection` hook传递给子组件。原代码中`childProps`对象只包含了基本状态信息，缺少完整的`tabs`数组传递：
+
+```typescript
+// 修改前
+const childProps: ConnectionChildProps = {
+  hasConnection: !!connectionProps.connection,
+  tabsCount: connectionProps.tabs?.length || 0,
+  activeTabKey: connectionProps.activeTabKey || 'no-tabs',
+  isConnected: connectionProps.isConnected || false
+};
+```
+
+修复后的代码确保了完整的属性传递：
+
+```typescript
+// 修改后
+const childProps: ConnectionChildProps = {
+  hasConnection: !!connectionProps.connection,
+  tabsCount: connectionProps.tabs?.length || 0,
+  activeTabKey: connectionProps.activeTabKey || 'no-tabs',
+  isConnected: connectionProps.isConnected || false,
+  // 添加完整的tabs数组和其他属性
+  tabs: connectionProps.tabs || terminalStateRef.current.tabs || [],
+  connection: connectionProps.connection,
+  fullscreen: connectionProps.fullscreen,
+  terminalSize: connectionProps.terminalSize,
+  networkLatency: connectionProps.networkLatency,
+  terminalMode: connectionProps.terminalMode,
+  sidebarCollapsed: connectionProps.sidebarCollapsed,
+  toggleFullscreen: connectionProps.toggleFullscreen,
+  sendDataToServer: connectionProps.sendDataToServer
+};
+```
+
+同时，为了处理类型兼容性问题，需要在`Terminal.d.ts`中修改`networkLatency`属性的类型，使其支持`null`值：
+
+```typescript
+networkLatency?: number | null;  // 修改为允许null
+```
+
+## 注意事项
+
+1. 项目启动和构建仍由用户自行负责，修复仅涉及代码逻辑
+2. 修复后，确保在点击树形结构时能正常创建和显示标签页
+3. 监控控制台是否有相关错误日志，以便验证修复效果
+4. 如有其他问题出现，可能需要进一步检查终端初始化流程

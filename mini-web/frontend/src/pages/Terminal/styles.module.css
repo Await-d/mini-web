@@ -56,12 +56,13 @@
   flex-direction: column; /* 纵向排列 */
   min-width: 0; /* 防止子元素溢出 */
   isolation: isolate; /* 创建新的堆叠上下文，隔离子元素 */
+  box-sizing: border-box; /* 确保边框包含在元素尺寸内 */
 }
 
 /* 修复xterm.js层级显示问题 */
 .terminalWrapper :global(.xterm) {
-  height: 100%;
-  width: 100%;
+  height: 100% !important;
+  width: 100% !important;
   display: block !important;
 }
 
@@ -80,6 +81,8 @@
 
 .terminalWrapper :global(.xterm-viewport) {
   z-index: 10 !important;
+  overflow-y: auto !important;
+  width: 100% !important;
 }
 
 .terminalWrapper :global(.xterm-screen) {
@@ -171,10 +174,11 @@
   display: flex;
   flex: 1;
   width: 100%;
-  height: calc(100vh - 60px); /* 减去头部和底部的高度 */
+  height: 100%; /* 修改为100%，让它基于父元素调整尺寸 */
   position: relative;
   overflow: hidden;
   background-color: #1e1e1e;
+  box-sizing: border-box; /* 确保边框包含在元素尺寸内 */
 }
 
 /* 终端标签内容 */
@@ -185,6 +189,7 @@
   flex: 1;
   position: relative;
   overflow: hidden;
+  box-sizing: border-box; /* 确保边框包含在元素尺寸内 */
 }
 
 .terminalFooter {
@@ -327,8 +332,9 @@
 .tabTitleContainer {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
   position: relative; /* 用于绝对定位标签指示器 */
+  font-size: 12px;
 }
 
 .tabTitleText {
@@ -387,16 +393,17 @@
 
 /* 标签式样式 */
 .terminalTabs {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: calc(100% - 30px - 32px); /* 减去头部和底部的高度 */
-  min-height: 0; /* 允许容器收缩 */
-  position: relative; /* 为子元素绝对定位提供参考 */
-  overflow: hidden; /* 防止内容溢出 */
-  z-index: 3; /* 提高z-index确保在父容器上层 */
-  background-color: #1e1e1e; /* 设置背景色 */
-  width: 100%; /* 确保宽度100% */
+  flex-shrink: 0;
+  width: 100%;
+  height: 32px; /* 减小标签栏高度 */
+  margin: 0;
+  padding: 0;
+  border-bottom: 1px solid #e8e8e8;
+  background-color: #f5f5f5;
+  position: relative;
+  z-index: 10;
+  line-height: 1; /* 减小行高 */
+  font-size: 12px; /* 减小字体大小 */
 }
 
 .terminalTabs :global(.ant-tabs-content) {
@@ -441,13 +448,31 @@
 .terminalTabs :global(.ant-tabs-nav) {
   margin: 0;
   background-color: #f5f5f5;
+  height: 32px;
+  min-height: 32px;
 }
 
+.terminalTabs :global(.ant-tabs-nav-wrap) {
+  height: 32px !important; 
+}
+
+.terminalTabs :global(.ant-tabs-nav-list) {
+  height: 32px !important;
+}
+
+/* 调整标签内容高度 */
 .terminalTabs :global(.ant-tabs-tab) {
-  background-color: #f0f0f0;
-  border-color: #e8e8e8;
-  color: #333;
+  padding: 6px 8px; /* 减小内边距 */
+  background-color: #f5f5f5;
+  border: 1px solid #f0f0f0;
+  border-bottom: none;
+  margin-right: 3px; /* 减小标签间距 */
+  display: flex;
+  align-items: center;
+  min-height: 22px; /* 减小最小高度 */
+  height: 26px; /* 减小标签高度 */
   transition: all 0.3s;
+  font-size: 12px; /* 明确设置字体大小 */
 }
 
 .terminalTabs :global(.ant-tabs-tab-active) {
@@ -457,10 +482,40 @@
 
 .terminalTabs :global(.ant-tabs-tab-btn) {
   color: #333;
+  font-size: 12px;
 }
 
 .terminalTabs :global(.ant-tabs-tab-active .ant-tabs-tab-btn) {
   color: #1677ff;
+}
+
+/* 自定义标签标签样式 */
+.tabLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 2px 0;
+}
+
+/* 自定义标签关闭按钮样式 */
+.tabCloseButton {
+  margin-left: 5px;
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  transition: all 0.2s;
+}
+
+.tabCloseButton:hover {
+  color: #ff4d4f;
+  background-color: rgba(0, 0, 0, 0.03);
 }
 
 /* 侧边栏样式 */
@@ -520,24 +575,50 @@
 
 /* 标签关闭图标 */
 .closeIcon {
-  margin-left: 8px;
-  font-size: 12px;
-  opacity: 0.7;
-  transition: all 0.3s;
+  margin-left: 4px; /* 减少左侧间距 */
+  font-size: 9px; /* 进一步减小图标尺寸 */
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center; /* 确保垂直居中 */
+  justify-content: center; /* 水平居中 */
+  height: 14px; /* 进一步减小点击区域大小 */
+  width: 14px; /* 进一步减小点击区域大小 */
+  opacity: 0.7; /* 降低初始透明度 */
+  transition: all 0.2s; /* 加快过渡速度 */
 }
 
 .closeIcon:hover {
-  opacity: 1;
-  color: #f5222d;
+  color: #ff4d4f;
+  background-color: rgba(0, 0, 0, 0.03);
+  border-radius: 50%; /* 添加圆形背景效果 */
+  opacity: 1; /* 悬停时透明度恢复正常 */
 }
 
 /* 额外添加: 防止关闭会话按钮悬停导致布局变化 */
 :global(.close-session-btn) {
-  width: 32px !important;
-  height: 32px !important;
+  width: 28px !important;
+  height: 28px !important;
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
   margin-right: 0 !important;
   padding: 0 !important;
+}
+
+/* 控制标签页中的"新标签"按钮 */
+.terminalTabs :global(.ant-tabs-nav-add) {
+  height: 26px; /* 与标签页高度一致 */
+  width: 32px; /* 减小宽度 */
+  min-width: 32px;
+  margin-left: 4px;
+  background-color: #f0f0f0;
+  border: 1px solid #e8e8e8;
+  border-radius: 2px;
+  display: flex;
+  align-items: center; /* 垂直居中 */
+  justify-content: center; /* 水平居中 */
+  font-size: 12px; /* 减小字体大小 */
+  padding: 0;
+  line-height: 1;
 }

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Layout, Tree, Button, Spin, Space, Input, Dropdown, Avatar, Menu, message, Modal } from 'antd';
-import { 
-  SearchOutlined, 
-  PlusOutlined, 
+import {
+  SearchOutlined,
+  PlusOutlined,
   DesktopOutlined,
   CloudServerOutlined,
   DatabaseOutlined,
@@ -46,27 +46,27 @@ const OperationLayout: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const [searchValue, setSearchValue] = useState('');
-  
+
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
-  
+
   // 监听Terminal组件发送的自定义事件
   useEffect(() => {
     const handleToggleSidebar = (event: CustomEvent) => {
       setCollapsed(!collapsed);
     };
-    
+
     // 添加事件监听器
-    window.addEventListener('toggle-operation-sidebar', 
+    window.addEventListener('toggle-operation-sidebar',
       handleToggleSidebar as EventListener);
-    
+
     // 组件卸载时移除监听器
     return () => {
-      window.removeEventListener('toggle-operation-sidebar', 
+      window.removeEventListener('toggle-operation-sidebar',
         handleToggleSidebar as EventListener);
     };
   }, [collapsed]);
-  
+
   // 加载连接列表
   const fetchConnections = async () => {
     setLoading(true);
@@ -87,56 +87,61 @@ const OperationLayout: React.FC = () => {
   useEffect(() => {
     fetchConnections();
   }, []);
-  
+
   // 处理连接
   const handleConnect = (connection: Connection) => {
     message.info(`正在连接到 ${connection.name}...`);
-    
+
     // 创建会话
     sessionAPI.createSession(connection.id)
       .then(response => {
         if (response.data && response.data.code === 200) {
           const sessionId = response.data.data.id;
-          
+
+          // 创建标签键，确保在恢复时可以识别
+          const timestamp = Date.now();
+          const tabKey = `conn-${connection.id}-session-${sessionId}-${timestamp}`;
+
           // 保存更详细的会话信息到localStorage，便于页面刷新时恢复
           localStorage.setItem('current_terminal_session', JSON.stringify({
             connectionId: connection.id,
             sessionId: sessionId,
+            tabKey: tabKey,
             connectionProtocol: connection.protocol,
             connectionName: connection.name,
             host: connection.host,
             port: connection.port,
             username: connection.username,
             isConnected: false,
-            lastActive: new Date().toISOString(),
-            timestamp: new Date().getTime()
+            timestamp: timestamp
           }));
-          
-          // 如果侧边栏已展开，在连接时自动折叠，获得更多空间
-          if (!collapsed) {
-            // 添加短暂延迟以确保导航完成后再折叠侧边栏
-            setTimeout(() => {
-              setCollapsed(true);
-            }, 300);
-          }
-          
-          // 导航到终端页面，保持在操作模式中
+
+          // 导航到终端页面，包含连接ID和会话ID作为参数
+          console.log(`【连接】跳转到终端页面: /terminal/${connection.id}?session=${sessionId}`);
           navigate(`/terminal/${connection.id}?session=${sessionId}`);
+
+          // 直接发布会话创建事件，通知相关组件
+          window.dispatchEvent(new CustomEvent('session-created', {
+            detail: {
+              connectionId: connection.id,
+              sessionId: sessionId,
+              tabKey: tabKey
+            }
+          }));
         } else {
-          message.error('创建会话失败');
+          message.error(`创建会话失败: ${response.data?.message || '未知错误'}`);
         }
       })
       .catch(error => {
-        console.error('创建会话失败:', error);
-        message.error('创建会话失败，请稍后再试');
+        message.error(`连接失败: ${error.message || '网络错误'}`);
       });
   };
-  
+
   // 处理添加新连接
   const handleAddConnection = () => {
     navigate('/connections');
   };
-  
+
   // 处理全屏切换
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -149,22 +154,22 @@ const OperationLayout: React.FC = () => {
       }
     }
   };
-  
+
   // 监听全屏状态变化
   useEffect(() => {
     const handleFullscreenChange = () => {
       setFullscreen(!!document.fullscreenElement);
     };
-    
+
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, []);
-  
+
   // 分组视图类型
   const [groupBy, setGroupBy] = useState<'protocol' | 'group' | 'all'>('protocol');
-  
+
   // 将连接数据转换为树形结构
   useEffect(() => {
     const groupMap: Record<string, TreeNode> = {};
@@ -194,7 +199,7 @@ const OperationLayout: React.FC = () => {
         children: [],
       }
     };
-    
+
     // 创建连接节点并组织到对应协议组和分组下
     connections.forEach(conn => {
       const connectionNode: TreeNode = {
@@ -204,12 +209,12 @@ const OperationLayout: React.FC = () => {
         connection: conn,
         icon: getProtocolIcon(conn.protocol)
       };
-      
+
       // 添加到协议分组
       if (protocolMap[conn.protocol]) {
-        protocolMap[conn.protocol].children!.push({...connectionNode});
+        protocolMap[conn.protocol].children!.push({ ...connectionNode });
       }
-      
+
       // 添加到用户分组
       if (conn.group) {
         if (!groupMap[conn.group]) {
@@ -220,7 +225,7 @@ const OperationLayout: React.FC = () => {
             children: []
           };
         }
-        groupMap[conn.group].children!.push({...connectionNode});
+        groupMap[conn.group].children!.push({ ...connectionNode });
       } else {
         // 如果没有分组，添加到"未分组"
         if (!groupMap['未分组']) {
@@ -231,13 +236,13 @@ const OperationLayout: React.FC = () => {
             children: []
           };
         }
-        groupMap['未分组'].children!.push({...connectionNode});
+        groupMap['未分组'].children!.push({ ...connectionNode });
       }
     });
-    
+
     // 构建最终的树结构
     const tree: TreeNode[] = [];
-    
+
     // 根据分组方式构建树
     if (groupBy === 'protocol') {
       // 按协议分组
@@ -259,22 +264,22 @@ const OperationLayout: React.FC = () => {
         connection: conn,
         icon: getProtocolIcon(conn.protocol)
       }));
-      
+
       // 按名称排序
-      allConnections.sort((a, b) => 
+      allConnections.sort((a, b) =>
         a.title.toString().localeCompare(b.title.toString())
       );
-      
+
       tree.push(...allConnections);
     }
-    
+
     setTreeData(tree);
   }, [connections, groupBy]);
-  
+
   // 右键菜单状态
-  const [contextMenuPosition, setContextMenuPosition] = useState<{x: number, y: number} | null>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number, y: number } | null>(null);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
-  
+
   // 处理树节点选择
   const handleSelect = (selectedKeys: React.Key[], info: any) => {
     const node = info.node as TreeNode;
@@ -282,7 +287,7 @@ const OperationLayout: React.FC = () => {
       handleConnect(node.connection);
     }
   };
-  
+
   // 处理树节点右键点击
   const handleRightClick = (info: any) => {
     const node = info.node as TreeNode;
@@ -294,24 +299,24 @@ const OperationLayout: React.FC = () => {
       });
     }
   };
-  
+
   // 关闭右键菜单
   const closeContextMenu = () => {
     setContextMenuPosition(null);
   };
-  
+
   // 点击文档时关闭右键菜单
   useEffect(() => {
     const handleClickOutside = () => {
       closeContextMenu();
     };
-    
+
     document.addEventListener('click', handleClickOutside);
     return () => {
       document.removeEventListener('click', handleClickOutside);
     };
   }, []);
-  
+
   // 处理编辑连接
   const handleEditConnection = () => {
     if (selectedNode?.connection) {
@@ -319,7 +324,7 @@ const OperationLayout: React.FC = () => {
       navigate(`/connections?edit=${selectedNode.connection.id}`);
     }
   };
-  
+
   // 处理删除连接
   const handleDeleteConnection = () => {
     if (selectedNode?.connection) {
@@ -343,33 +348,33 @@ const OperationLayout: React.FC = () => {
       });
     }
   };
-  
+
   // 处理搜索
   const handleSearch = (value: string) => {
     setSearchValue(value);
   };
-  
+
   // 过滤树数据
   const getFilteredTreeData = () => {
     if (!searchValue) return treeData;
-    
+
     const filterTreeNode = (node: TreeNode): TreeNode | null => {
       // 如果节点标题包含搜索值，保留节点
       if (node.title.toLowerCase().includes(searchValue.toLowerCase())) {
         return node;
       }
-      
+
       // 如果是叶子节点且不匹配，返回null
       if (node.isLeaf) {
         return null;
       }
-      
+
       // 处理子节点
       if (node.children) {
         const filteredChildren = node.children
           .map(child => filterTreeNode(child))
           .filter(Boolean) as TreeNode[];
-        
+
         // 如果有匹配的子节点，返回带有过滤后子节点的节点
         if (filteredChildren.length > 0) {
           return {
@@ -378,19 +383,19 @@ const OperationLayout: React.FC = () => {
           };
         }
       }
-      
+
       // 没有匹配则返回null
       return null;
     };
-    
+
     // 过滤根节点
     const filtered = treeData
       .map(node => filterTreeNode(node))
       .filter(Boolean) as TreeNode[];
-      
+
     return filtered;
   };
-  
+
   // 获取协议图标
   const getProtocolIcon = (protocol: string) => {
     switch (protocol) {
@@ -406,7 +411,7 @@ const OperationLayout: React.FC = () => {
         return <CloudServerOutlined />;
     }
   };
-  
+
   return (
     <Layout style={{ height: '100vh' }}>
       <Sider
@@ -417,7 +422,7 @@ const OperationLayout: React.FC = () => {
         width={280}
         collapsedWidth={0}
         trigger={null}
-        style={{ 
+        style={{
           boxShadow: collapsed ? 'none' : '0 1px 4px rgba(0,0,0,0.1)',
           overflow: 'auto',
           height: '100vh',
@@ -437,7 +442,7 @@ const OperationLayout: React.FC = () => {
             enterButton
             onSearch={handleSearch}
           />
-          
+
           <Space style={{ marginBottom: 8 }}>
             <Button
               type="primary"
@@ -459,24 +464,24 @@ const OperationLayout: React.FC = () => {
               onClick={toggleFullscreen}
             />
           </Space>
-          
+
           <Space style={{ marginBottom: 8 }}>
-            <Button 
-              type={groupBy === 'protocol' ? 'primary' : 'default'} 
+            <Button
+              type={groupBy === 'protocol' ? 'primary' : 'default'}
               size="small"
               onClick={() => setGroupBy('protocol')}
             >
               按协议
             </Button>
-            <Button 
-              type={groupBy === 'group' ? 'primary' : 'default'} 
+            <Button
+              type={groupBy === 'group' ? 'primary' : 'default'}
               size="small"
               onClick={() => setGroupBy('group')}
             >
               按分组
             </Button>
-            <Button 
-              type={groupBy === 'all' ? 'primary' : 'default'} 
+            <Button
+              type={groupBy === 'all' ? 'primary' : 'default'}
               size="small"
               onClick={() => setGroupBy('all')}
             >
@@ -484,7 +489,7 @@ const OperationLayout: React.FC = () => {
             </Button>
           </Space>
         </div>
-        
+
         <div style={{ padding: '0 8px' }}>
           {loading ? (
             <div style={{ textAlign: 'center', padding: 24 }}>
@@ -504,10 +509,10 @@ const OperationLayout: React.FC = () => {
               treeData={getFilteredTreeData()}
             />
           )}
-          
+
           {/* 右键菜单 */}
           {contextMenuPosition && selectedNode && (
-            <div 
+            <div
               style={{
                 position: 'fixed',
                 zIndex: 1000,
@@ -541,10 +546,10 @@ const OperationLayout: React.FC = () => {
           )}
         </div>
       </Sider>
-      
+
       <Layout>
-        <Header style={{ 
-          padding: '0 12px', 
+        <Header style={{
+          padding: '0 12px',
           background: '#fafafa',
           display: 'flex',
           alignItems: 'center',
@@ -552,13 +557,13 @@ const OperationLayout: React.FC = () => {
           borderBottom: '1px solid #f0f0f0',
           height: 36 /* 更紧凑的高度 */
         }}>
-          <Button 
+          <Button
             type="text"
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             onClick={() => setCollapsed(!collapsed)}
             style={{ fontSize: '14px', width: 36, height: 36 }}
           />
-          <Dropdown menu={{ 
+          <Dropdown menu={{
             items: [
               {
                 key: 'exit-operation',
@@ -601,8 +606,8 @@ const OperationLayout: React.FC = () => {
             </Space>
           </Dropdown>
         </Header>
-        
-        <Content style={{ 
+
+        <Content style={{
           height: 'calc(100vh - 36px)', /* 匹配新的头部高度 */
           overflow: 'auto',
           background: '#f0f2f5',

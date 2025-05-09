@@ -1,140 +1,165 @@
 import React from 'react';
-import { Button, Tooltip, Space, Typography } from 'antd';
+import { Button, Tooltip } from 'antd';
 import {
-  FullscreenOutlined, FullscreenExitOutlined, SettingOutlined,
-  CloseOutlined, CopyOutlined, DownloadOutlined, PlusOutlined,
-  CodeOutlined, BuildOutlined
+  PlusOutlined,
+  CopyOutlined,
+  DownloadOutlined,
+  CodeOutlined,
+  BuildOutlined,
+  SettingOutlined,
+  FullscreenOutlined,
+  CloseOutlined
 } from '@ant-design/icons';
-import type { Connection } from '../../../services/api';
 import styles from '../styles.module.css';
 
-const { Text } = Typography;
-
-export interface TerminalHeaderProps {
+interface TerminalHeaderProps {
   connection?: any;
-  fullscreen?: boolean;
-  terminalMode?: string;
-  networkLatency?: number;
+  connectionName?: string;
+  connectionInfo?: string;
   isConnected?: boolean;
+  networkLatency?: number;
+  terminalMode?: string;
+  fullscreen?: boolean;
+  onAddTab?: () => void;
+  onCopyContent?: () => void;
+  onDownloadLog?: () => void;
+  onShowSettings?: () => void;
+  onCodePanel?: () => void;
+  onBuildPanel?: () => void;
   onToggleFullscreen?: () => void;
+  onCloseSession?: () => void;
   onOpenSettings?: () => void;
   onOpenQuickCommands?: () => void;
   onOpenBatchCommands?: () => void;
-  onCopyContent: (activeTab?: any) => void;
-  onDownloadLog: (activeTab?: any) => void;
-  onAddTab: () => void;
-  onCloseSession: (activeTab?: any) => void;
 }
 
 const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   connection,
-  fullscreen = false,
-  terminalMode = 'normal',
+  connectionName,
+  connectionInfo,
+  isConnected,
   networkLatency,
-  isConnected = false,
-  onToggleFullscreen,
-  onOpenSettings,
-  onOpenQuickCommands,
-  onOpenBatchCommands,
+  terminalMode = 'normal',
+  fullscreen,
+  onAddTab,
   onCopyContent,
   onDownloadLog,
-  onAddTab,
-  onCloseSession
+  onShowSettings,
+  onCodePanel,
+  onBuildPanel,
+  onToggleFullscreen,
+  onCloseSession,
+  onOpenSettings,
+  onOpenQuickCommands,
+  onOpenBatchCommands
 }) => {
+  // 从connection中获取名称和信息（如果未直接提供）
+  const connName = connectionName || (connection?.name || connection?.host || '未命名连接');
+  const connInfo = connectionInfo || (connection?.username ? `${connection.username}@${connection.host || ''}:${connection.port || ''}` : '');
+
+  // 兼容处理回调函数
+  const handleSettings = onShowSettings || onOpenSettings;
+  const handleCodePanel = onCodePanel || onOpenQuickCommands;
+  const handleBuildPanel = onBuildPanel || onOpenBatchCommands;
+
   return (
-    <div className={styles.terminalHeader} style={{ padding: '4px 12px' }}>
+    <div className={styles.terminalHeader}>
       <div className={styles.terminalInfo}>
-        <span style={{ fontSize: '15px', fontWeight: 'bold' }}>
-          {connection?.name}
-          <Text type="secondary" style={{ fontSize: '13px', marginLeft: '8px' }}>
-            {connection?.host}:{connection?.port} - {connection?.protocol.toUpperCase()}
-          </Text>
-        </span>
-        {connection && (
-          <span className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
-            {isConnected ? '已连接' : '未连接'}
-          </span>
+        {connName ? (
+          <>
+            <span>{connName}</span>
+            {connInfo && <span className={styles.hostInfo}>{connInfo}</span>}
+          </>
+        ) : (
+          <span>Terminal</span>
         )}
       </div>
       <div className={styles.terminalControls}>
-        <Space>
-          <Tooltip title="新建标签">
-            <Button
-              type="text"
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={onAddTab}
-            />
-          </Tooltip>
-          <Tooltip title="复制选中内容">
-            <Button
-              type="text"
-              size="small"
-              icon={<CopyOutlined />}
-              onClick={() => onCopyContent(null)}
-            />
-          </Tooltip>
-          <Tooltip title="下载日志">
-            <Button
-              type="text"
-              size="small"
-              icon={<DownloadOutlined />}
-              onClick={() => onDownloadLog(null)}
-            />
-          </Tooltip>
-          <Tooltip title="终端模式">
-            <div className={`terminal-mode ${terminalMode}`}>
-              {terminalMode}
-            </div>
-          </Tooltip>
-          {networkLatency !== undefined && (
-            <Tooltip title="网络延迟">
-              <div className={`network-latency ${networkLatency > 200 ? 'high' : networkLatency > 100 ? 'medium' : 'low'}`}>
-                {networkLatency}ms
-              </div>
-            </Tooltip>
-          )}
-          <Tooltip title="快速命令">
-            <Button
-              type="text"
-              size="small"
-              icon={<CodeOutlined />}
-              onClick={onOpenQuickCommands}
-            />
-          </Tooltip>
-          <Tooltip title="批量命令">
-            <Button
-              type="text"
-              size="small"
-              icon={<BuildOutlined />}
-              onClick={onOpenBatchCommands}
-            />
-          </Tooltip>
-          <Tooltip title="终端设置">
-            <Button
-              type="text"
-              size="small"
-              icon={<SettingOutlined />}
-              onClick={onOpenSettings}
-            />
-          </Tooltip>
-          <Tooltip title={fullscreen ? "退出全屏" : "全屏"}>
-            <Button
-              type="text"
-              size="small"
-              icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-              onClick={onToggleFullscreen}
-            />
-          </Tooltip>
+        <Tooltip title="新标签页">
+          <Button
+            type="text"
+            size="small"
+            icon={<PlusOutlined style={{ fontSize: '14px' }} />}
+            onClick={onAddTab}
+          />
+        </Tooltip>
+        <Tooltip title="复制终端内容">
+          <Button
+            type="text"
+            size="small"
+            icon={<CopyOutlined style={{ fontSize: '14px' }} />}
+            onClick={onCopyContent}
+          />
+        </Tooltip>
+        <Tooltip title="下载终端日志">
+          <Button
+            type="text"
+            size="small"
+            icon={<DownloadOutlined style={{ fontSize: '14px' }} />}
+            onClick={onDownloadLog}
+          />
+        </Tooltip>
+
+        {terminalMode && (
+          <span className={styles.terminalMode}>{terminalMode}</span>
+        )}
+
+        {networkLatency !== undefined && networkLatency !== null ? (
+          <span className={
+            networkLatency < 100
+              ? styles.latencyGood
+              : networkLatency < 300
+                ? styles.latencyMedium
+                : styles.latencyPoor
+          }>
+            {networkLatency}ms
+          </span>
+        ) : (
+          <span className={styles.latencyUnknown}>ms</span>
+        )}
+
+        <Tooltip title="命令面板">
+          <Button
+            type="text"
+            size="small"
+            icon={<CodeOutlined style={{ fontSize: '14px' }} />}
+            onClick={handleCodePanel}
+          />
+        </Tooltip>
+        <Tooltip title="构建工具">
+          <Button
+            type="text"
+            size="small"
+            icon={<BuildOutlined style={{ fontSize: '14px' }} />}
+            onClick={handleBuildPanel}
+          />
+        </Tooltip>
+        <Tooltip title="终端设置">
+          <Button
+            type="text"
+            size="small"
+            icon={<SettingOutlined style={{ fontSize: '14px' }} />}
+            onClick={handleSettings}
+          />
+        </Tooltip>
+        <Tooltip title="全屏模式">
+          <Button
+            type="text"
+            size="small"
+            icon={<FullscreenOutlined style={{ fontSize: '14px' }} />}
+            onClick={onToggleFullscreen}
+          />
+        </Tooltip>
+        <Tooltip title="关闭当前会话">
           <Button
             type="text"
             danger
             size="small"
-            icon={<CloseOutlined />}
-            onClick={() => onCloseSession(null)}
+            icon={<CloseOutlined style={{ fontSize: '14px' }} />}
+            onClick={onCloseSession}
             className="close-session-btn"
           />
-        </Space>
+        </Tooltip>
       </div>
     </div>
   );

@@ -7,7 +7,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import TerminalConnected from './components/TerminalConnected';
+import ConnectedTerminal from './components/ConnectedTerminal';
 import TerminalNotConnected from './components/TerminalNotConnected';
 import TerminalConnectionWrapper from './components/TerminalConnectionWrapper';
 import './Terminal.css';
@@ -109,24 +109,19 @@ const Terminal: React.FC = () => {
     return (
         <div className="terminal-page">
             <TerminalConnectionWrapper connectionParams={connectionParams}>
-                {({ hasConnection, tabsCount, activeTabKey, isConnected }) => {
+                {({ hasConnection, tabsCount, activeTabKey, isConnected, tabs }) => {
                     console.log('【主组件调试】终端连接组件就绪，接收到的属性:', {
                         hasConnection, tabsCount, activeTabKey, isConnected
                     });
 
+                    // 判断是否显示已连接终端
                     if (hasConnection || tabsCount > 0 || activeTabKey !== 'no-tabs' || isConnected || isConnectionRestored) {
-                        return <TerminalConnected />;
-                    } else if (!hasConnectionParams) {
-                        return <TerminalNotConnected />;
-                    } else {
-                        // 确保显示加载指示器，避免空白页面
-                        return (
-                            <div className="terminal-loading">
-                                <div className="terminal-loading-spinner"></div>
-                                <div className="terminal-loading-text">正在连接终端...</div>
-                            </div>
-                        );
+                        // 使用子组件进行终端DOM初始化，无需手动操作DOM
+                        return <ConnectedTerminal />;
                     }
+
+                    // 显示未连接终端组件
+                    return <TerminalNotConnected />;
                 }}
             </TerminalConnectionWrapper>
         </div>

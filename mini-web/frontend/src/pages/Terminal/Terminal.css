@@ -6,6 +6,8 @@
   height: 100vh;
   overflow: hidden;
   position: relative;
+  background-color: #1e1e1e;
+  color: #f0f0f0;
 }
 
 /* 终端加载状态样式 */
@@ -47,16 +49,17 @@
   align-items: center;
   height: 100%;
   width: 100%;
-  background-color: #f5f5f5;
+  background-color: #1e1e1e;
 }
 
 .terminal-not-connected-content {
   text-align: center;
   padding: 30px;
-  background-color: #fff;
+  background-color: #2d2d2d;
   border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   max-width: 400px;
+  color: #f0f0f0;
 }
 
 .terminal-not-connected-actions {
@@ -68,18 +71,20 @@
 
 /* 已连接状态样式 */
 .terminal-connected-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+  position: relative;
   width: 100%;
+  height: 100%;
+  overflow: hidden;
   background-color: #1e1e1e;
-  color: #ffffff;
+  z-index: 1;
 }
 
 .terminal-connected-content {
   flex: 1;
   position: relative;
   overflow: hidden;
+  width: 100%;
+  height: 100%;
 }
 
 /* 终端区域样式 */
@@ -90,14 +95,19 @@
   position: relative;
   background-color: #1e1e1e;
   height: 100%;
+  box-sizing: border-box;
+  z-index: 20;
 }
 
 .terminal-tab-content {
   display: flex;
   flex: 1;
   height: 100%;
+  width: 100%;
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
+  z-index: 30;
 }
 
 .terminal-wrapper {
@@ -108,6 +118,8 @@
   flex: 1;
   overflow: hidden;
   background-color: #1e1e1e;
+  box-sizing: border-box;
+  z-index: 40;
 }
 
 .empty-terminal {
@@ -116,21 +128,47 @@
   align-items: center;
   width: 100%;
   height: 100%;
-  background-color: #f0f2f5;
-  color: #666;
+  background-color: #1e1e1e;
+  color: #aaa;
 }
 
 /* 使所有 xterm 元素正确显示 */
 .xterm {
-  height: 100%;
-  width: 100%;
+  height: 100% !important;
+  width: 100% !important;
   display: block !important;
+  box-sizing: border-box !important;
+  position: relative !important;
+  z-index: 2 !important;
+}
+
+/* 修改标签页相关样式 */
+.ant-tabs-nav {
+  height: 32px;
+  min-height: 32px;
+  background-color: #252525;
+  border-bottom: 1px solid #333;
+}
+
+.ant-tabs-tab {
+  font-size: 12px !important;
+  padding: 4px 8px !important;
+  height: 28px !important;
+  color: #bbb !important;
+}
+
+.ant-tabs-tab.ant-tabs-tab-active {
+  background-color: #2d2d2d !important;
+  border-top: 2px solid #1677ff !important;
+  color: #fff !important;
 }
 
 .xterm-screen {
   width: 100% !important;
   height: 100% !important;
   display: block !important;
+  box-sizing: border-box !important;
+  position: relative !important;
 }
 
 .xterm-rows {
@@ -139,11 +177,16 @@
 }
 
 .xterm-viewport {
-  z-index: 10 !important;
+  z-index: 3 !important;
+  overflow-y: auto !important;
+  width: 100% !important;
+  position: relative !important;
 }
 
-.xterm-screen {
-  z-index: 1;
+.xterm-screen,
+.xterm-text-layer,
+.xterm-cursor-layer {
+  position: relative !important;
 }
 
 /* 确保文本层在最上层 */
@@ -178,120 +221,187 @@
   pointer-events: none !important;
 }
 
-/* 终端组件样式 */
-.terminal-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background-color: #1e1e1e;
-  color: #f0f0f0;
+/* 修复工具按钮位置 */
+.terminal-tools {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  z-index: 1000 !important;
+  display: flex !important;
+  gap: 5px !important;
+  background-color: rgba(30, 30, 30, 0.7) !important;
+  border-radius: 4px !important;
+  padding: 4px !important;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3) !important;
 }
 
-/* 确保xterm组件正确显示 */
-.xterm {
-  padding: 0;
-  height: 100%;
-  width: 100%;
+/* 底部按钮容器 */
+.terminal-buttons {
+  position: absolute !important;
+  bottom: 10px !important;
+  right: 10px !important;
+  z-index: 1000 !important;
+  display: flex !important;
+  gap: 5px !important;
+  background-color: rgba(30, 30, 30, 0.7) !important;
+  border-radius: 4px !important;
+  padding: 4px !important;
 }
 
-.xterm-viewport {
-  overflow-y: auto !important;
+/* 全局修复 - 确保终端内部所有元素正确显示 */
+#terminal-container,
+.terminal-element-*,
+[data-terminal-id],
+[id^="terminal-element-"] {
+  position: relative !important;
   width: 100% !important;
-}
-
-.xterm-screen {
-  width: 100% !important;
-}
-
-/* 终端内容区域 */
-.terminal-tab-content {
-  height: calc(100vh - 120px);
-  position: relative;
-  overflow: hidden;
-}
-
-/* 终端包装器 */
-.terminal-wrapper {
-  width: 100%;
-  height: 100%;
-  position: relative;
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
-/* 标签页内容占位符 */
-.terminal-tab-placeholder {
-  display: none;
+  height: 100% !important;
+  overflow: hidden !important;
+  z-index: 50 !important;
+  box-sizing: border-box !important;
 }
 
 /* 终端全屏模式 */
 .terminal-fullscreen {
-  position: fixed;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 1000 !important;
+  background: #000 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
+/* 确保复制内容和清屏按钮不受布局影响 */
+button[class*="复制内容"],
+button[class*="清屏"] {
+  position: relative !important;
+  z-index: 100 !important;
+  background: rgba(0, 0, 0, 0.7) !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 4px !important;
+  padding: 5px 10px !important;
+  cursor: pointer !important;
+  margin-right: 5px !important;
+}
+
+/* 添加终端状态覆盖层样式 */
+.terminal-status-overlay {
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 1000;
-  background: #000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 45;
 }
 
-/* 隐藏xterm链接层 */
-.xterm-link-layer {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
+.terminal-status-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  background-color: rgba(30, 30, 30, 0.9);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-/* 终端工具按钮 */
-.terminal-tools {
+.terminal-status-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255, 255, 255, 0.1);
+  border-left-color: #1677ff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+.terminal-status-text {
+  color: #fff;
+  font-size: 14px;
+}
+
+/* 连接状态指示器 */
+.terminal-status-indicator {
   position: absolute;
   top: 10px;
-  right: 10px;
+  left: 10px;
   z-index: 100;
   display: flex;
-  gap: 5px;
-}
-
-.terminal-tool-button {
-  background: rgba(0, 0, 0, 0.7);
-  color: white;
-  border: none;
-  border-radius: 4px;
+  align-items: center;
+  background-color: rgba(30, 30, 30, 0.8);
   padding: 5px 10px;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.terminal-tool-button:hover {
-  background: rgba(0, 0, 0, 0.85);
-}
-
-/* 重连界面样式 */
-#retry-button {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 100;
-  padding: 8px 16px;
-  background-color: #1677ff;
-  color: white;
-  border: none;
   border-radius: 4px;
-  cursor: pointer;
+  font-size: 12px;
+  color: #fff;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
 }
 
-#connection-help {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background-color: rgba(0,0,0,0.9);
-  color: white;
-  padding: 20px;
-  border-radius: 8px;
-  z-index: 1000;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-  max-width: 500px;
+.terminal-status-indicator .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.status-dot.connected {
+  background-color: #52c41a;
+  box-shadow: 0 0 5px #52c41a;
+}
+
+.status-dot.connecting {
+  background-color: #faad14;
+  box-shadow: 0 0 5px #faad14;
+  animation: blink 1s infinite;
+}
+
+.status-dot.disconnected {
+  background-color: #ff4d4f;
+  box-shadow: 0 0 5px #ff4d4f;
+}
+
+.status-dot.error {
+  background-color: #ff4d4f;
+  box-shadow: 0 0 5px #ff4d4f;
+}
+
+@keyframes blink {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+
+.terminal-latency {
+  margin-left: 10px;
+  font-size: 11px;
+  color: #bbb;
+}
+
+/* 控制按钮容器 */
+.terminal-controls {
+  position: absolute !important;
+  bottom: 10px !important;
+  left: 10px !important;
+  z-index: 50 !important;
+  display: flex;
+  flex-direction: row;
+  background-color: rgba(30, 30, 30, 0.7) !important;
+  border-radius: 4px !important;
+  padding: 4px !important;
+}
+
+/* 终端内部容器 */
+.terminal-container-inner {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #1e1e1e;
+  position: relative;
+  z-index: 1;
 } 

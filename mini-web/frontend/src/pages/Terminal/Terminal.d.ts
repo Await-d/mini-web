@@ -18,14 +18,15 @@ export interface TerminalConnectionWrapperProps {
         tabsCount: number;
         activeTabKey: string;
         isConnected: boolean;
-        tabs?: any[];
+        tabs: any[];
         connection?: any;
         fullscreen?: boolean;
         terminalSize?: any;
-        networkLatency?: number;
+        networkLatency?: number | null;
         terminalMode?: string;
         sidebarCollapsed?: boolean;
         toggleFullscreen?: () => void;
         sendDataToServer?: (data: string) => void;
+        clearRetryTimers?: () => void;
     }) => React.ReactNode;
 } 

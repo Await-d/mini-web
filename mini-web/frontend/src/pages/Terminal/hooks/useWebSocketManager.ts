@@ -1,9 +1,22 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { XTerm } from 'xterm-for-react';
+/*
+ * @Author: Await
+ * @Date: 2025-05-09 17:49:44
+ * @LastEditors: Await
+ * @LastEditTime: 2025-05-09 18:29:24
+ * @Description: 请填写简介
+ */
+import { useState, useRef, useCallback, useEffect, createRef } from 'react';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
 import { handleWebSocketMessage } from '../utils';
 import { terminalStateRef } from '../../../contexts/TerminalContext';
-import { createConnectionHelp, createRetryInterface } from '../utils/connectionUtils';
+import { writeColorText } from '../utils/terminalUtils';
+
+// 扩展TerminalTab接口以支持lastActivityTime属性
+declare module '../../../contexts/TerminalContext' {
+  interface TerminalTab {
+    lastActivityTime?: number;
+  }
+}
 
 /**
  * 管理WebSocket连接的生命周期的Hook
@@ -12,11 +25,61 @@ export interface WebSocketManagerOptions {
   // ... 保留现有选项 ...
 }
 
-// 简单定义终端大小数据类型
-interface TerminalSizeData {
-  cols: number;
-  rows: number;
-}
+// 创建连接帮助界面
+export const createConnectionHelp = (activeTab: TerminalTab, onRetry: () => void) => {
+  if (!activeTab.xtermRef?.current) return;
+  const term = activeTab.xtermRef.current;
+
+  writeColorText(term, '\r\n\n=== 连接问题排查指南 ===\r\n\n', 'yellow');
+  writeColorText(term, '1. 确保后端服务已启动\r\n', 'white');
+  writeColorText(term, '2. 检查WebSocket端点是否正确配置\r\n', 'white');
+  writeColorText(term, '3. 检查防火墙或代理设置\r\n', 'white');
+  writeColorText(term, '4. 确认连接ID和会话ID有效\r\n', 'white');
+  writeColorText(term, '\r\n按Enter键尝试重新连接...', 'green');
+
+  const handleKey = (data: string) => {
+    if (data === '\r' || data === '\n') {
+      // 移除事件监听
+      term.onData(handleKey);
+      // 尝试重连
+      onRetry();
+    }
+  };
+
+  // 添加键盘事件监听
+  term.onData(handleKey);
+};
+
+// 创建重试界面
+export const createRetryInterface = (
+  activeTab: TerminalTab,
+  onRetry: () => void,
+  onHelp: () => void
+) => {
+  if (!activeTab.xtermRef?.current) return;
+  const term = activeTab.xtermRef.current;
+
+  writeColorText(term, '\r\n\n连接失败，请选择操作:\r\n\n', 'red');
+  writeColorText(term, '按 R 键: 重试连接\r\n', 'white');
+  writeColorText(term, '按 H 键: 显示帮助\r\n', 'white');
+
+  const handleKey = (data: string) => {
+    if (data.toLowerCase() === 'r') {
+      // 移除事件监听
+      term.onData(handleKey);
+      // 重试连接
+      onRetry();
+    } else if (data.toLowerCase() === 'h') {
+      // 移除事件监听
+      term.onData(handleKey);
+      // 显示帮助
+      onHelp();
+    }
+  };
+
+  // 添加键盘事件监听
+  term.onData(handleKey);
+};
 
 // WebSocket管理器Hook
 export const useWebSocketManager = () => {
@@ -25,6 +88,31 @@ export const useWebSocketManager = () => {
   const connectionAttemptRef = useRef(false);
   // 保存心跳定时器的引用
   const heartbeatTimerRef = useRef<number | null>(null);
+
+  // 定义updateTab函数
+  const updateTab = useCallback((key: string, updates: Partial<TerminalTab>) => {
+    // 获取所有标签
+    const tabs = terminalStateRef.current.tabs as TerminalTab[];
+
+    // 找到要更新的标签
+    const tabIndex = tabs.findIndex(tab => tab.key === key);
+    if (tabIndex === -1) {
+      console.error(`【更新标签】找不到标签: ${key}`);
+      return;
+    }
+
+    // 更新标签
+    const updatedTab = { ...tabs[tabIndex], ...updates };
+    tabs[tabIndex] = updatedTab;
+
+    // 更新状态引用
+    terminalStateRef.current = {
+      ...terminalStateRef.current,
+      tabs: [...tabs],
+    };
+
+    console.log(`【更新标签】标签已更新: ${key}`, updates);
+  }, []);
 
   /**
    * 开始心跳检测，定期发送ping消息保持连接活跃
@@ -96,258 +184,367 @@ export const useWebSocketManager = () => {
   ) => {
     // 判断参数类型并处理
     let activeTab: TerminalTab | undefined;
+    let connectionId: number | undefined;
+    let sessionId: number | undefined;
+    let tabKey: string | undefined;
     let onConnectionHelp: (() => void) | undefined;
     let onRetryInterface: (() => void) | undefined;
 
     if (typeof activeTabOrConnectionId === 'number') {
       // 使用的是参数形式2：connectionId, sessionId, tabKey
-      const connectionId = activeTabOrConnectionId;
-      const sessionId = onConnectionHelpOrSessionId as number;
-      const tabKey = onRetryInterfaceOrTabKey as string;
+      connectionId = activeTabOrConnectionId;
+      sessionId = typeof onConnectionHelpOrSessionId === 'number' ? onConnectionHelpOrSessionId : undefined;
+      tabKey = typeof onRetryInterfaceOrTabKey === 'string' ? onRetryInterfaceOrTabKey : undefined;
 
       console.log(`【WebSocket调试】使用ID调用: connectionId=${connectionId}, sessionId=${sessionId}, tabKey=${tabKey}`);
 
       // 从terminalStateRef中查找匹配的tab
-      activeTab = terminalStateRef.current.tabs.find(t => t.key === tabKey) as TerminalTab | undefined;
+      // 使用类型断言，确保tabs数组中的元素被识别为TerminalTab类型
+      const tabs = terminalStateRef.current.tabs as unknown as TerminalTab[];
+      activeTab = tabs.find(t =>
+        t.connectionId === connectionId &&
+        t.sessionId === sessionId &&
+        (tabKey ? t.key === tabKey : true)
+      );
 
       if (!activeTab) {
-        console.error('【WebSocket调试】未找到匹配的标签页:', tabKey);
-        return false;
+        console.error(`【WebSocket调试】找不到匹配的标签，无法创建连接: connectionId=${connectionId}, sessionId=${sessionId}`);
+        return;
       }
-
-      // 创建默认的帮助和重试接口
-      onConnectionHelp = () => {
-        console.log('【WebSocket调试】显示连接帮助界面');
-        createConnectionHelp(activeTab as TerminalTab, () => {
-          createWebSocketConnection(connectionId, sessionId, tabKey);
-        });
-      };
-
-      onRetryInterface = () => {
-        console.log('【WebSocket调试】显示重试界面');
-        createRetryInterface(activeTab as TerminalTab,
-          () => createWebSocketConnection(connectionId, sessionId, tabKey),
-          () => createConnectionHelp(activeTab as TerminalTab, () => {
-            createWebSocketConnection(connectionId, sessionId, tabKey);
-          })
-        );
-      };
     } else {
-      // 使用的是参数形式1：直接传入activeTab对象和回调函数
+      // 使用的是参数形式1：activeTab, onConnectionHelp, onRetryInterface
       activeTab = activeTabOrConnectionId;
-      onConnectionHelp = onConnectionHelpOrSessionId as () => void;
-      onRetryInterface = onRetryInterfaceOrTabKey as (() => void) | undefined;
+      onConnectionHelp = onConnectionHelpOrSessionId as (() => void);
+      onRetryInterface = onRetryInterfaceOrTabKey as (() => void);
+
+      connectionId = activeTab.connectionId;
+      sessionId = activeTab.sessionId;
+      tabKey = activeTab.key;
     }
 
-    if (!activeTab || !activeTab.terminalRef?.current || !activeTab.xtermRef?.current) {
-      console.error('【WebSocket调试】创建WebSocket连接失败：缺少必要参数');
-      console.log('【WebSocket调试】标签页详情:', {
-        key: activeTab?.key,
-        connectionId: activeTab?.connectionId,
-        sessionId: activeTab?.sessionId,
-        hasTerminalRef: !!activeTab?.terminalRef?.current,
-        hasXtermRef: !!activeTab?.xtermRef?.current,
-        hasWebSocketRef: !!activeTab?.webSocketRef?.current,
-        connectionInfo: activeTab?.connection ? {
-          protocol: activeTab.connection.protocol,
-          host: activeTab.connection.host,
-          port: activeTab.connection.port
-        } : 'connection不存在'
+    // 确保activeTab存在
+    if (!activeTab) {
+      console.error('【WebSocket】无效的活动标签，无法创建WebSocket连接');
+      return;
+    }
+
+    // 准备DOM检查函数
+    const ensureTerminalDOM = (tab: TerminalTab, maxAttempts = 10, currentAttempt = 0): Promise<boolean> => {
+      return new Promise((resolve) => {
+        // 如果已经有有效的DOM引用，直接返回成功
+        if (tab.terminalRef?.current) {
+          console.log('【DOM检查】terminalRef.current 已存在，无需创建');
+          resolve(true);
+          return;
+        }
+
+        console.log(`【DOM检查】尝试查找或创建DOM元素，尝试次数：${currentAttempt + 1}/${maxAttempts}`);
+
+        // 尝试通过ID查找DOM元素
+        const terminalElementId = `terminal-element-${tab.key}`;
+        const containerElementId = `terminal-container-${tab.key}`;
+        let domElement = document.getElementById(terminalElementId) ||
+          document.getElementById(containerElementId);
+
+        if (domElement) {
+          console.log(`【DOM检查】找到已存在的DOM元素: ${domElement.id}`);
+
+          // 确保tab.terminalRef存在
+          if (!tab.terminalRef) {
+            tab.terminalRef = createRef<HTMLDivElement>();
+          }
+
+          // 设置DOM引用
+          tab.terminalRef.current = domElement as HTMLDivElement;
+          resolve(true);
+          return;
+        }
+
+        // 如果找不到DOM元素且尝试次数未达上限，就创建新元素
+        if (currentAttempt < maxAttempts) {
+          console.log(`【DOM检查】创建新的DOM元素: ${terminalElementId}`);
+
+          // 创建容器元素
+          const newElement = document.createElement('div');
+          newElement.id = terminalElementId;
+          newElement.className = `terminal-element terminal-element-${tab.key}`;
+          newElement.style.width = '100%';
+          newElement.style.height = '100%';
+          newElement.style.position = 'relative';
+
+          // 查找放置容器的父元素
+          const terminalArea = document.querySelector('.terminal-area') ||
+            document.getElementById('terminal-area') ||
+            document.body;
+
+          terminalArea.appendChild(newElement);
+
+          // 确保tab.terminalRef存在
+          if (!tab.terminalRef) {
+            tab.terminalRef = createRef<HTMLDivElement>();
+          }
+
+          // 设置DOM引用
+          tab.terminalRef.current = newElement;
+
+          // 保存到全局对象便于调试
+          if (typeof window !== 'undefined') {
+            (window as any).terminalElements = (window as any).terminalElements || {};
+            (window as any).terminalElements[tab.key] = newElement;
+          }
+
+          resolve(true);
+          return;
+        }
+
+        // 尝试次数达到上限仍未成功
+        console.error('【DOM检查】达到最大尝试次数，DOM元素准备失败');
+        resolve(false);
       });
+    };
+
+    // 使用DOM检查函数
+    if (!activeTab) {
+      console.error('【WebSocket调试】创建WebSocket连接失败：标签页不存在');
       return false;
     }
 
-    const term = activeTab.xtermRef.current;
-
-    try {
-      // 确保连接信息存在
-      if (!activeTab.sessionId || !activeTab.connection) {
-        const errorMsg = '无法连接：会话ID或连接信息不存在';
-        console.error('【WebSocket调试】' + errorMsg, {
-          sessionId: activeTab.sessionId,
-          connection: activeTab.connection ? '存在' : '不存在',
-          connectionDetails: activeTab.connection
-        });
-        term.writeln(`\r\n\x1b[31m${errorMsg}\x1b[0m`);
+    // 检查DOM并创建WebSocket连接
+    ensureTerminalDOM(activeTab).then(domReady => {
+      if (!domReady) {
+        console.error('【WebSocket调试】DOM准备失败，无法创建WebSocket连接');
         return false;
       }
 
-      // 构建WebSocket URL
-      let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const token = localStorage.getItem('token') || '';
+      if (!activeTab || !activeTab.terminalRef?.current) {
+        console.error('【WebSocket调试】创建WebSocket连接失败：DOM引用不存在');
+        return false;
+      }
 
-      // 获取后端配置
-      const savedSettings = localStorage.getItem('terminal_settings');
-      let backendUrl = window.location.hostname;
-      let backendPort = 8080;
+      const term = activeTab.xtermRef?.current;
+      if (!term) {
+        console.error('【WebSocket调试】创建WebSocket连接失败：xterm引用不存在');
+        // 创建xterm实例的逻辑应在此之前完成
+        return false;
+      }
 
-      if (savedSettings) {
-        try {
-          const settings = JSON.parse(savedSettings);
-          backendUrl = settings.backendUrl || backendUrl;
-          backendPort = settings.backendPort || backendPort;
-        } catch (e) {
-          console.error('读取终端设置失败:', e);
+      try {
+        // 确保连接信息存在
+        if (!activeTab.sessionId || !activeTab.connection) {
+          const errorMsg = '无法连接：会话ID或连接信息不存在';
+          console.error('【WebSocket调试】' + errorMsg, {
+            sessionId: activeTab.sessionId,
+            connection: activeTab.connection ? '存在' : '不存在',
+            connectionDetails: activeTab.connection
+          });
+          term.writeln(`\r\n\x1b[31m${errorMsg}\x1b[0m`);
+          return false;
         }
-      }
 
-      const protocol = activeTab.connection.protocol || 'ssh';
-      let wsUrl = `${wsProtocol}//${backendUrl}:${backendPort}/ws/${protocol}/${activeTab.sessionId}`;
-      wsUrl = `${wsUrl}?token=${encodeURIComponent(token)}`;
+        // 构建WebSocket URL
+        let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const token = localStorage.getItem('token') || '';
 
-      console.log('【WebSocket调试】创建WebSocket连接:', wsUrl);
-      console.log('【WebSocket调试】连接参数:', {
-        协议: protocol,
-        主机: activeTab.connection.host,
-        端口: activeTab.connection.port,
-        用户名: activeTab.connection.username,
-        会话ID: activeTab.sessionId,
-        后端地址: `${backendUrl}:${backendPort}`,
-        连接时间: new Date().toLocaleTimeString()
-      });
-      term.writeln(`\r\n\x1b[33m连接到: ${wsUrl}\x1b[0m`);
+        // 获取后端配置
+        const savedSettings = localStorage.getItem('terminal_settings');
+        let backendUrl = window.location.hostname;
+        let backendPort = 8080;
 
-      // 将URL保存到window对象便于调试
-      if (typeof window !== 'undefined') {
-        (window as any).lastWsUrl = wsUrl;
-      }
-
-      // 创建WebSocket
-      const ws = new WebSocket(wsUrl);
-      console.log('WebSocket实例创建成功，等待连接...');
-
-      // 将WebSocket实例导出到window对象便于调试
-      if (typeof window !== 'undefined') {
-        (window as any).lastWebSocket = ws;
-        (window as any).lastWebSocketTime = new Date().toISOString();
-
-        // 保存最新的标签页和WebSocket实例，用于导航后恢复连接
-        (window as any).lastActiveTab = activeTab;
-        (window as any).lastConnectionInfo = {
-          sessionId: activeTab.sessionId,
-          protocol: protocol,
-          wsUrl: wsUrl
-        };
-      }
-
-      // 连接超时处理
-      const connectionTimeout = setTimeout(() => {
-        if (ws.readyState !== WebSocket.OPEN) {
-          term.writeln('\r\n\x1b[31m连接超时，请检查后端服务\x1b[0m');
-
-          // 连接超时后提供帮助信息
-          onConnectionHelp();
+        if (savedSettings) {
+          try {
+            const settings = JSON.parse(savedSettings);
+            backendUrl = settings.backendUrl || backendUrl;
+            backendPort = settings.backendPort || backendPort;
+          } catch (e) {
+            console.error('读取终端设置失败:', e);
+          }
         }
-      }, 5000);
 
-      // WebSocket连接成功时的处理
-      ws.onopen = () => {
-        clearTimeout(connectionTimeout);
-        console.log('WebSocket连接成功!');
-        term.writeln('\r\n\x1b[32m🎉 WebSocket连接成功!\x1b[0m');
+        const protocol = activeTab.connection.protocol || 'ssh';
+        let wsUrl = `${wsProtocol}//${backendUrl}:${backendPort}/ws/${protocol}/${activeTab.sessionId}`;
 
-        // 更新连接状态
-        activeTab.webSocketRef.current = ws;
-        activeTab.isConnected = true;
-        setIsConnected(true);
-        reconnectCountRef.current = 0; // 重置重试计数
+        // 添加认证令牌
+        if (token) {
+          wsUrl += `?token=${token}`;
+        }
 
-        // 启动心跳检测 - 减少间隔到15秒，确保连接保持活跃
-        startHeartbeat(ws, activeTab, 15000);
+        console.log(`【WebSocket】尝试连接终端 [${activeTab.title}]，URL: ${wsUrl}`);
 
-        // 发送认证消息
+        // 创建WebSocket连接
         try {
-          if (!activeTab.connection) return;
+          const ws = new WebSocket(wsUrl);
+          // 保存WebSocket引用
+          if (activeTab.webSocketRef) {
+            activeTab.webSocketRef.current = ws;
+          }
 
-          const authMessage = JSON.stringify({
-            type: 'auth',
-            token: token,
-            connectionInfo: {
-              protocol: protocol,
-              host: activeTab.connection.host,
-              port: activeTab.connection.port,
-              username: activeTab.connection.username,
-              sessionId: activeTab.sessionId
+          // 设置WebSocket事件处理
+          ws.onopen = () => {
+            console.log(`【WebSocket】连接成功 [${activeTab.title}]`);
+            // 更新连接状态
+            activeTab.isConnected = true;
+
+            // 保存到全局对象以便调试
+            if (typeof window !== 'undefined') {
+              (window as any).lastWebSocket = ws;
+              (window as any).lastConnectedTime = new Date().toLocaleTimeString();
             }
+
+            // 更新终端标签状态
+            updateTab(activeTab.key, {
+              isConnected: true
+            });
+
+            // 获取Term实例
+            const term = activeTab.xtermRef?.current;
+
+            if (!term) {
+              console.error('【WebSocket】Term实例未初始化，无法发送初始化数据');
+              return;
+            }
+
+            // 发送连接初始化数据
+            const initData = JSON.stringify({
+              type: 'init',
+              connectionId: activeTab.connectionId,
+              sessionId: activeTab.sessionId,
+              cols: term.cols || 80,
+              rows: term.rows || 24,
+              protocol: activeTab.connection?.protocol || 'ssh',
+              timestamp: Date.now()
+            });
+
+            console.log('【WebSocket】发送初始化数据:', initData);
+            ws.send(initData);
+
+            // 循环并发送队列中的消息
+            if (activeTab.messageQueueRef?.current) {
+              console.log(`【WebSocket】处理消息队列，共${activeTab.messageQueueRef.current.length}条消息`);
+
+              // 类型断言确保TypeScript识别messageQueueRef.current为字符串数组
+              const messageQueue = activeTab.messageQueueRef.current as string[];
+
+              while (messageQueue.length > 0) {
+                const message = messageQueue.shift();
+                if (message) {
+                  console.log(`【WebSocket】发送队列消息: ${message.substring(0, 20)}...`);
+                  ws.send(message);
+                }
+              }
+            }
+          };
+
+          ws.onmessage = (event) => {
+            // 接收WebSocket消息
+            const data = event.data;
+            // 确保xtermRef存在
+            if (activeTab.xtermRef?.current) {
+              activeTab.xtermRef.current.write(data);
+            } else {
+              console.error('【WebSocket】无法写入终端，xtermRef不存在');
+              // 保存到消息队列
+              if (activeTab.messageQueueRef?.current) {
+                // 类型断言确保TypeScript识别messageQueueRef.current为字符串数组
+                const messageQueue = activeTab.messageQueueRef.current as string[];
+                messageQueue.push(data);
+                console.log(`【WebSocket】消息已保存到队列，当前队列长度: ${messageQueue.length}`);
+              }
+            }
+          };
+
+          ws.onerror = (error) => {
+            console.error(`【WebSocket】连接错误 [${activeTab.title}]:`, error);
+
+            // 如果终端已初始化，显示错误信息
+            if (activeTab.xtermRef?.current) {
+              activeTab.xtermRef.current.writeln('\r\n\x1b[31m连接错误，请检查网络或服务器状态\x1b[0m');
+              // 提供重试界面
+              if (onRetryInterface) {
+                onRetryInterface();
+              }
+            }
+
+            // 更新连接状态
+            activeTab.isConnected = false;
+            updateTab(activeTab.key, {
+              isConnected: false
+            });
+          };
+
+          ws.onclose = (event) => {
+            console.log(`【WebSocket】连接关闭 [${activeTab.title}]，代码: ${event.code}，原因: ${event.reason || '未知'}`);
+
+            // 如果终端已初始化，显示连接关闭信息
+            if (activeTab.xtermRef?.current) {
+              activeTab.xtermRef.current.writeln('\r\n\x1b[33m连接已关闭\x1b[0m');
+
+              // 提供重试界面
+              if (event.code !== 1000 && event.code !== 1005) {
+                // 非正常关闭
+                if (onRetryInterface) {
+                  onRetryInterface();
+                }
+              } else {
+                // 正常关闭
+                activeTab.xtermRef.current.writeln('\r\n\x1b[32m会话已结束，按R键重新连接\x1b[0m');
+              }
+            }
+
+            // 更新连接状态
+            activeTab.isConnected = false;
+            updateTab(activeTab.key, {
+              isConnected: false
+            });
+          };
+
+          // 保存全局重连函数
+          if (typeof window !== 'undefined') {
+            (window as any).reconnectTab = (tabKey?: string) => {
+              const targetKey = tabKey || activeTab.key;
+              console.log(`【重连】尝试重连标签: ${targetKey}`);
+
+              // 类型断言确保tabs被识别为TerminalTab[]
+              const tabs = terminalStateRef.current.tabs as unknown as TerminalTab[];
+              const tab = tabs.find(t => t.key === targetKey);
+
+              if (tab) {
+                console.log('【重连】找到标签，尝试重新建立连接');
+                createSimpleConnection(tab);
+                return true;
+              }
+              console.error('【重连】找不到标签');
+              return false;
+            };
+          }
+
+          return ws;
+        } catch (error) {
+          console.error(`【WebSocket】创建连接失败 [${activeTab.title}]:`, error);
+
+          // 显示错误信息
+          if (activeTab.xtermRef?.current) {
+            activeTab.xtermRef.current.writeln('\r\n\x1b[31m创建WebSocket连接失败\x1b[0m');
+
+            // 提供帮助信息
+            if (onConnectionHelp) {
+              onConnectionHelp();
+            }
+          }
+
+          // 更新连接状态
+          activeTab.isConnected = false;
+          updateTab(activeTab.key, {
+            isConnected: false
           });
 
-          ws.send(authMessage);
-          term.writeln('\r\n\x1b[32m发送认证信息成功\x1b[0m');
-
-          // 发送初始命令
-          setTimeout(() => {
-            try {
-              ws.send('\r\n');
-              setTimeout(() => ws.send('echo "终端连接成功!"\r\n'), 300);
-            } catch (e) {
-              console.error('发送初始命令失败:', e);
-            }
-          }, 500);
-        } catch (e) {
-          console.error('发送认证消息失败:', e);
-          term.writeln('\r\n\x1b[31m发送认证信息失败\x1b[0m');
+          return null;
         }
-
-        // 设置WebSocket事件处理
-        ws.onmessage = (event) => {
-          // 收到消息时更新最后活动时间
-          activeTab.lastActivityTime = Date.now();
-          handleWebSocketMessage(event, term, activeTab.isGraphical);
-        };
-      };
-
-      // WebSocket连接关闭时的处理
-      ws.onclose = (event) => {
-        console.log('WebSocket连接关闭:', event.code, event.reason);
-        activeTab.isConnected = false;
-        setIsConnected(false);
-        term.writeln('\r\n\x1b[31mWebSocket连接已关闭\x1b[0m');
-
-        // 停止心跳检测
-        if (heartbeatTimerRef.current !== null) {
-          clearInterval(heartbeatTimerRef.current);
-          heartbeatTimerRef.current = null;
-        }
-
-        // 检查是否是导航后的关闭，如果是则尝试重新连接
-        const navigationClose = document.visibilityState === 'visible' &&
-          typeof (window as any).lastConnectionInfo !== 'undefined';
-
-        if (navigationClose) {
-          console.log('检测到可能是导航操作导致的连接关闭，尝试自动重连');
-          term.writeln('\r\n\x1b[33m导航后尝试重新连接...\x1b[0m');
-
-          setTimeout(() => {
-            // 尝试使用保存的信息重新连接
-            createSimpleConnection(activeTab);
-          }, 1000);
-        } else {
-          // 不是导航引起的关闭，显示重试界面
-          if (onRetryInterface) {
-            onRetryInterface();
-          }
-        }
-      };
-
-      // WebSocket错误处理
-      ws.onerror = (error) => {
-        console.error('WebSocket错误:', error);
-        term.writeln('\r\n\x1b[31mWebSocket错误，请检查后端服务\x1b[0m');
-
-        // 出错时也显示重试界面
-        setTimeout(() => {
-          if (ws.readyState !== WebSocket.OPEN && onRetryInterface) {
-            onRetryInterface();
-          }
-        }, 1000);
-      };
-
-      return true;
-    } catch (e) {
-      console.error('建立WebSocket连接失败:', e);
-      if (term) term.writeln(`\r\n\x1b[31m建立WebSocket连接失败: ${e}\x1b[0m`);
-      return false;
-    }
+      } catch (e) {
+        console.error('建立WebSocket连接失败:', e);
+        if (term) term.writeln(`\r\n\x1b[31m建立WebSocket连接失败: ${e}\x1b[0m`);
+        return false;
+      }
+    });
   }, [startHeartbeat]);
 
   /**
@@ -503,126 +700,6 @@ export const useWebSocketManager = () => {
   }, [startHeartbeat]);
 
   /**
-   * 创建连接帮助界面
-   */
-  const createConnectionHelp = useCallback((
-    activeTab: TerminalTab,
-    retryCallback: () => void
-  ) => {
-    // 创建HTML帮助面板
-    if (!activeTab.terminalRef?.current) return;
-
-    // 检查是否已经存在帮助面板
-    const existingHelp = activeTab.terminalRef.current.querySelector('#connection-help');
-    if (existingHelp) return;
-
-    const helpDiv = document.createElement('div');
-    helpDiv.id = 'connection-help';
-    helpDiv.style.position = 'absolute';
-    helpDiv.style.top = '50%';
-    helpDiv.style.left = '50%';
-    helpDiv.style.transform = 'translate(-50%, -50%)';
-    helpDiv.style.backgroundColor = 'rgba(0,0,0,0.9)';
-    helpDiv.style.color = 'white';
-    helpDiv.style.padding = '20px';
-    helpDiv.style.borderRadius = '8px';
-    helpDiv.style.zIndex = '1000';
-    helpDiv.style.boxShadow = '0 4px 12px rgba(0,0,0,0.5)';
-    helpDiv.style.fontSize = '14px';
-    helpDiv.style.maxWidth = '500px';
-    helpDiv.style.textAlign = 'left';
-    helpDiv.style.lineHeight = '1.6';
-
-    helpDiv.innerHTML = `
-      <div style="margin-bottom:15px;font-weight:bold;font-size:16px;text-align:center">WebSocket连接问题</div>
-      <div style="margin-bottom:15px">无法连接到WebSocket服务器。可能的原因：</div>
-      <ul style="margin-bottom:15px;padding-left:20px">
-        <li>后端服务未启动</li>
-        <li>网络问题或防火墙拦截</li>
-        <li>WebSocket端点不可用 (端口: 8080)</li>
-        <li>会话ID无效: ${activeTab.sessionId}</li>
-      </ul>
-      <div style="margin-bottom:15px">解决方法：</div>
-      <ol style="margin-bottom:15px;padding-left:20px">
-        <li>确保后端服务已启动并监听端口8080</li>
-        <li>检查网络连接和防火墙设置</li>
-        <li>尝试刷新页面或重新连接</li>
-      </ol>
-      <div style="display:flex;justify-content:center;gap:10px;margin-top:20px">
-        <button id="retry-connection" style="padding:8px 16px;background:#1677ff;border:none;color:white;border-radius:4px;cursor:pointer">重试连接</button>
-        <button id="dismiss-help" style="padding:8px 16px;background:#666;border:none;color:white;border-radius:4px;cursor:pointer">关闭提示</button>
-      </div>
-    `;
-
-    activeTab.terminalRef.current.appendChild(helpDiv);
-
-    // 添加按钮事件
-    setTimeout(() => {
-      const retryButton = document.getElementById('retry-connection');
-      const dismissButton = document.getElementById('dismiss-help');
-
-      if (retryButton) {
-        retryButton.onclick = () => {
-          if (helpDiv.parentNode) {
-            helpDiv.parentNode.removeChild(helpDiv);
-          }
-          // 重新尝试连接
-          retryCallback();
-        };
-      }
-
-      if (dismissButton) {
-        dismissButton.onclick = () => {
-          if (helpDiv.parentNode) {
-            helpDiv.parentNode.removeChild(helpDiv);
-          }
-        };
-      }
-    }, 100);
-  }, []);
-
-  /**
-   * 创建重试界面
-   */
-  const createRetryInterface = useCallback((
-    activeTab: TerminalTab,
-    retryCallback: () => void,
-    showHelpCallback: () => void
-  ) => {
-    // 在连接关闭时添加重试按钮和帮助界面
-    if (!activeTab.terminalRef?.current) return;
-
-    // 检查是否已经存在重试按钮
-    if (activeTab.terminalRef.current.querySelector('#retry-button')) return;
-
-    const retryButton = document.createElement('button');
-    retryButton.id = 'retry-button';
-    retryButton.innerHTML = '重新连接';
-    retryButton.style.position = 'absolute';
-    retryButton.style.top = '10px';
-    retryButton.style.right = '10px';
-    retryButton.style.zIndex = '100';
-    retryButton.style.padding = '8px 16px';
-    retryButton.style.backgroundColor = '#1677ff';
-    retryButton.style.color = 'white';
-    retryButton.style.border = 'none';
-    retryButton.style.borderRadius = '4px';
-    retryButton.style.cursor = 'pointer';
-
-    retryButton.onclick = () => {
-      if (activeTab.xtermRef?.current) {
-        activeTab.xtermRef.current.writeln('\r\n\x1b[33m重新尝试连接...\x1b[0m');
-      }
-      retryCallback();
-    };
-
-    activeTab.terminalRef.current.appendChild(retryButton);
-
-    // 显示连接帮助
-    showHelpCallback();
-  }, []);
-
-  /**
    * 发送数据到服务器
    */
   const sendData = useCallback((
@@ -752,7 +829,9 @@ export const useWebSocketManager = () => {
 
       // 如果提供了标签Key，找到对应标签
       if (tabKey && terminalStateRef.current) {
-        const tab = terminalStateRef.current.tabs.find(t => t.key === tabKey) as TerminalTab | undefined;
+        // 使用类型断言，确保tabs数组中的元素被识别为TerminalTab类型
+        const tabs = terminalStateRef.current.tabs as unknown as TerminalTab[];
+        const tab = tabs.find(t => t.key === tabKey);
         if (tab) {
           console.log('【连接流程】找到指定标签，尝试重连');
           return createSimpleConnection(tab);
@@ -761,9 +840,11 @@ export const useWebSocketManager = () => {
 
       // 否则尝试找到活动标签
       if (terminalStateRef.current && terminalStateRef.current.activeTabKey) {
-        const activeTab = terminalStateRef.current.tabs.find(
+        // 使用类型断言，确保tabs数组中的元素被识别为TerminalTab类型
+        const tabs = terminalStateRef.current.tabs as unknown as TerminalTab[];
+        const activeTab = tabs.find(
           t => t.key === terminalStateRef.current.activeTabKey
-        ) as TerminalTab | undefined;
+        );
 
         if (activeTab) {
           console.log('【连接流程】找到活动标签，尝试重连');
