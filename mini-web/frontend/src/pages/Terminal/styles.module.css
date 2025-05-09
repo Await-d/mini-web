@@ -1,4 +1,46 @@
 .terminalContainer {
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.terminalContainerInner {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.activeTerminal {
+  visibility: visible !important;
+  display: block !important;
+  z-index: 10 !important;
+  opacity: 1 !important;
+}
+
+.inactiveTerminal {
+  visibility: hidden !important;
+  display: none !important;
+  z-index: 1 !important;
+  opacity: 0 !important;
+}
+
+.visible {
+  display: block !important;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.terminalContainer {
   display: flex;
   flex-direction: column;
   height: 100vh; /* 使用视口高度确保占满整个可见区域 */

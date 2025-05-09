@@ -942,45 +942,87 @@ function TerminalComponent(): React.ReactNode {
         {(connProps) => (
           <>
             {/* 终端标题 */}
-            <TerminalHeader
-              networkLatency={connProps.networkLatency as number | undefined}
-              terminalMode={connProps.terminalMode}
-              fullscreen={connProps.fullscreen}
-              onAddTab={handleAddNewTab}
-              onCopyContent={handleCopyContent}
-              onDownloadLog={handleDownloadLog}
-              onShowSettings={() => setSettingsVisible(true)}
-              onToggleFullscreen={connProps.toggleFullscreen}
-              onCloseSession={handleCloseSession}
-              onOpenQuickCommands={() => setQuickCommandsVisible(true)}
-              onOpenBatchCommands={() => setBatchCommandsVisible(true)}
-            />
-
-            {/* 终端标签页 */}
-            {connProps.hasConnection && (
+            <div className={`${styles.terminalHeader} ${connProps.fullscreen ? styles.fullscreenHeader : ''}`}>
               <TerminalTabs
-                tabs={connProps.tabs} // 确保正确传递完整的tabs数组
+                tabs={connProps.tabs}
                 activeKey={connProps.activeTabKey}
-                onTabChange={handleTabChange}
-                onTabEdit={handleTabEdit}
+                onTabChange={setActiveTab}
+                onTabEdit={(targetKey, action) => {
+                  if (action === 'remove') {
+                    handleTabClose(targetKey.toString());
+                  } else if (action === 'add') {
+                    handleAddNewTab();
+                  }
+                }}
                 onTabClose={handleTabClose}
                 onAddTab={handleAddNewTab}
               />
-            )}
+              {/* 工具栏 */}
+              <div className={styles.terminalToolbar}>
+                <TerminalHeader
+                  addNewTab={handleAddNewTab}
+                  onCopyContent={handleCopyContent}
+                  onDownloadLog={handleDownloadLog}
+                  networkLatency={connProps.networkLatency}
+                  terminalMode={connProps.terminalMode || 'normal'}
+                  onToggleCode={() => { }}
+                  onToggleSplit={() => { }}
+                  onOpenSettings={() => setSettingsVisible(true)}
+                  onToggleFullscreen={connProps.toggleFullscreen || (() => { })}
+                  onCloseTab={() => handleTabClose(connProps.activeTabKey)}
+                />
+              </div>
+            </div>
 
             {/* 终端内容区域 */}
             {connProps.tabsCount > 0 ? (
               <div className={styles.terminalContainer}>
                 {/* 为每个标签创建终端容器 */}
-                {connProps.tabs.map((tab) => (
-                  <div
-                    key={tab.key}
-                    id={`terminal-element-conn-${tab.connectionId}-session-${tab.sessionId}`}
-                    className={`${styles.terminalContainerInner} ${connProps.activeTabKey === tab.key ? styles.visible : styles.hidden
-                      }`}
-                    style={{ width: '100%', height: '100%', position: 'relative' }}
-                  ></div>
-                ))}
+                {connProps.tabs.map((tab) => {
+                  // 为每个标签定义唯一的初始化标记变量名
+                  const initializedKey = `terminal_initialized_${tab.key}`;
+
+                  return (
+                    <div
+                      key={tab.key}
+                      id={`terminal-element-conn-${tab.connectionId}-session-${tab.sessionId}`}
+                      ref={el => {
+                        // 只在元素存在且引用未设置时设置引用
+                        if (el && tab.terminalRef && !tab.terminalRef.current) {
+                          console.log(`【终端容器】设置DOM引用: ${tab.key}`);
+                          tab.terminalRef.current = el;
+
+                          // 检查全局初始化标记
+                          if (connProps.activeTabKey === tab.key && !tab.xtermRef?.current && !(window as any)[initializedKey]) {
+                            console.log(`【终端容器】触发终端就绪事件: ${tab.key}`);
+
+                            // 设置初始化标记，防止重复触发
+                            (window as any)[initializedKey] = true;
+
+                            // 延迟触发，确保DOM完全渲染
+                            setTimeout(() => {
+                              window.dispatchEvent(new CustomEvent('terminal-ready', {
+                                detail: { tabKey: tab.key }
+                              }));
+                            }, 100);
+                          }
+                        }
+                      }}
+                      className={`${styles.terminalContainerInner} ${connProps.activeTabKey === tab.key ? styles.activeTerminal : styles.inactiveTerminal}`}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        zIndex: connProps.activeTabKey === tab.key ? 10 : 1, // 确保活动标签在最上层
+                        opacity: connProps.activeTabKey === tab.key ? 1 : 0, // 非活动标签完全透明
+                        visibility: connProps.activeTabKey === tab.key ? 'visible' : 'hidden',
+                        display: connProps.activeTabKey === tab.key ? 'block' : 'none' // 同时控制display属性
+                      }}
+                    ></div>
+                  );
+                })}
               </div>
             ) : connProps.hasConnection ? (
               <TerminalGuide

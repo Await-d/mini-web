@@ -1,5 +1,8 @@
 import { FC, ReactNode } from 'react';
-import type { TerminalTab } from '../../contexts/TerminalContext';
+import { TerminalTab } from '../../contexts/TerminalContext';
+
+// 导出TerminalTab类型，以便其他文件可以直接从这里导入
+export type { TerminalTab };
 
 // 终端连接包装器属性
 export interface TerminalConnectionWrapperProps {

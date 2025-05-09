@@ -11,6 +11,8 @@ import { type Connection, sessionAPI } from '../services/api';
 export interface TerminalTab {
   key: string;
   title: string;
+  icon?: React.ReactNode; // 添加可选的图标属性
+  status?: string; // 添加可选的状态属性
   connectionId?: number;
   sessionId?: number;
   connection?: Connection;
@@ -21,6 +23,10 @@ export interface TerminalTab {
   fitAddonRef: RefObject<FitAddon | null>;
   searchAddonRef: RefObject<SearchAddon | null>;
   messageQueueRef: RefObject<string[] | null>;
+  protocol?: string; // 添加协议类型
+  hostname?: string; // 添加主机名
+  port?: number; // 添加端口
+  username?: string; // 添加用户名
 }
 
 // 定义上下文状态类型
