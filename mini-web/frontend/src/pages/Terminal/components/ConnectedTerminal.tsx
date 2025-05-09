@@ -13,9 +13,6 @@ import { Button } from 'antd';
 // 终端连接状态类型
 type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
-// 创建DOM元素ID
-const createTerminalId = (key: string) => `terminal-element-${key}`;
-
 // 终端连接组件 - 显示并管理已连接的终端
 function ConnectedTerminal() {
   const { state, updateTab, addTab, setActiveTab, closeTab } = useTerminal();
@@ -89,15 +86,24 @@ function ConnectedTerminal() {
 
   // 检查是否需要创建新标签并处理初始化
   useEffect(() => {
-    console.log('【终端】检查是否需要创建标签，connectionId=', connectionId, 'activeTab=', activeTab?.key);
+    console.log('【终端】检查是否需要创建标签，connectionId=', connectionId, 'activeTab=', activeTab?.key, 'sessionParam=', sessionParam, 'tabs=', tabs.length);
 
     // 首先检查是否已存在具有相同connectionId和sessionId的标签
-    const existingTab = tabs.find(tab =>
-      tab.connectionId === parseInt(connectionId || '0', 10) &&
-      tab.sessionId === (sessionParam ? parseInt(sessionParam, 10) : undefined) &&
-      connectionId !== null &&
-      connectionId !== undefined
-    );
+    const existingTab = tabs.find(tab => {
+      // 确保连接ID匹配
+      const connectionIdMatches = tab.connectionId === parseInt(connectionId || '0', 10);
+
+      // 会话ID检查更宽松 - 如果没有sessionParam，则忽略sessionId检查
+      const sessionIdMatches = sessionParam
+        ? tab.sessionId === parseInt(sessionParam, 10)
+        : true; // 如果没有sessionParam，则认为会话ID匹配
+
+      // 确保connectionId有效
+      const connectionIdValid = connectionId !== null && connectionId !== undefined;
+
+      // 所有条件都必须满足
+      return connectionIdMatches && sessionIdMatches && connectionIdValid;
+    });
 
     if (existingTab) {
       console.log(`【终端】检测到已存在标签 ${existingTab.key}，将激活此标签`);
@@ -116,17 +122,19 @@ function ConnectedTerminal() {
       return;
     }
 
-    // 如果有连接ID但没有活动的标签或活动标签为no-tabs，则创建新标签
-    if (connectionId && sessionParam && (!activeTab || activeTab?.key === 'no-tabs')) {
-      console.log('【终端】检测到连接ID和会话ID但无活动标签，立即创建新标签');
+    // 如果有连接ID但没有活动的标签或活动标签为no-tabs，或者没有匹配的标签，则创建新标签
+    if (connectionId && (!activeTab || activeTab?.key === 'no-tabs' || !existingTab)) {
+      console.log('【终端】检测到连接ID但无活动标签或匹配标签，立即创建新标签');
 
       // 解析参数
       const connId = parseInt(connectionId, 10);
-      const sessId = parseInt(sessionParam, 10);
+      const sessId = sessionParam ? parseInt(sessionParam, 10) : undefined;
 
-      // 生成唯一的标签键
+      // 生成唯一的标签键 - 即使没有sessionParam也能工作
       const timestamp = Date.now();
-      const tabKey = `conn-${connId}-session-${sessId}-${timestamp}`;
+      const tabKey = `conn-${connId}-session-${sessId || 'direct'}-${timestamp}`;
+
+      console.log(`【终端】生成标签键: ${tabKey}, 会话ID: ${sessId || '无'}`);
 
       // 创建引用
       const terminalRef = React.createRef<HTMLDivElement>();

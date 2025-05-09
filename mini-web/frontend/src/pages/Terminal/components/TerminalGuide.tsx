@@ -1,8 +1,8 @@
 import React from 'react';
 import { Button, Typography, Card, Space, Row, Col } from 'antd';
-import { 
-  CodeOutlined, 
-  MenuFoldOutlined, 
+import {
+  CodeOutlined,
+  MenuFoldOutlined,
   MenuUnfoldOutlined,
   LinkOutlined,
   DesktopOutlined
@@ -35,15 +35,15 @@ const TerminalGuide: React.FC<TerminalGuideProps> = ({
           <Col xs={24} sm={12}>
             <Card title="快速操作" className={styles.guideCard}>
               <Space direction="vertical" style={{ width: '100%' }}>
-                <Button 
-                  type="primary" 
+                <Button
+                  type="primary"
                   icon={<LinkOutlined />}
                   block
                 >
                   <Link to="/connections">管理连接</Link>
                 </Button>
-                <Button 
-                  icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} 
+                <Button
+                  icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
                   onClick={onToggleSidebar}
                   block
                 >

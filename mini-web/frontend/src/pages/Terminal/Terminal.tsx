@@ -6,7 +6,7 @@
  * @Description: 请填写简介
  */
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useParams } from 'react-router-dom';
 import ConnectedTerminal from './components/ConnectedTerminal';
 import TerminalNotConnected from './components/TerminalNotConnected';
 import TerminalConnectionWrapper from './components/TerminalConnectionWrapper';
@@ -15,7 +15,9 @@ import './Terminal.css';
 const Terminal: React.FC = () => {
     // 获取URL参数
     const [searchParams] = useSearchParams();
-    const connectionId = searchParams.get('id');
+    const { connectionId: pathConnectionId } = useParams<{ connectionId: string }>();
+    // 路径参数优先，查询参数其次
+    const connectionId = pathConnectionId || searchParams.get('id');
     const sessionId = searchParams.get('sessionId');
 
     // 连接状态

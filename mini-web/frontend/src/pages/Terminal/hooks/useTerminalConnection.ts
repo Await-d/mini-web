@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, createRef, RefObject } from 'react';
+import { useState, useCallback, useEffect, useRef, createRef } from 'react';
 import { message } from 'antd';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { connectionAPI, sessionAPI } from '../../../services/api';
@@ -10,6 +10,7 @@ import type { WindowSize, TerminalMessage } from '../utils/terminalConfig';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { SearchAddon } from 'xterm-addon-search';
+import { WebLinksAddon } from 'xterm-addon-web-links';
 
 // 导入拆分出的子Hook
 import { useTerminalInitialization } from './useTerminalInitialization';
@@ -84,6 +85,9 @@ const saveSessionInfo = (connectionId: number, sessionId: number, tabKey: string
   }
 };
 
+// 创建isLoadingRef
+const isLoadingRef = { current: false }; // 使用对象模拟ref以避免重复渲染
+
 /**
  * 终端连接的主Hook，整合各子Hook的功能
  */
@@ -147,6 +151,9 @@ export const useTerminalConnection = () => {
   // 保存间隔定时器引用以便清理
   const intervalsRef = useRef<{ [key: string]: number }>({});
 
+  // 添加一个useRef来跟踪已处理过的连接ID和会话ID组合
+  const processedConnectionRef = useRef<Set<string>>(new Set());
+
   // 发送数据到服务器
   const sendDataToServer = useCallback((data: string) => {
     const activeTab = tabs.find(tab => tab.key === activeTabKey);
@@ -164,12 +171,12 @@ export const useTerminalConnection = () => {
 
     // 先查找活动标签，显式添加类型断言
     const activeTab = (tabs.find(tab => tab.key === activeTabKey) ||
-      (terminalStateRef.current.tabs as TerminalTab[]).find(tab => tab.key === terminalStateRef.current.activeTabKey)) as TerminalTab | undefined;
+      (terminalStateRef.current?.tabs as TerminalTab[])?.find(tab => tab.key === terminalStateRef.current?.activeTabKey)) as TerminalTab | undefined;
 
     // 标签信息调试
     console.log("【连接流程】清理URL时的标签状态:", {
       activeTabKey: activeTabKey,
-      refTabsCount: terminalStateRef.current.tabs?.length || 0,
+      refTabsCount: terminalStateRef.current?.tabs?.length || 0,
       contextTabsCount: tabs.length,
       hasActiveTab: !!activeTab,
       activeTabDetails: activeTab ? {
@@ -229,7 +236,7 @@ export const useTerminalConnection = () => {
 
           // 重新获取当前标签页，添加类型断言
           const currentTab = (tabs.find(tab => tab.key === activeTab.key) ||
-            (terminalStateRef.current.tabs as TerminalTab[]).find(tab => tab.key === activeTab.key)) as TerminalTab | undefined;
+            (terminalStateRef.current?.tabs as TerminalTab[])?.find(tab => tab.key === activeTab.key)) as TerminalTab | undefined;
 
           if (currentTab && (!currentTab.isConnected || !currentTab.webSocketRef?.current)) {
             console.log("【连接流程】URL清理后发现连接丢失，尝试恢复连接");
@@ -267,12 +274,12 @@ export const useTerminalConnection = () => {
     } else {
       console.warn("【连接流程】无法保存会话信息，活动标签不存在");
       // 保留URL参数直到标签创建成功
-      if (tabs.length === 0 && terminalStateRef.current.tabs.length === 0) {
+      if (tabs.length === 0 && (terminalStateRef.current?.tabs?.length || 0) === 0) {
         console.log("【连接流程】无标签，暂不清理URL参数");
         return;
       } else {
         // 如果有标签但找不到活动标签，尝试保存第一个标签的信息
-        const firstTab = terminalStateRef.current.tabs[0] || tabs[0];
+        const firstTab = terminalStateRef.current?.tabs?.[0] || tabs[0];
         if (firstTab) {
           console.log("【连接流程】使用第一个标签保存会话信息");
 
@@ -400,7 +407,8 @@ export const useTerminalConnection = () => {
       console.log(`【会话创建】开始为连接 ${connectionId} 创建新会话`);
       const response = await sessionAPI.createSession(connectionId);
 
-      if (response && response.data && response.data.success && response.data.data) {
+      // 修改检查方式以适应API响应格式
+      if (response && response.data && response.data.code === 200 && response.data.data) {
         const sessionId = response.data.data.id;
         console.log(`【会话创建】会话创建成功，ID: ${sessionId}`);
         return sessionId;
@@ -414,243 +422,172 @@ export const useTerminalConnection = () => {
     }
   }, []);
 
-  // 将fetchConnectionAndCreateTab提升为hook级别函数
-  const fetchConnectionAndCreateTab = useCallback(async (connectionId: number, sessionId?: number) => {
-    if (!connectionId) {
-      console.error('【连接流程】错误: connectionId为空');
-      return null;
+  // DOM就绪检查和初始化函数
+  const checkAndInitTerminal = useCallback((tabKey: string, retryCount = 0) => {
+    if (!terminalStateRef.current) {
+      console.error(`【连接流程】terminalStateRef.current为空，无法检查DOM就绪状态`);
+      return;
     }
 
-    console.log(`【连接流程】开始获取连接信息: connectionId=${connectionId}, sessionId=${sessionId}`);
+    const tab = terminalStateRef.current.tabs.find(t => t.key === tabKey);
 
-    // 清除所有可能存在的重试计时器，确保干净的开始
-    clearRetryTimers();
+    if (!tab) {
+      console.error(`【连接流程】无法找到标签: ${tabKey}`);
+      return;
+    }
+
+    // 保证connectionId和sessionId存在
+    if (!tab.connectionId || !tab.sessionId) {
+      console.error(`【连接流程】标签缺少connectionId或sessionId: ${tabKey}`);
+      return;
+    }
+
+    const terminalElement = document.getElementById(`terminal-element-conn-${tab.connectionId}-session-${tab.sessionId}`);
+
+    if (!terminalElement) {
+      if (retryCount < 5) {
+        console.log(`【连接流程】终端DOM元素不可用，${retryCount + 1}次尝试，将在250ms后重试`);
+        setTimeout(() => checkAndInitTerminal(tabKey, retryCount + 1), 250);
+      } else {
+        console.error(`【连接流程】终端DOM元素不可用，已达到最大重试次数`);
+        message.error('无法初始化终端界面，请刷新页面重试');
+      }
+      return;
+    }
+
+    // DOM已就绪，设置引用并初始化连接
+    if (tab.terminalRef) {
+      tab.terminalRef.current = terminalElement as HTMLDivElement;
+      console.log(`【连接流程】已设置终端DOM引用: ${tabKey}`);
+
+      // 分发DOM就绪事件
+      window.dispatchEvent(new CustomEvent('terminal-ready', {
+        detail: { tabKey }
+      }));
+      console.log(`【连接流程】分发终端就绪事件: ${tabKey}`);
+    }
+
+    // 初始化WebSocket连接，确保参数类型正确
+    if (typeof tab.connectionId === 'number' && typeof tab.sessionId === 'number') {
+      // 延迟初始化WebSocket连接，确保DOM和事件处理程序已就绪
+      setTimeout(() => {
+        try {
+          createWebSocketConnection(tab.connectionId as number, tab.sessionId as number, tabKey);
+          console.log(`【连接流程】DOM就绪检查通过，已初始化WebSocket连接: ${tabKey}`);
+        } catch (error) {
+          console.error(`【连接流程】初始化WebSocket连接失败:`, error);
+          message.error('连接服务器失败，请重试');
+
+          // 添加重试按钮
+          if (tab.terminalRef?.current) {
+            const retryButton = document.createElement('button');
+            retryButton.innerText = '重试连接';
+            retryButton.style.position = 'absolute';
+            retryButton.style.top = '50%';
+            retryButton.style.left = '50%';
+            retryButton.style.transform = 'translate(-50%, -50%)';
+            retryButton.style.padding = '8px 16px';
+            retryButton.style.backgroundColor = '#1677ff';
+            retryButton.style.color = 'white';
+            retryButton.style.border = 'none';
+            retryButton.style.borderRadius = '4px';
+            retryButton.style.cursor = 'pointer';
+
+            retryButton.onclick = () => {
+              if (tab.terminalRef?.current) {
+                tab.terminalRef.current.innerHTML = '';
+                checkAndInitTerminal(tabKey, 0);
+              }
+            };
+
+            tab.terminalRef.current.appendChild(retryButton);
+          }
+        }
+      }, 300);
+    } else {
+      console.error(`【连接流程】无法初始化WebSocket连接，参数类型错误: ${tabKey}`);
+    }
+  }, [createWebSocketConnection]);
+
+  // 将fetchConnectionAndCreateTab函数用useCallback包装
+  const fetchConnectionAndCreateTab = useCallback(async (connectionId: number, sessionId?: number) => {
+    console.log(`【获取连接】开始获取连接信息: 连接ID=${connectionId}, 会话ID=${sessionId}`);
 
     try {
-      // 先检查是否已有相同连接的标签
-      const existingTab = tabs.find(tab =>
-        tab.connectionId === connectionId && (!sessionId || tab.sessionId === sessionId)
-      );
-
-      if (existingTab) {
-        console.log(`【连接流程】找到相同连接的标签: ${existingTab.key}`);
-
-        // 激活标签 - 只调用一次，避免多余的状态更新
-        setActiveTab(existingTab.key);
-
-        // 保存为最近创建的标签
-        localStorage.setItem('terminal_last_created_tab', existingTab.key);
-
-        // 分发激活事件
-        window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-          detail: { tabKey: existingTab.key, isNewTab: false }
-        }));
-
-        return existingTab;
-      }
-
-      // 获取连接详情
+      // 从API获取连接详情
       const response = await connectionAPI.getConnection(connectionId);
-      console.log(`【连接流程】获取连接信息响应:`, response);
+      if (response && response.data && response.data.data) {
+        const connectionData = response.data.data;
+        console.log(`【获取连接】成功获取连接详情:`, connectionData);
 
-      if (!response.data || response.data.code !== 200) {
-        console.error('【连接流程】获取连接信息失败:', response.data);
+        // 生成唯一标签键，包含时间戳
+        const timestamp = Date.now();
+        const tabKey = `tab-${connectionId}-${sessionId || 'nosession'}-${timestamp}`;
+
+        // 创建所有必要的引用
+        const terminalRef = createRef<HTMLDivElement>();
+        const xtermRef = createRef<Terminal>();
+        const webSocketRef = createRef<WebSocket>();
+        const fitAddonRef = createRef<FitAddon>();
+        const searchAddonRef = createRef<SearchAddon>();
+        const messageQueueRef = createRef<string[]>();
+
+        // 初始化消息队列
+        messageQueueRef.current = [];
+
+        // 创建标签对象
+        const tab: TerminalTab = {
+          key: tabKey,
+          title: connectionData.name || `Terminal ${connectionId}`,
+          connectionId,
+          sessionId,
+          connection: connectionData, // 存储完整的连接信息
+          terminalRef,
+          xtermRef,
+          webSocketRef,
+          fitAddonRef,
+          searchAddonRef,
+          messageQueueRef,
+          isConnected: false
+        };
+
+        // 保存会话信息到localStorage
+        saveSessionInfo(connectionId, sessionId || 0, tabKey, connectionData);
+
+        // 添加标签到context
+        addTab(tab);
+
+        // 确保状态更新
+        terminalStateRef.current = {
+          ...terminalStateRef.current!,
+          tabs: [...terminalStateRef.current!.tabs, tab]
+        };
+
+        // 触发标签激活事件
+        setTimeout(() => {
+          setActiveTab(tabKey);
+          window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
+            detail: { tabKey, isNewTab: true }
+          }));
+
+          // 触发终端就绪事件
+          window.dispatchEvent(new CustomEvent('terminal-ready', {
+            detail: { tabKey }
+          }));
+        }, 100);
+
+        // 返回创建的标签
+        return tab;
+      } else {
+        const errorMsg = response?.data?.message || '未知错误';
+        console.error(`【获取连接】无法获取连接信息: ${errorMsg}`);
         return null;
       }
-
-      const connectionInfo = response.data.data;
-      console.log(`【连接流程】成功获取连接 ${connectionId} 的信息:`, connectionInfo);
-
-      // 尝试创建会话
-      let sessionIdToUse = sessionId;
-      if (!sessionIdToUse) {
-        // 尝试创建新会话
-        const newSessionId = await createNewSession(connectionId);
-        if (!newSessionId) {
-          console.error('【连接流程】无法为连接创建会话');
-          return null;
-        }
-        sessionIdToUse = newSessionId;
-      }
-
-      // 创建新标签
-      const timestamp = Date.now();
-      const tabKey = `conn-${connectionId}-session-${sessionIdToUse}-${timestamp}`;
-
-      // 终端引用
-      const terminalRef = createRef<HTMLDivElement>();
-      const xtermRef = createRef<Terminal>();
-      const webSocketRef = createRef<WebSocket>();
-      const fitAddonRef = createRef<FitAddon>();
-      const searchAddonRef = createRef<SearchAddon>();
-
-      // 消息队列引用
-      const messageQueueRef = createRef<string[]>();
-      messageQueueRef.current = [];
-
-      // 创建新标签对象
-      const newTab: TerminalTab = {
-        key: tabKey,
-        title: connectionInfo.name || `连接${connectionId}`,
-        connectionId: connectionId,
-        sessionId: sessionIdToUse,
-        connection: connectionInfo,
-        isConnected: false,
-        terminalRef,
-        xtermRef,
-        webSocketRef,
-        fitAddonRef,
-        searchAddonRef,
-        messageQueueRef
-      };
-
-      console.log(`【连接流程】创建新标签 ${tabKey}，准备添加到状态`);
-
-      // 持久化会话信息以便于恢复
-      saveSessionInfo(connectionId, sessionIdToUse, tabKey, connectionInfo);
-
-      // 保存最新创建的标签到localStorage - 在添加标签前先保存
-      localStorage.setItem('terminal_last_created_tab', tabKey);
-
-      // 添加到状态，触发React更新
-      addTab(newTab);
-      console.log(`【连接流程】已添加标签到状态`);
-
-      // 设置为活动标签
-      setActiveTab(tabKey);
-      console.log(`【连接流程】已设置活动标签: ${tabKey}`);
-
-      // 确保在terminalStateRef.current中也更新activeTabKey
-      if (terminalStateRef && terminalStateRef.current) {
-        terminalStateRef.current.activeTabKey = tabKey;
-      }
-
-      // 分发激活事件 - 不要延迟，立即分发
-      window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-        detail: { tabKey: tabKey, isNewTab: true }
-      }));
-      console.log(`【连接流程】已分发标签激活事件: ${tabKey}`);
-
-      // 多次触发DOM就绪事件，确保终端初始化成功
-      [100, 300, 600, 1000].forEach(delay => {
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('terminal-ready', {
-            detail: { tabKey: tabKey }
-          }));
-          console.log(`【连接流程】${delay}ms后触发terminal-ready事件`);
-        }, delay);
-      });
-
-      // 确保刷新后仍然选择这个新标签
-      // 设置一个标记，强制下次刷新选择这个标签
-      localStorage.setItem('force_select_tab', tabKey);
-
-      return newTab;
     } catch (error) {
-      console.error('【连接流程】获取连接信息或创建标签时出错:', error);
-      return null;
+      console.error(`【获取连接】获取连接信息失败:`, error);
+      throw error;
     }
-  }, [tabs, addTab, setActiveTab, createNewSession, clearRetryTimers]);
-
-  // 处理连接ID和会话ID参数
-  useEffect(() => {
-    // 如果有连接ID和会话ID，创建新标签
-    if (connectionId && sessionParam) {
-      // 创建唯一键来标识这个连接+会话组合
-      const connectionKey = `${connectionId}-${sessionParam}`;
-      console.log(`检测到连接参数: 连接ID=${connectionId}, 会话ID=${sessionParam}, 键=${connectionKey}`);
-
-      // 检查这个特定组合是否已经处理
-      if (!processedRef.current.get(connectionKey)) {
-        console.log(`开始处理新的连接组合: ${connectionKey}`);
-
-        // 标记此组合为已处理
-        processedRef.current.set(connectionKey, true);
-
-        // 添加检查以防止重复请求
-        const existingTab = tabs.find(
-          tab => tab.connectionId === Number(connectionId) && tab.sessionId === Number(sessionParam)
-        );
-
-        if (!existingTab) {
-          console.log("【连接流程】未找到匹配的标签页，创建新标签...");
-
-          // 立即创建标签，不要使用延迟
-          fetchConnectionAndCreateTab(Number(connectionId), Number(sessionParam)).then((newTab) => {
-            if (newTab) {
-              console.log("【连接流程】创建标签页成功:", newTab.key);
-
-              // 保存连接信息到localStorage
-              saveSessionInfo(Number(connectionId), Number(sessionParam), newTab.key, newTab.connection);
-
-              // 保存最新创建的标签到localStorage
-              localStorage.setItem('terminal_last_created_tab', newTab.key);
-
-              // 立即设置为活动标签
-              setActiveTab(newTab.key);
-
-              // 清理URL
-              cleanURL();
-
-              // 分发激活事件
-              window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-                detail: { tabKey: newTab.key, isNewTab: true }
-              }));
-
-              // 多次触发终端就绪事件，确保终端被正确初始化
-              [100, 300, 600, 1000].forEach(delay => {
-                setTimeout(() => {
-                  window.dispatchEvent(new CustomEvent('terminal-ready', {
-                    detail: { tabKey: newTab.key }
-                  }));
-                }, delay);
-              });
-            } else {
-              console.error("【连接流程】创建标签页失败");
-              message.error("创建终端标签失败，请重试");
-            }
-
-            // 清理此组合的处理状态，允许下次点击同一连接时创建新标签
-            setTimeout(() => {
-              processedRef.current.delete(connectionKey);
-              console.log(`清理连接组合处理状态: ${connectionKey}`);
-            }, 1000);
-          }).catch(err => {
-            console.error("【连接流程】创建标签页失败:", err);
-            message.error("创建终端标签失败，请重试");
-            processedRef.current.delete(connectionKey); // 发生错误时清理处理状态
-          });
-        } else {
-          console.log(`【连接流程】找到匹配的标签页: ${existingTab.key}，激活此标签`);
-          // 如果已存在，只激活该标签并清理URL
-          setActiveTab(existingTab.key);
-
-          // 保存最新选择的标签到localStorage
-          localStorage.setItem('terminal_last_created_tab', existingTab.key);
-
-          // 分发激活事件
-          window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-            detail: { tabKey: existingTab.key, isNewTab: false }
-          }));
-
-          cleanURL();
-
-          // 清理处理状态，允许再次点击
-          setTimeout(() => {
-            processedRef.current.delete(connectionKey);
-            console.log(`清理已存在标签的连接组合处理状态: ${connectionKey}`);
-          }, 300);
-        }
-      } else {
-        console.log(`已处理过的连接组合，跳过处理: ${connectionKey}`);
-        // 即使是已处理的连接，也允许在一段时间后再次处理
-        setTimeout(() => {
-          processedRef.current.delete(connectionKey);
-          console.log(`定时清理连接组合处理状态: ${connectionKey}`);
-        }, 2000);
-      }
-    }
-  }, [connectionId, sessionParam, addTab, setActiveTab, tabs, cleanURL, fetchConnectionAndCreateTab]);
+  }, [addTab, setActiveTab, saveSessionInfo]);
 
   // 当没有标签时的特殊处理
   useEffect(() => {
@@ -658,11 +595,11 @@ export const useTerminalConnection = () => {
     const savedSession = localStorage.getItem('current_terminal_session');
 
     // 优先使用引用状态判断是否有标签
-    const hasTabsInRef = terminalStateRef.current.tabs.length > 0;
+    const hasTabsInRef = (terminalStateRef.current?.tabs?.length || 0) > 0;
     const hasTabsInContext = tabs.length > 0;
 
     console.log('【连接流程】检查恢复会话条件:', {
-      refTabs: terminalStateRef.current.tabs.length,
+      refTabs: terminalStateRef.current?.tabs?.length || 0,
       contextTabs: tabs.length,
       hasConnectionId: !!connectionId,
       hasSavedSession: !!savedSession
@@ -766,378 +703,6 @@ export const useTerminalConnection = () => {
       document.head.removeChild(style);
     };
   }, []);
-
-  // 标签切换时初始化终端并连接WebSocket
-  useEffect(() => {
-    console.log(`【连接调试】检测到活动标签页变化，尝试执行初始化和连接: ${activeTabKey || 'no-tabs'}`);
-
-    // 检查全局引用中的标签列表
-    const refTabs = terminalStateRef.current.tabs;
-    console.log(`【连接调试】状态比较:`, {
-      contextTabs: tabs.length,
-      refTabs: refTabs.length,
-      contextActiveKey: activeTabKey,
-      refActiveKey: terminalStateRef.current.activeTabKey
-    });
-
-    // 优先使用引用中的标签列表，防止状态延迟更新问题
-    const tabsToUse = refTabs.length > tabs.length ? refTabs : tabs;
-
-    console.log(`【连接调试】当前标签页列表:`, tabsToUse.map(t => ({
-      key: t.key,
-      connectionId: t.connectionId,
-      sessionId: t.sessionId,
-      hasTerminalRef: !!t.terminalRef?.current,
-      hasXtermRef: !!t.xtermRef?.current,
-      isConnected: t.isConnected,
-      protocol: t.connection?.protocol
-    })));
-
-    // 优先使用引用查找活动标签
-    let activeTab;
-    if (activeTabKey !== 'no-tabs') {
-      activeTab = tabsToUse.find(tab => tab.key === activeTabKey);
-    } else if (terminalStateRef.current.activeTabKey !== 'no-tabs') {
-      // 使用引用中的activeTabKey作为备选
-      activeTab = tabsToUse.find(tab => tab.key === terminalStateRef.current.activeTabKey);
-    }
-
-    if (!activeTab || !activeTab.terminalRef?.current) {
-      console.log(`【连接调试】terminalRef未初始化: activeTab ${activeTab ? '存在' : '不存在'}, terminalRef ${activeTab?.terminalRef?.current ? '存在' : '不存在'}`);
-
-      // 如果activeTab存在但terminalRef未初始化，设置延迟重试
-      if (activeTab) {
-        console.log('检测到activeTab但terminalRef未初始化，设置延迟重试');
-
-        // 增加重试次数和间隔，提高成功率
-        const retryIntervals = [300, 600, 1000, 1500, 2000, 3000, 5000]; // 增加更多间隔和更长的时间
-
-        let retryAttempt = 0;
-        const maxRetries = retryIntervals.length;
-
-        // 创建递归重试函数，更可靠
-        const attemptInitialization = (delay: number, attempt: number) => {
-          const timerId = setTimeout(() => {
-            // 清除此定时器ID
-            retryTimersRef.current = retryTimersRef.current.filter(id => id !== timerId);
-
-            // 每次重试时重新获取最新状态，优先从引用中获取
-            const currentTabs = terminalStateRef.current.tabs.length > 0 ?
-              terminalStateRef.current.tabs : tabsToUse;
-
-            const currentActiveKey = activeTabKey !== 'no-tabs' ?
-              activeTabKey : terminalStateRef.current.activeTabKey;
-
-            // 获取当前活动标签
-            const currentActiveTab = currentTabs.find(tab => tab.key === currentActiveKey);
-
-            // 检查标签是否仍存在于状态中
-            const tabStillExists = () => {
-              if (!currentActiveTab || !currentActiveTab.key) return false;
-
-              // 检查标签是否仍在状态中
-              const tabsInState = terminalStateRef.current?.tabs || [];
-              return tabsInState.some(t => t.key === currentActiveTab.key);
-            };
-
-            // 如果标签不再存在，终止重试
-            if (!tabStillExists()) {
-              console.log(`【终端】标签 ${currentActiveKey} 已不存在，终止重试`);
-              return;
-            }
-
-            // 添加调试输出，显示DOM元素查询信息
-            if (currentActiveTab && currentActiveTab.key) {
-              const terminalElement = document.querySelector(`.terminal-element-${currentActiveTab.key}`);
-              console.log(`【DOM检查】标签 ${currentActiveTab.key}: DOM元素存在: ${!!terminalElement}, ref存在: ${!!currentActiveTab.terminalRef?.current}`);
-            }
-
-            console.log(`重试初始化(${attempt}/${maxRetries}): activeTab ${currentActiveTab ? '存在' : '不存在'}, ` +
-              `terminalRef ${currentActiveTab?.terminalRef?.current ? '存在' : '不存在'}, ` +
-              `连接尝试 ${connectionAttemptRef.current ? '已进行' : '未进行'}`);
-
-            if (currentActiveTab?.terminalRef?.current && !connectionAttemptRef.current) {
-              console.log(`延迟重试${attempt}成功：terminalRef已初始化，开始连接`);
-              connectionAttemptRef.current = true; // 标记为已尝试连接，避免重复
-
-              // 执行初始化和连接逻辑
-              const handleTerminalData = (data: string) => {
-                if (!data) return;
-                console.log('终端输入数据:', data.length > 10 ? data.substring(0, 10) + '...' : data);
-                sendDataToServer(data);
-              };
-
-              // 初始化终端实例
-              console.log('延迟初始化终端实例...');
-              const initialized = initTerminal(currentActiveTab, handleTerminalData);
-
-              if (initialized) {
-                console.log('终端实例初始化成功，附加事件处理程序');
-
-                // 添加终端焦点事件
-                const cleanup = attachTerminalFocusHandlers(currentActiveTab);
-
-                // 创建终端工具按钮
-                createTerminalTools(currentActiveTab);
-
-                // 设置定期检测终端模式
-                const modeCleanup = setupModeDetection(currentActiveTab);
-
-                // 设置定期测量网络延迟
-                const latencyCleanup = setupLatencyMeasurement(currentActiveTab);
-
-                // 尝试建立WebSocket连接
-                console.log('延迟尝试建立WebSocket连接...');
-
-                // 定义重连函数，确保它被正确定义
-                const reconnectFunction = () => {
-                  console.log('执行重连函数...');
-                  createWebSocketConnection(
-                    currentActiveTab.connectionId,
-                    currentActiveTab.sessionId,
-                    currentActiveTab.key
-                  );
-                };
-
-                // 保存重连函数到全局，确保可被其他地方调用
-                if (typeof window !== 'undefined') {
-                  (window as any).reconnectTerminal = reconnectFunction;
-                }
-
-                const onConnectionHelp = () => {
-                  createConnectionHelp(currentActiveTab, () => {
-                    createWebSocketConnection(
-                      currentActiveTab.connectionId,
-                      currentActiveTab.sessionId,
-                      currentActiveTab.key
-                    );
-                  });
-                };
-
-                const onRetryInterface = () => {
-                  createRetryInterface(
-                    currentActiveTab,
-                    () => createWebSocketConnection(
-                      currentActiveTab.connectionId,
-                      currentActiveTab.sessionId,
-                      currentActiveTab.key
-                    ),
-                    () => createConnectionHelp(
-                      currentActiveTab,
-                      () => createWebSocketConnection(
-                        currentActiveTab.connectionId,
-                        currentActiveTab.sessionId,
-                        currentActiveTab.key
-                      )
-                    )
-                  );
-                };
-
-                // 立即尝试连接
-                createWebSocketConnection(
-                  currentActiveTab.connectionId,
-                  currentActiveTab.sessionId,
-                  currentActiveTab.key
-                );
-
-                // 更新标签状态
-                const updatedTab = {
-                  ...currentActiveTab,
-                  initialized: true
-                };
-                updateTab(currentActiveTab.key, updatedTab);
-              } else {
-                console.error('终端实例初始化失败，尝试下一次重试');
-                if (attempt < maxRetries) {
-                  attemptInitialization(retryIntervals[attempt], attempt + 1);
-                }
-              }
-            } else {
-              // 如果还未达到最大重试次数，继续重试
-              if (attempt < maxRetries) {
-                console.log(`重试${attempt}失败：terminalRef未初始化或已有连接，将在${retryIntervals[attempt]}ms后重试`);
-                attemptInitialization(retryIntervals[attempt], attempt + 1);
-              } else {
-                console.warn(`达到最大重试次数(${maxRetries})：终端初始化失败`);
-
-                // 尝试清理状态并重新激活标签
-                if (currentActiveTab) {
-                  console.log('尝试重新激活标签，可能会触发新的渲染周期');
-                  setActiveTab(currentActiveTab.key);
-
-                  // 最后一次尝试，强制更新DOM后检查
-                  setTimeout(() => {
-                    const finalCheck = currentTabs.find(tab => tab.key === currentActiveKey);
-                    if (finalCheck?.terminalRef?.current) {
-                      console.log('最终检查发现terminalRef已初始化，尝试连接');
-                      attemptInitialization(0, 1); // 重新开始尝试
-                    } else {
-                      console.error('最终尝试失败：无法初始化终端');
-                    }
-                  }, 1000);
-                }
-              }
-            }
-          }, delay);
-
-          // 保存定时器ID
-          retryTimersRef.current.push(timerId);
-        };
-
-        // 开始第一次尝试
-        attemptInitialization(retryIntervals[0], 1);
-      } else {
-        console.log(`【连接调试】未找到活动标签页，activeTabKey:`, activeTabKey);
-        console.log(`【连接调试】引用中的activeTabKey:`, terminalStateRef.current.activeTabKey);
-      }
-
-      return;
-    }
-
-    // 重置连接尝试状态
-    connectionAttemptRef.current = false;
-
-    // 终端已初始化，调整大小确保正确显示
-    if (activeTab.xtermRef?.current && activeTab.fitAddonRef?.current) {
-      console.log(`标签页 ${activeTabKey} 终端已初始化，调整大小`);
-
-      // 立即调整一次
-      try {
-        if (activeTab.fitAddonRef.current) {
-          console.log('立即尝试调整终端大小');
-          activeTab.fitAddonRef.current.fit();
-        }
-      } catch (e) {
-        console.error(`立即调整终端大小错误:`, e);
-      }
-
-      // 延迟多次调整以确保DOM已更新
-      [100, 300, 500, 1000].forEach(delay => {
-        setTimeout(() => {
-          try {
-            if (activeTab.fitAddonRef?.current) {
-              console.log(`${delay}ms后尝试调整终端大小`);
-              activeTab.fitAddonRef.current.fit();
-
-              // 发送一个回车确保有内容显示
-              if (delay === 1000 && activeTab.webSocketRef?.current &&
-                activeTab.webSocketRef.current.readyState === WebSocket.OPEN) {
-                console.log('发送回车以确保终端内容可见');
-                activeTab.webSocketRef.current.send('\r');
-              }
-            }
-          } catch (e) {
-            console.error(`${delay}ms后调整终端大小错误:`, e);
-          }
-        }, delay);
-      });
-
-      // 更新状态
-      setIsConnected(activeTab.isConnected || false);
-      if (activeTab.networkLatency !== undefined && activeTab.networkLatency !== null) {
-        setNetworkLatency(activeTab.networkLatency);
-      }
-      if (activeTab.terminalMode) {
-        setTerminalMode(activeTab.terminalMode);
-      }
-
-      return;
-    }
-
-    // 改进的终端数据处理函数
-    const handleTerminalData = (data: string) => {
-      if (!data) {
-        console.warn('终端输入数据为空');
-        return;
-      }
-
-      console.log('终端输入数据:', data.length > 10 ? data.substring(0, 10) + '...' : data);
-      sendDataToServer(data);
-    };
-
-    // 初始化终端实例
-    console.log('初始化终端实例...');
-    const initialized = initTerminal(activeTab, handleTerminalData);
-
-    if (!initialized) {
-      console.error('终端初始化失败，无法继续');
-      return;
-    }
-
-    // 添加终端焦点事件
-    const cleanup = attachTerminalFocusHandlers(activeTab);
-
-    // 创建终端工具按钮
-    createTerminalTools(activeTab);
-
-    // 设置定期检测终端模式
-    const modeCleanup = setupModeDetection(activeTab);
-
-    // 设置定期测量网络延迟
-    const latencyCleanup = setupLatencyMeasurement(activeTab);
-
-    // 注册全局辅助函数
-    registerGlobalHelpers(activeTab);
-
-    // 尝试建立WebSocket连接
-    const onConnectionHelp = () => {
-      createConnectionHelp(activeTab, () => {
-        createWebSocketConnection(
-          activeTab.connectionId,
-          activeTab.sessionId,
-          activeTab.key
-        );
-      });
-    };
-
-    const onRetryInterface = () => {
-      createRetryInterface(
-        activeTab,
-        () => createWebSocketConnection(
-          activeTab.connectionId,
-          activeTab.sessionId,
-          activeTab.key
-        ),
-        () => createConnectionHelp(
-          activeTab,
-          () => createWebSocketConnection(
-            activeTab.connectionId,
-            activeTab.sessionId,
-            activeTab.key
-          )
-        )
-      );
-    };
-
-    // 立即尝试连接
-    console.log('尝试建立WebSocket连接...');
-    createWebSocketConnection(
-      activeTab.connectionId,
-      activeTab.sessionId,
-      activeTab.key
-    );
-
-    // 清理函数
-    return () => {
-      clearRetryTimers(); // 清除所有重试定时器
-      if (cleanup) cleanup();
-      if (modeCleanup) modeCleanup();
-      if (latencyCleanup) latencyCleanup();
-    };
-  }, [
-    activeTabKey,
-    tabs,
-    initTerminal,
-    attachTerminalFocusHandlers,
-    createWebSocketConnection,
-    createConnectionHelp,
-    createRetryInterface,
-    registerGlobalHelpers,
-    setupModeDetection,
-    setupLatencyMeasurement,
-    createTerminalTools,
-    sendDataToServer
-  ]);
 
   // 切换全屏
   const handleToggleFullscreen = useCallback(() => {
@@ -1259,7 +824,7 @@ export const useTerminalConnection = () => {
     console.log('【连接流程】URL清理后检查连接状态');
 
     // 检查是否有标签和连接
-    const hasActiveTab = terminalStateRef.current.tabs.length > 0 || tabs.length > 0;
+    const hasActiveTab = (terminalStateRef.current?.tabs?.length || 0) > 0 || tabs.length > 0;
     const hasSavedSession = localStorage.getItem('terminal_last_session') !== null;
 
     // 如果没有活动标签但有保存的会话，尝试恢复连接
@@ -1285,7 +850,7 @@ export const useTerminalConnection = () => {
         console.log(`【事件响应】收到终端准备事件，标签: ${tabKey}`);
 
         // 获取标签信息
-        const tab = terminalStateRef.current.tabs.find(t => t.key === tabKey);
+        const tab = terminalStateRef.current?.tabs.find(t => t.key === tabKey);
         if (tab && tab.terminalRef?.current) {
           console.log(`【事件响应】标签 ${tabKey} 的DOM已准备就绪，尝试初始化终端`);
 
@@ -1296,18 +861,66 @@ export const useTerminalConnection = () => {
             sendDataToServer(data);
           };
 
-          // 初始化终端实例
-          const initialized = initTerminal(tab, handleTerminalData);
-          if (initialized) {
-            console.log(`【事件响应】终端初始化成功，准备连接`);
+          try {
+            // 初始化终端实例
+            const initialized = initTerminal(tab, handleTerminalData);
+            if (initialized) {
+              console.log(`【事件响应】终端初始化成功: ${tabKey}`);
 
-            // 准备连接 - 使用参数形式2: connectionId, sessionId, tabKey
-            createWebSocketConnection(
-              tab.connectionId,
-              tab.sessionId,
-              tab.key
-            );
+              // 准备连接
+              if (tab.connectionId && tab.sessionId) {
+                console.log(`【事件响应】准备创建WebSocket连接: ${tabKey}`);
+                // 使用参数形式2: connectionId, sessionId, tabKey
+                const connectionId = Number(tab.connectionId);
+                const sessionId = Number(tab.sessionId);
+
+                if (!isNaN(connectionId) && !isNaN(sessionId)) {
+                  createWebSocketConnection(connectionId, sessionId, tabKey);
+                } else {
+                  console.error(`【事件响应】无法创建WebSocket连接，参数无效: connectionId=${tab.connectionId}, sessionId=${tab.sessionId}`);
+                }
+              } else {
+                console.error(`【事件响应】无法创建WebSocket连接，缺少connectionId或sessionId: ${tabKey}`);
+              }
+            } else {
+              console.error(`【事件响应】终端初始化失败: ${tabKey}`);
+            }
+          } catch (err) {
+            console.error(`【事件响应】终端初始化出错: ${tabKey}`, err);
           }
+        } else if (tab && !tab.terminalRef?.current) {
+          // DOM元素不存在，尝试重新查找
+          const domId = `terminal-element-conn-${tab.connectionId}-session-${tab.sessionId}`;
+          console.log(`【事件响应】标签 ${tabKey} 的DOM不存在，尝试查找: ${domId}`);
+
+          const terminalElement = document.getElementById(domId);
+          if (terminalElement) {
+            // 设置DOM引用并重新触发事件
+            console.log(`【事件响应】找到DOM元素 ${domId}，设置引用并重新触发事件`);
+            tab.terminalRef.current = terminalElement as HTMLDivElement;
+
+            // 重新触发终端就绪事件
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('terminal-ready', {
+                detail: { tabKey: tabKey }
+              }));
+            }, 100);
+          } else {
+            console.error(`【事件响应】无法找到DOM元素: ${domId}，将在500ms后重试`);
+
+            // 添加重试
+            const timerId = setTimeout(() => {
+              console.log(`【事件响应】重试触发terminal-ready事件: ${tabKey}`);
+              window.dispatchEvent(new CustomEvent('terminal-ready', {
+                detail: { tabKey: tabKey }
+              }));
+            }, 500);
+
+            // 保存定时器ID以便清理
+            retryTimersRef.current.push(timerId);
+          }
+        } else {
+          console.error(`【事件响应】找不到标签: ${tabKey}`);
         }
       }
     };
@@ -1322,6 +935,92 @@ export const useTerminalConnection = () => {
       }
     };
   }, []);
+
+  // 添加useEffect监听connectionId和sessionParam变化
+  useEffect(() => {
+    if (connectionId && parseInt(connectionId) > 0) {
+      // 创建唯一标识符来跟踪这个连接ID和会话ID组合是否已处理
+      const connectionKey = `${connectionId}-${sessionParam || 'nosession'}`;
+
+      // 如果已经处理过这个组合，直接返回避免重复处理
+      if (processedConnectionRef.current.has(connectionKey)) {
+        return;
+      }
+
+      console.log(`【主useEffect】连接ID参数变化: ${connectionId}, 会话: ${sessionParam || '未设置'}`);
+
+      // 确保显示加载提示
+      if (isLoadingRef.current) {
+        console.log(`【主useEffect】已显示加载提示`);
+      } else {
+        console.log(`【主useEffect】显示加载提示`);
+        message.loading(`正在连接到远程服务器...`, 0.5);
+        isLoadingRef.current = true;
+      }
+
+      // 使用terminalStateRef获取最新的tabs状态，而不是依赖于tabs props
+      const currentTabs = terminalStateRef.current?.tabs || [];
+
+      // 检查是否已存在相同连接的标签
+      const existingTab = currentTabs.find(tab =>
+        tab.connectionId === parseInt(connectionId) &&
+        (!sessionParam || tab.sessionId === parseInt(sessionParam))
+      );
+
+      if (existingTab) {
+        console.log(`【主useEffect】发现现有标签: ${existingTab.key}，激活此标签`);
+        setActiveTab(existingTab.key);
+
+        // 分发激活事件
+        window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
+          detail: { tabKey: existingTab.key, isNewTab: false }
+        }));
+
+        // 记录最后活动的标签
+        localStorage.setItem('terminal_active_tab', existingTab.key);
+
+        // 标记为已处理
+        processedConnectionRef.current.add(connectionKey);
+
+        return;
+      }
+
+      // 创建新标签
+      console.log(`【主useEffect】准备创建新标签，连接ID: ${connectionId}`);
+
+      // 转换参数类型
+      const connId = parseInt(connectionId);
+      const sessId = sessionParam ? parseInt(sessionParam) : undefined;
+
+      // 标记为已处理，防止重复创建
+      processedConnectionRef.current.add(connectionKey);
+
+      // 调用fetchConnectionAndCreateTab创建标签
+      fetchConnectionAndCreateTab(connId, sessId)
+        .then(newTab => {
+          if (newTab) {
+            console.log(`【主useEffect】标签创建成功: ${newTab.key}`);
+            message.success('连接创建成功');
+          } else {
+            console.error(`【主useEffect】标签创建失败`);
+            message.error('连接创建失败');
+            // 如果创建失败，移除标记以允许再次尝试
+            processedConnectionRef.current.delete(connectionKey);
+          }
+        })
+        .catch(error => {
+          console.error(`【主useEffect】标签创建出错:`, error);
+          message.error('创建连接时发生错误');
+          // 如果创建失败，移除标记以允许再次尝试
+          processedConnectionRef.current.delete(connectionKey);
+        })
+        .finally(() => {
+          isLoadingRef.current = false;
+        });
+    } else {
+      console.log(`【主useEffect】无连接ID参数 或 ID无效: ${connectionId}`);
+    }
+  }, [connectionId, sessionParam, setActiveTab, fetchConnectionAndCreateTab]);
 
   return {
     connection,

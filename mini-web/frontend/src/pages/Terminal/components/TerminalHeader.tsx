@@ -13,10 +13,6 @@ import {
 import styles from '../styles.module.css';
 
 interface TerminalHeaderProps {
-  connection?: any;
-  connectionName?: string;
-  connectionInfo?: string;
-  isConnected?: boolean;
   networkLatency?: number;
   terminalMode?: string;
   fullscreen?: boolean;
@@ -34,10 +30,6 @@ interface TerminalHeaderProps {
 }
 
 const TerminalHeader: React.FC<TerminalHeaderProps> = ({
-  connection,
-  connectionName,
-  connectionInfo,
-  isConnected,
   networkLatency,
   terminalMode = 'normal',
   fullscreen,
@@ -54,9 +46,6 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   onOpenBatchCommands
 }) => {
   // 从connection中获取名称和信息（如果未直接提供）
-  const connName = connectionName || (connection?.name || connection?.host || '未命名连接');
-  const connInfo = connectionInfo || (connection?.username ? `${connection.username}@${connection.host || ''}:${connection.port || ''}` : '');
-
   // 兼容处理回调函数
   const handleSettings = onShowSettings || onOpenSettings;
   const handleCodePanel = onCodePanel || onOpenQuickCommands;
@@ -64,16 +53,7 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
 
   return (
     <div className={styles.terminalHeader}>
-      <div className={styles.terminalInfo}>
-        {connName ? (
-          <>
-            <span>{connName}</span>
-            {connInfo && <span className={styles.hostInfo}>{connInfo}</span>}
-          </>
-        ) : (
-          <span>Terminal</span>
-        )}
-      </div>
+      <div className={styles.terminalInfo}>      </div>
       <div className={styles.terminalControls}>
         <Tooltip title="新标签页">
           <Button

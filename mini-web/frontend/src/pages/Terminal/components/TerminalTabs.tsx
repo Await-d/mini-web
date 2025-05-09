@@ -33,12 +33,11 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
     }
   }, [activeKey]);
 
-  // 处理关闭标签事件，直接调用onTabClose回调
+  // 处理关闭标签事件
   const handleCloseTab = (e: React.MouseEvent, key: string) => {
     e.stopPropagation(); // 阻止冒泡，避免触发Tab选中事件
     e.preventDefault(); // 防止默认行为
     console.log('【标签关闭】用户点击自定义关闭按钮', key);
-    // 直接调用传入的关闭函数
     onTabClose(key);
   };
 
@@ -58,33 +57,53 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
 
   // 使用useMemo进行标签去重和数据处理
   const uniqueTabs = useMemo(() => {
-    // 使用Map按key去重
+    // 确保tabs有效，更详细的日志
+    console.log('【TerminalTabs】收到的原始标签：', tabs ? (Array.isArray(tabs) ? `数组，长度${tabs.length}` : typeof tabs) : 'null');
+    console.log('【TerminalTabs】标签数据详情：', tabs);
+
+    // 检查tabs是否存在并且是数组
+    if (!tabs || !Array.isArray(tabs)) {
+      console.log('【TerminalTabs】没有有效的标签数据：tabs不是数组');
+      return [];
+    }
+
+    if (tabs.length === 0) {
+      console.log('【TerminalTabs】没有有效的标签数据：tabs是空数组');
+      return [];
+    }
+
+    // 创建一个新的Map来保存去重后的标签
     const tabMap = new Map<string, TerminalTab>();
 
-    // 遍历原始标签，保留每个key的最后一个标签
+    // 遍历所有标签，按key去重
     tabs.forEach(tab => {
-      if (tab.key) {
+      if (tab && tab.key) {
         tabMap.set(tab.key, tab);
+        console.log(`【TerminalTabs】添加标签到Map: ${tab.key}, 标题: ${tab.title}, 连接ID: ${tab.connectionId}`);
+      } else {
+        console.log('【TerminalTabs】跳过无效标签:', tab);
       }
     });
 
     // 将Map转换回数组
-    return Array.from(tabMap.values());
+    const result = Array.from(tabMap.values());
+    console.log(`【TerminalTabs】去重后的标签: ${result.length}个`, result.map(t => `${t.key}(${t.title})`));
+    return result;
   }, [tabs]);
 
   // 构建标签项
   const items: TabsProps['items'] = uniqueTabs.map((tab) => ({
     key: tab.key,
     label: (
-      <div className={styles.tabLabel || "tab-label"}>
+      <div className={styles.tabLabel}>
         <span title={tab.title}>{tab.title}</span>
         <CloseOutlined
-          className={styles.tabCloseButton || "tab-close-button"}
+          className={styles.tabCloseButton}
           onClick={(e) => handleCloseTab(e, tab.key)}
         />
       </div>
     ),
-    closable: false, // 禁用内置的关闭按钮
+    closable: false, // 禁用内置的关闭按钮，使用自定义的关闭按钮
   }));
 
   // 调试输出
@@ -94,6 +113,11 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
     活动标签: activeKey,
     标签列表: uniqueTabs.map(t => t.key)
   });
+
+  // 如果没有标签，返回占位元素
+  if (items.length === 0) {
+    return <div className={styles.terminalTabs} style={{ minHeight: '40px' }}></div>;
+  }
 
   return (
     <div className={styles.terminalTabs}>
@@ -106,6 +130,9 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
         items={items}
         addIcon={<span onClick={onAddTab}>+</span>}
         className={styles.customTabs}
+        size="small"
+        tabPosition="top"
+        animated={{ inkBar: true, tabPane: false }}
       />
     </div>
   );

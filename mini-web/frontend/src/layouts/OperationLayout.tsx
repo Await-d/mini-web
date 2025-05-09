@@ -284,6 +284,7 @@ const OperationLayout: React.FC = () => {
   const handleSelect = (selectedKeys: React.Key[], info: any) => {
     const node = info.node as TreeNode;
     if (node.isLeaf && node.connection) {
+      console.log("【树节点】用户选择了节点:", node.title, "，连接ID:", node.connection.id);
       handleConnect(node.connection);
     }
   };

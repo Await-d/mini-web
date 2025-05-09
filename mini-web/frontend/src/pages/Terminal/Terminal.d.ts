@@ -1,32 +1,44 @@
-// 针对终端组件的类型声明
-import React from 'react';
+import { FC, ReactNode } from 'react';
+import type { TerminalTab } from '../../contexts/TerminalContext';
 
-// 定义 TerminalConnected 的 Props 接口
-export interface TerminalConnectedProps { }
-
-// 定义 TerminalNotConnected 的 Props 接口
-export interface TerminalNotConnectedProps { }
-
-// 定义 TerminalConnectionWrapper 的 Props 接口
+// 终端连接包装器属性
 export interface TerminalConnectionWrapperProps {
+    children: (props: ConnectionChildProps) => ReactNode;
     connectionParams?: {
-        connectionId?: number;
+        connectionId: number;
         sessionId?: number;
     };
-    children: (props: {
-        hasConnection: boolean;
-        tabsCount: number;
-        activeTabKey: string;
-        isConnected: boolean;
-        tabs: any[];
-        connection?: any;
-        fullscreen?: boolean;
-        terminalSize?: any;
-        networkLatency?: number | null;
-        terminalMode?: string;
-        sidebarCollapsed?: boolean;
-        toggleFullscreen?: () => void;
-        sendDataToServer?: (data: string) => void;
-        clearRetryTimers?: () => void;
-    }) => React.ReactNode;
-} 
+}
+
+// 连接子组件属性 - 传递给内部渲染函数
+export interface ConnectionChildProps {
+    hasConnection: boolean;
+    tabsCount: number;
+    activeTabKey: string;
+    isConnected: boolean;
+    tabs: TerminalTab[]; // 必需项，添加完整标签数组
+    connection?: any;
+    fullscreen?: boolean;
+    terminalSize?: any;
+    networkLatency?: number | null; // 修改为支持null值
+    terminalMode?: string;
+    sidebarCollapsed?: boolean;
+    toggleFullscreen?: () => void;
+    sendDataToServer?: (data: string) => void;
+    clearRetryTimers?: () => void;
+    [key: string]: any; // 支持其他可能的属性
+}
+
+// 终端设置
+export interface TerminalSettings {
+    fontSize: number;
+    fontFamily: string;
+    cursorBlink: boolean;
+    background: string;
+    foreground: string;
+    scrollback?: number;
+}
+
+// 其他终端相关类型定义
+export type ProtocolType = 'ssh' | 'telnet' | 'rdp' | 'vnc';
+export type TerminalMode = 'normal' | 'fullscreen';
