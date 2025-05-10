@@ -28,11 +28,11 @@ export const useWebSocketConnection = () => {
         term.writeln(`\r\n\x1b[31m${errorMsg}\x1b[0m`);
         return false;
       }
-      
+
       // 直接构建WebSocket URL
       let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const token = localStorage.getItem('token') || '';
-      
+
       // 获取后端配置
       const savedSettings = localStorage.getItem('terminal_settings');
       let backendUrl = window.location.hostname;
@@ -48,45 +48,45 @@ export const useWebSocketConnection = () => {
           console.error('读取终端设置失败:', e);
         }
       }
-      
+
       const protocol = activeTab.connection.protocol;
       let wsUrl = `${wsProtocol}//${backendUrl}:${backendPort}/ws/${protocol}/${activeTab.sessionId}`;
       wsUrl = `${wsUrl}?token=${encodeURIComponent(token)}`;
-      
+
       console.log('🔴 直接创建WebSocket连接:', wsUrl);
       term.writeln(`\r\n\x1b[33m连接到: ${wsUrl}\x1b[0m`);
-      
+
       // 把URL保存到window对象方便调试
       (window as any).lastWsUrl = wsUrl;
-      
+
       // 直接创建WebSocket
       const ws = new WebSocket(wsUrl);
       console.log('WebSocket实例创建成功，等待连接...');
-      
+
       // 将WebSocket实例导出到window对象便于调试
       (window as any).lastWebSocket = ws;
       (window as any).lastWebSocketTime = new Date().toISOString();
-      
+
       // 连接超时处理
       const connectionTimeout = setTimeout(() => {
         if (ws.readyState !== WebSocket.OPEN) {
           term.writeln('\r\n\x1b[31m连接超时，请检查后端服务\x1b[0m');
-          
+
           // 连接超时后提供帮助信息
           showConnectionHelp();
         }
       }, 5000);
-      
+
       ws.onopen = () => {
         clearTimeout(connectionTimeout);
         console.log('🎉 WebSocket连接成功!');
         term.writeln('\r\n\x1b[32m🎉 WebSocket连接成功!\x1b[0m');
-        
+
         // 更新连接状态
         activeTab.webSocketRef.current = ws;
         activeTab.isConnected = true;
         setIsConnected(true);
-        
+
         // 发送认证消息
         try {
           if (!activeTab.connection) {
@@ -94,7 +94,7 @@ export const useWebSocketConnection = () => {
             term.writeln('\r\n\x1b[31m无法发送认证消息：连接信息不存在\x1b[0m');
             return;
           }
-          
+
           const authMessage = JSON.stringify({
             type: 'auth',
             token: token,
@@ -106,10 +106,10 @@ export const useWebSocketConnection = () => {
               sessionId: activeTab.sessionId
             }
           });
-          
+
           ws.send(authMessage);
           term.writeln('\r\n\x1b[32m发送认证信息成功\x1b[0m');
-          
+
           // 发送初始命令
           setTimeout(() => {
             try {
@@ -123,30 +123,30 @@ export const useWebSocketConnection = () => {
           console.error('发送认证消息失败:', e);
           term.writeln('\r\n\x1b[31m发送认证信息失败\x1b[0m');
         }
-        
+
         // 设置WebSocket事件处理
         ws.onmessage = (event) => {
-          console.log('收到WebSocket消息:', typeof event.data === 'string' ? 
-            (event.data.length > 100 ? event.data.substring(0, 100) + '...' : event.data) : 
+          console.log('收到WebSocket消息:', typeof event.data === 'string' ?
+            (event.data.length > 100 ? event.data.substring(0, 100) + '...' : event.data) :
             '二进制数据');
           handleWebSocketMessage(event, term, activeTab.isGraphical);
         };
       };
-      
+
       ws.onclose = (event) => {
         console.log('WebSocket连接关闭:', event.code, event.reason);
         activeTab.isConnected = false;
         setIsConnected(false);
         term.writeln('\r\n\x1b[31mWebSocket连接已关闭\x1b[0m');
-        
+
         // 显示重试界面
         showRetryInterface();
       };
-      
+
       ws.onerror = (error) => {
         console.error('WebSocket错误:', error);
         term.writeln('\r\n\x1b[31mWebSocket错误，请检查后端服务\x1b[0m');
-        
+
         // 出错时也显示重试界面
         setTimeout(() => {
           if (ws.readyState !== WebSocket.OPEN) {
@@ -154,7 +154,7 @@ export const useWebSocketConnection = () => {
           }
         }, 1000);
       };
-      
+
       return true;
     } catch (e) {
       console.error('建立WebSocket连接失败:', e);
@@ -173,11 +173,11 @@ export const useWebSocketConnection = () => {
   ) => {
     const sessionId = sessId || activeTab.sessionId;
     console.log(`尝试创建简化版WebSocket连接，会话ID: ${sessionId}`);
-    
+
     try {
       let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const token = localStorage.getItem('token') || '';
-      
+
       // 获取后端配置
       const savedSettings = localStorage.getItem('terminal_settings');
       let backendUrl = window.location.hostname;
@@ -192,28 +192,28 @@ export const useWebSocketConnection = () => {
           console.error('读取终端设置失败:', e);
         }
       }
-      
+
       // 如果没有指定会话ID，尝试使用当前标签页的
       if (!sessionId) {
         console.error('simpleConnect: 未提供会话ID');
         return null;
       }
-      
+
       const protocol = activeTab.connection?.protocol || 'ssh';
       let wsUrl = `${wsProtocol}//${backendUrl}:${backendPort}/ws/${protocol}/${sessionId}`;
       wsUrl = `${wsUrl}?token=${encodeURIComponent(token)}`;
-      
+
       console.log('simpleConnect: 创建WebSocket:', wsUrl);
-      
+
       const ws = new WebSocket(wsUrl);
       console.log('simpleConnect: WebSocket实例创建成功，等待连接...');
-      
+
       (window as any).lastSimpleWs = ws;
       (window as any).lastSimpleWsTime = new Date().toISOString();
-      
+
       ws.onopen = () => {
         console.log('simpleConnect: 连接成功!');
-        
+
         // 发送认证消息
         try {
           const authMessage = JSON.stringify({
@@ -227,16 +227,16 @@ export const useWebSocketConnection = () => {
               sessionId: sessionId
             }
           });
-          
+
           ws.send(authMessage);
           console.log('simpleConnect: 发送认证消息成功');
-          
+
           // 如果是当前标签页的会话，更新连接状态
           if (sessionId === activeTab.sessionId) {
             activeTab.webSocketRef.current = ws;
             activeTab.isConnected = true;
             setIsConnected(true);
-            
+
             // 设置消息处理
             ws.onmessage = (event) => {
               if (term) {
@@ -248,7 +248,7 @@ export const useWebSocketConnection = () => {
           console.error('simpleConnect: 发送认证消息失败:', e);
         }
       };
-      
+
       return ws;
     } catch (e) {
       console.error('simpleConnect: 创建WebSocket失败:', e);
@@ -265,11 +265,11 @@ export const useWebSocketConnection = () => {
   ) => {
     // 创建HTML帮助面板
     if (!activeTab.terminalRef.current) return;
-    
+
     // 检查是否已经存在帮助面板
     const existingHelp = activeTab.terminalRef.current.querySelector('#connection-help');
     if (existingHelp) return;
-    
+
     const helpDiv = document.createElement('div');
     helpDiv.id = 'connection-help';
     helpDiv.style.position = 'absolute';
@@ -286,7 +286,7 @@ export const useWebSocketConnection = () => {
     helpDiv.style.maxWidth = '500px';
     helpDiv.style.textAlign = 'left';
     helpDiv.style.lineHeight = '1.6';
-    
+
     helpDiv.innerHTML = `
       <div style="margin-bottom:15px;font-weight:bold;font-size:16px;text-align:center">WebSocket连接问题</div>
       <div style="margin-bottom:15px">无法连接到WebSocket服务器。可能的原因：</div>
@@ -307,14 +307,14 @@ export const useWebSocketConnection = () => {
         <button id="dismiss-help" style="padding:8px 16px;background:#666;border:none;color:white;border-radius:4px;cursor:pointer">关闭提示</button>
       </div>
     `;
-    
+
     activeTab.terminalRef.current.appendChild(helpDiv);
-    
+
     // 添加按钮事件
     setTimeout(() => {
       const retryButton = document.getElementById('retry-connection');
       const dismissButton = document.getElementById('dismiss-help');
-      
+
       if (retryButton) {
         retryButton.onclick = () => {
           if (helpDiv.parentNode) {
@@ -324,7 +324,7 @@ export const useWebSocketConnection = () => {
           createDirectWebSocket();
         };
       }
-      
+
       if (dismissButton) {
         dismissButton.onclick = () => {
           if (helpDiv.parentNode) {
@@ -346,10 +346,10 @@ export const useWebSocketConnection = () => {
   ) => {
     // 在连接关闭时添加重试按钮和帮助界面
     if (!activeTab.terminalRef.current) return;
-    
+
     // 检查是否已经存在重试按钮
     if (activeTab.terminalRef.current.querySelector('#retry-button')) return;
-    
+
     const retryButton = document.createElement('button');
     retryButton.id = 'retry-button';
     retryButton.innerHTML = '重新连接';
@@ -363,14 +363,14 @@ export const useWebSocketConnection = () => {
     retryButton.style.border = 'none';
     retryButton.style.borderRadius = '4px';
     retryButton.style.cursor = 'pointer';
-    
+
     retryButton.onclick = () => {
       term.writeln('\r\n\x1b[33m重新尝试连接...\x1b[0m');
       createDirectWebSocket();
     };
-    
+
     activeTab.terminalRef.current.appendChild(retryButton);
-    
+
     // 显示连接帮助
     showConnectionHelp();
   }, []);
@@ -387,18 +387,18 @@ export const useWebSocketConnection = () => {
       console.warn('尝试发送空数据');
       return;
     }
-    
+
     console.log(`尝试发送数据到服务器: ${data.length > 20 ? data.substring(0, 20) + '...' : data}`);
 
     if (!activeTab) {
       console.error('无法发送数据：activeTab不存在');
       return;
     }
-    
+
     // WebSocket状态检查
     if (!activeTab.webSocketRef?.current) {
       console.warn('无法发送数据：WebSocket引用不存在');
-      
+
       // 在本地终端显示错误
       if (term) {
         term.writeln('\r\n\x1b[31m无法发送数据：WebSocket未连接\x1b[0m');
@@ -406,20 +406,20 @@ export const useWebSocketConnection = () => {
       }
       return;
     }
-    
+
     if (activeTab.webSocketRef.current.readyState !== WebSocket.OPEN) {
       console.warn(`无法发送数据：WebSocket未处于开启状态 (当前状态: ${activeTab.webSocketRef.current.readyState})`);
-      
+
       // 在本地终端显示错误
       if (term) {
         term.writeln('\r\n\x1b[31m无法发送数据：WebSocket未处于开启状态\x1b[0m');
         term.writeln(`\r\n\x1b[33mWebSocket状态: ${getWebSocketStateText(activeTab.webSocketRef.current.readyState)}\x1b[0m`);
-        
+
         // 尝试自动重连
         setTimeout(() => {
           if (activeTab && !activeTab.isConnected && activeTab.connection && activeTab.sessionId) {
             term.writeln('\r\n\x1b[33m尝试重新连接...\x1b[0m');
-            
+
             // 使用简化版重连函数
             simpleConnect(activeTab, term, activeTab.sessionId);
           }
@@ -427,11 +427,11 @@ export const useWebSocketConnection = () => {
       }
       return;
     }
-    
+
     try {
       // 修正回车键处理：确保后端能正确识别命令结束
       let processedData = data;
-      
+
       // 对于回车键，确保发送\r\n
       if (data === '\r' || data === '\n') {
         processedData = '\r\n';
@@ -440,19 +440,19 @@ export const useWebSocketConnection = () => {
       else if (data.endsWith('\r') && !data.endsWith('\r\n')) {
         processedData = data + '\n';
       }
-      
+
       // 记录发送的命令
       activeTab.lastActivityTime = Date.now();
-      
+
       // 确保存在连接信息
       if (!activeTab.connection) {
         console.warn('无法确定连接协议，默认使用SSH协议');
-        
+
         // 直接发送数据
         activeTab.webSocketRef.current.send(processedData);
         return;
       }
-      
+
       // 检查是否需要包装为JSON格式
       if (activeTab.connection.protocol === 'ssh' || activeTab.connection.protocol === 'telnet') {
         // SSH/Telnet协议直接发送数据
@@ -466,7 +466,7 @@ export const useWebSocketConnection = () => {
           data: processedData
         });
         activeTab.webSocketRef.current.send(jsonData);
-        
+
         // 备份机制：如果包装发送后没有响应，尝试直接发送
         setTimeout(() => {
           if (activeTab.webSocketRef?.current?.readyState === WebSocket.OPEN) {
@@ -475,9 +475,9 @@ export const useWebSocketConnection = () => {
           }
         }, 100);
       }
-      
+
       console.log('数据发送成功');
-      
+
       // 对于命令行输入，等待短暂延迟后再发送一个空回车，增加命令处理的可靠性
       if (data.includes('\r') || data.includes('\n')) {
         setTimeout(() => {
@@ -489,14 +489,14 @@ export const useWebSocketConnection = () => {
       }
     } catch (error) {
       console.error('发送数据失败:', error);
-      
+
       // 在本地终端显示错误
       if (term) {
         term.writeln(`\r\n\x1b[31m发送数据失败: ${error}\x1b[0m`);
       }
     }
   }, [simpleConnect]);
-  
+
   // 辅助函数：获取WebSocket状态文本
   const getWebSocketStateText = (state: number): string => {
     switch (state) {

@@ -155,6 +155,55 @@ const OperationLayout: React.FC = () => {
               tabKey: tabKey
             }
           }));
+
+          // 手动触发标签激活事件，确保新标签立即被保存 - 连续触发多次确保一定被处理
+          const triggerActivation = () => {
+            console.log(`【连接】手动触发标签激活事件: tabKey=${tabKey}`);
+            window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
+              detail: {
+                tabKey: tabKey,
+                isNewTab: true,
+                fromOperationLayout: true
+              }
+            }));
+
+            // 直接保存到localStorage，确保持久化
+            localStorage.setItem('terminal_active_tab', tabKey);
+            console.log(`【连接】已直接保存活动标签到localStorage: ${tabKey}`);
+
+            // 检查localStorage是否已保存
+            const savedActiveTab = localStorage.getItem('terminal_active_tab');
+            if (savedActiveTab !== tabKey) {
+              console.log(`【连接】持久化异常！localStorage中活动标签为 ${savedActiveTab}，而非预期的 ${tabKey}`);
+              // 强制保存一次
+              localStorage.setItem('terminal_active_tab', tabKey);
+
+              // 获取当前所有标签
+              const tabsJson = localStorage.getItem('terminal_tabs');
+              if (tabsJson) {
+                try {
+                  const tabs = JSON.parse(tabsJson);
+                  // 检查新标签是否已在保存的标签列表中
+                  const hasTab = tabs.some((tab: any) => tab.key === tabKey);
+                  if (!hasTab) {
+                    console.log(`【连接】标签${tabKey}未在已保存标签列表中，将尝试重新保存`);
+                    // 标签激活时，持久化组件会保存完整标签列表
+                  }
+                } catch (e) {
+                  console.error('解析已保存标签失败:', e);
+                }
+              }
+            }
+          };
+
+          // 立即触发一次
+          triggerActivation();
+
+          // 再延迟触发几次，保证一定会生效
+          setTimeout(triggerActivation, 500);
+          setTimeout(triggerActivation, 1000);
+          setTimeout(triggerActivation, 2000);
+          setTimeout(triggerActivation, 3000);
         } else {
           message.error(`创建会话失败: ${response.data?.message || '未知错误'}`);
         }

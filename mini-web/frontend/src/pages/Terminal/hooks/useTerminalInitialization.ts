@@ -17,7 +17,7 @@ export const useTerminalInitialization = () => {
       console.error('终端容器不存在，无法初始化终端');
       return false;
     }
-    
+
     // 设置关键样式确保终端容器正确显示
     activeTab.terminalRef.current.style.height = '100%';
     activeTab.terminalRef.current.style.width = '100%';
@@ -27,7 +27,7 @@ export const useTerminalInitialization = () => {
     activeTab.terminalRef.current.style.display = 'flex';
     activeTab.terminalRef.current.style.flex = '1';
     activeTab.terminalRef.current.style.backgroundColor = '#1e1e1e';
-    
+
     // 清空终端容器内容以避免潜在干扰
     activeTab.terminalRef.current.innerHTML = '';
 
@@ -46,13 +46,13 @@ export const useTerminalInitialization = () => {
     if (typeof window !== 'undefined') {
       (window as any).lastTerminalInstance = terminalInstance;
     }
-    
+
     // 保存引用到Tab对象
     const { term, fitAddon, searchAddon } = terminalInstance;
     activeTab.xtermRef.current = term;
     activeTab.fitAddonRef.current = fitAddon;
     activeTab.searchAddonRef.current = searchAddon;
-    
+
     // 确保messageQueueRef正确初始化
     if (!activeTab.messageQueueRef) {
       activeTab.messageQueueRef = { current: terminalInstance.messageQueue };
@@ -88,13 +88,13 @@ export const useTerminalInitialization = () => {
     const handleTerminalFocus = () => {
       if (activeTab.xtermRef?.current) {
         console.log('设置终端焦点');
-        
+
         try {
           activeTab.xtermRef.current.focus();
-          
+
           // 发送一个回车确保终端响应
           if (activeTab.webSocketRef?.current &&
-              activeTab.webSocketRef.current.readyState === WebSocket.OPEN) {
+            activeTab.webSocketRef.current.readyState === WebSocket.OPEN) {
             setTimeout(() => {
               activeTab.webSocketRef.current?.send('\r');
             }, 100);
@@ -104,34 +104,34 @@ export const useTerminalInitialization = () => {
         }
       }
     };
-    
+
     // 移除可能存在的旧事件监听器
     const clone = activeTab.terminalRef.current.cloneNode(true);
     if (activeTab.terminalRef.current.parentNode) {
       activeTab.terminalRef.current.parentNode.replaceChild(clone, activeTab.terminalRef.current);
       activeTab.terminalRef.current = clone as HTMLDivElement;
     }
-    
+
     // 添加新的事件监听器
     activeTab.terminalRef.current.addEventListener('click', handleTerminalFocus);
-    
+
     // 添加全局键盘事件处理
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       // 检查终端是否有焦点
-      if (document.activeElement !== document.body && 
-          !activeTab.terminalRef.current?.contains(document.activeElement)) {
+      if (document.activeElement !== document.body &&
+        !activeTab.terminalRef.current?.contains(document.activeElement)) {
         return;
       }
-      
+
       // 确保终端有焦点
       if (activeTab.xtermRef?.current) {
         activeTab.xtermRef.current.focus();
       }
     };
-    
+
     // 添加全局键盘事件
     document.addEventListener('keydown', handleGlobalKeyDown);
-    
+
     // 返回清理函数
     return () => {
       document.removeEventListener('keydown', handleGlobalKeyDown);
@@ -149,14 +149,14 @@ export const useTerminalInitialization = () => {
 
     try {
       activeTab.fitAddonRef.current.fit();
-      
+
       // 获取新的终端尺寸
       const newCols = activeTab.xtermRef.current.cols;
       const newRows = activeTab.xtermRef.current.rows;
-      
+
       // 发送调整大小的消息到服务器
       if (activeTab.webSocketRef?.current &&
-          activeTab.webSocketRef.current.readyState === WebSocket.OPEN) {
+        activeTab.webSocketRef.current.readyState === WebSocket.OPEN) {
         const resizeMessage = {
           type: 'resize',
           cols: newCols,

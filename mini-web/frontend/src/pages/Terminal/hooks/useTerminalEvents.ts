@@ -12,7 +12,6 @@ export const useTerminalEvents = () => {
      * 关闭会话
      */
     const handleCloseSession = useCallback((tab?: TerminalTab) => {
-        console.log('关闭会话');
         if (!tab) {
             message.warning('没有可关闭的会话');
             return;
@@ -22,7 +21,6 @@ export const useTerminalEvents = () => {
         if (tab.webSocketRef && tab.webSocketRef.current) {
             try {
                 tab.webSocketRef.current.close();
-                console.log('WebSocket连接已关闭');
             } catch (e) {
                 console.error('关闭WebSocket连接失败:', e);
             }
@@ -104,90 +102,45 @@ export const useTerminalEvents = () => {
     }, []);
 
     /**
-     * 添加新标签页
-     */
-    const handleAddNewTab = useCallback(() => {
-        console.log('添加新标签页');
-
-        // 创建一个新的空白标签
-        try {
-            // 不再使用require导入，改为从上下文中获取或使用自定义事件
-            // 生成唯一key
-            const newKey = `blank-tab-${Date.now()}`;
-
-            // 创建新标签
-            const newTab: TerminalTab = {
-                key: newKey,
-                title: '新标签页',
-                isConnected: false,
-                terminalRef: createRef(),
-                xtermRef: createRef(),
-                webSocketRef: createRef(),
-                fitAddonRef: createRef(),
-                searchAddonRef: createRef(),
-                messageQueueRef: createRef(),
-                connectionId: 0,
-                sessionId: 0
-            };
-
-            // 创建并触发事件，避免直接从terminalStateRef访问函数
-            const event = new CustomEvent('add-new-blank-tab', {
-                detail: { tab: newTab }
-            });
-            window.dispatchEvent(event);
-
-            message.success('已创建新标签页');
-        } catch (e) {
-            console.error('创建新标签页失败:', e);
-            message.error('创建新标签页失败');
-        }
-    }, []);
-
-    /**
      * 标签页切换
      */
     const handleTabChange = useCallback((newActiveKey: string) => {
-        console.log('切换到标签页:', newActiveKey);
-
-        // 使用自定义事件切换标签页，避免直接从terminalStateRef访问函数
+        // 发布切换标签事件
         const event = new CustomEvent('set-active-tab', {
             detail: { key: newActiveKey }
         });
         window.dispatchEvent(event);
+
+        // 触发标签激活事件
+        window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
+            detail: {
+                tabKey: newActiveKey
+            }
+        }));
+
+        // 保存活动标签
+        localStorage.setItem('terminal_active_tab', newActiveKey);
     }, []);
 
     /**
      * 标签页编辑（关闭、添加）
      */
     const handleTabEdit = useCallback((targetKey: string | React.MouseEvent | React.KeyboardEvent, action: 'add' | 'remove') => {
-        console.log('编辑标签页:', targetKey, action);
-
         // 处理关闭标签页
         if (action === 'remove' && typeof targetKey === 'string') {
-            console.log('关闭标签页:', targetKey);
-
             // 关闭前检查WebSocket连接
             const tabs = terminalStateRef.current?.tabs || [];
             const tabToClose = tabs.find(tab => tab.key === targetKey);
             if (tabToClose?.webSocketRef?.current) {
                 try {
                     tabToClose.webSocketRef.current.close();
-                    console.log(`【关闭标签】WebSocket连接已关闭: ${targetKey}`);
                 } catch (e) {
-                    console.error(`【关闭标签】关闭WebSocket连接出错:`, e);
+                    console.error(`关闭WebSocket连接出错:`, e);
                 }
             }
 
             // 发布关闭标签事件
             const event = new CustomEvent('close-tab', { detail: { key: targetKey } });
-            window.dispatchEvent(event);
-        }
-
-        // 处理添加标签
-        if (action === 'add') {
-            console.log('添加新标签');
-            // 发布添加标签事件
-            const event = new CustomEvent('add-tab');
             window.dispatchEvent(event);
         }
     }, []);
@@ -196,7 +149,6 @@ export const useTerminalEvents = () => {
      * 切换侧边栏
      */
     const handleToggleSidebar = useCallback(() => {
-        console.log('切换侧边栏');
         // 实现切换侧边栏的逻辑
     }, []);
 
@@ -215,7 +167,6 @@ export const useTerminalEvents = () => {
         handleCloseSession,
         handleCopyContent,
         handleDownloadLog,
-        handleAddNewTab,
         handleTabChange,
         handleTabEdit,
         handleToggleSidebar,

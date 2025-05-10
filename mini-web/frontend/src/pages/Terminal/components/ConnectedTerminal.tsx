@@ -76,9 +76,94 @@ function ConnectedTerminal() {
       messageQueueRef: messageQueueRef,
     } as any;
 
-    // 添加标签
+    // 添加标签到状态
     addTab(newTab);
-    console.log(`【终端】新标签已创建: ${tabKey}，状态: connectionId=${connId}, sessionId=${sessionId}, refs已初始化`);
+    console.log(`【ConnectedTerminal】添加新标签: ${tabKey}，连接ID=${connId}，会话ID=${sessionParam || 'none'}`);
+
+    // 设置活动标签键
+    setActiveTab(tabKey);
+
+    // 同时在引用中直接设置，确保立即生效
+    if (terminalStateRef && terminalStateRef.current) {
+      terminalStateRef.current.activeTabKey = tabKey;
+
+      // 确保在引用中也正确添加了标签
+      if (!terminalStateRef.current.tabs.some(t => t.key === tabKey)) {
+        terminalStateRef.current.tabs.push(newTab);
+      }
+    }
+
+    // 立即保存所有标签信息到localStorage，防止刷新丢失
+    try {
+      // 使用类型断言绕过TypeScript的类型检查
+      const tabsToSave = (tabs as any[]).map(tab => {
+        // 创建基本标签对象
+        const serializedTab: any = {
+          key: tab.key,
+          title: tab.title,
+          connectionId: tab.connectionId,
+          sessionId: tab.sessionId,
+          isConnected: tab.isConnected || false
+        };
+
+        // 添加可选属性
+        if (tab.protocol) serializedTab.protocol = tab.protocol;
+        if (tab.hostname) serializedTab.hostname = tab.hostname;
+        if (tab.port) serializedTab.port = tab.port;
+        if (tab.username) serializedTab.username = tab.username;
+
+        // 安全地添加连接信息
+        if (tab.connection) {
+          // 创建连接对象的简化版本
+          serializedTab.connection = {
+            id: tab.connection.id,
+            name: tab.connection.name || '',
+            protocol: tab.connection.protocol || 'ssh'
+          };
+
+          // 添加可选连接属性
+          if (tab.connection.host) serializedTab.connection.host = tab.connection.host;
+          if (tab.connection.port) serializedTab.connection.port = tab.connection.port;
+          if (tab.connection.username) serializedTab.connection.username = tab.connection.username;
+
+          // 确保settings属性存在
+          serializedTab.connection.settings = {};
+
+          // 如果原连接有settings属性，复制它
+          if ('settings' in tab.connection && tab.connection.settings) {
+            serializedTab.connection.settings = { ...tab.connection.settings };
+          }
+        }
+
+        return serializedTab;
+      });
+
+      // 保存到localStorage
+      localStorage.setItem('terminal_tabs', JSON.stringify(tabsToSave));
+      localStorage.setItem('terminal_active_tab', tabKey);
+      console.log(`【ConnectedTerminal】标签信息已立即保存到localStorage: 活动标签=${tabKey}, 标签数量=${tabsToSave.length}`);
+    } catch (error) {
+      console.error('保存标签信息到localStorage失败:', error);
+    }
+
+    // 保存会话信息
+    localStorage.setItem('current_terminal_session', JSON.stringify({
+      connectionId: connId,
+      sessionId: sessionParam ? parseInt(sessionParam, 10) : undefined,
+      tabKey: tabKey,
+      isConnected: false,
+      timestamp: Date.now()
+    }));
+
+    // 标记为已初始化
+    initialized.current = true;
+
+    // 延迟触发DOM就绪事件
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('terminal-ready', {
+        detail: { tabKey: tabKey }
+      }));
+    }, 300);
 
     // 确保返回tabKey
     return tabKey;
@@ -177,6 +262,59 @@ function ConnectedTerminal() {
         if (!terminalStateRef.current.tabs.some(t => t.key === tabKey)) {
           terminalStateRef.current.tabs.push(newTab);
         }
+      }
+
+      // 立即保存所有标签信息到localStorage，防止刷新丢失
+      try {
+        // 使用类型断言绕过TypeScript的类型检查
+        const tabsToSave = (tabs as any[]).map(tab => {
+          // 创建基本标签对象
+          const serializedTab: any = {
+            key: tab.key,
+            title: tab.title,
+            connectionId: tab.connectionId,
+            sessionId: tab.sessionId,
+            isConnected: tab.isConnected || false
+          };
+
+          // 添加可选属性
+          if (tab.protocol) serializedTab.protocol = tab.protocol;
+          if (tab.hostname) serializedTab.hostname = tab.hostname;
+          if (tab.port) serializedTab.port = tab.port;
+          if (tab.username) serializedTab.username = tab.username;
+
+          // 安全地添加连接信息
+          if (tab.connection) {
+            // 创建连接对象的简化版本
+            serializedTab.connection = {
+              id: tab.connection.id,
+              name: tab.connection.name || '',
+              protocol: tab.connection.protocol || 'ssh'
+            };
+
+            // 添加可选连接属性
+            if (tab.connection.host) serializedTab.connection.host = tab.connection.host;
+            if (tab.connection.port) serializedTab.connection.port = tab.connection.port;
+            if (tab.connection.username) serializedTab.connection.username = tab.connection.username;
+
+            // 确保settings属性存在
+            serializedTab.connection.settings = {};
+
+            // 如果原连接有settings属性，复制它
+            if ('settings' in tab.connection && tab.connection.settings) {
+              serializedTab.connection.settings = { ...tab.connection.settings };
+            }
+          }
+
+          return serializedTab;
+        });
+
+        // 保存到localStorage
+        localStorage.setItem('terminal_tabs', JSON.stringify(tabsToSave));
+        localStorage.setItem('terminal_active_tab', tabKey);
+        console.log(`【ConnectedTerminal】标签信息已立即保存到localStorage: 活动标签=${tabKey}, 标签数量=${tabsToSave.length}`);
+      } catch (error) {
+        console.error('保存标签信息到localStorage失败:', error);
       }
 
       // 保存会话信息
@@ -554,6 +692,59 @@ function ConnectedTerminal() {
               if (terminalStateRef && terminalStateRef.current) {
                 console.log(`【标签切换】直接设置terminalStateRef.current.activeTabKey = ${key}`);
                 terminalStateRef.current.activeTabKey = key;
+              }
+
+              // 立即保存所有标签信息到localStorage，防止刷新丢失
+              try {
+                // 使用类型断言绕过TypeScript的类型检查
+                const tabsToSave = (tabs as any[]).map(tab => {
+                  // 创建基本标签对象
+                  const serializedTab: any = {
+                    key: tab.key,
+                    title: tab.title,
+                    connectionId: tab.connectionId,
+                    sessionId: tab.sessionId,
+                    isConnected: tab.isConnected || false
+                  };
+
+                  // 添加可选属性
+                  if (tab.protocol) serializedTab.protocol = tab.protocol;
+                  if (tab.hostname) serializedTab.hostname = tab.hostname;
+                  if (tab.port) serializedTab.port = tab.port;
+                  if (tab.username) serializedTab.username = tab.username;
+
+                  // 安全地添加连接信息
+                  if (tab.connection) {
+                    // 创建连接对象的简化版本
+                    serializedTab.connection = {
+                      id: tab.connection.id,
+                      name: tab.connection.name || '',
+                      protocol: tab.connection.protocol || 'ssh'
+                    };
+
+                    // 添加可选连接属性
+                    if (tab.connection.host) serializedTab.connection.host = tab.connection.host;
+                    if (tab.connection.port) serializedTab.connection.port = tab.connection.port;
+                    if (tab.connection.username) serializedTab.connection.username = tab.connection.username;
+
+                    // 确保settings属性存在
+                    serializedTab.connection.settings = {};
+
+                    // 如果原连接有settings属性，复制它
+                    if ('settings' in tab.connection && tab.connection.settings) {
+                      serializedTab.connection.settings = { ...tab.connection.settings };
+                    }
+                  }
+
+                  return serializedTab;
+                });
+
+                // 保存到localStorage
+                localStorage.setItem('terminal_tabs', JSON.stringify(tabsToSave));
+                localStorage.setItem('terminal_active_tab', key);
+                console.log(`【标签切换】立即保存${tabs.length}个标签的状态，活动标签已更新为: ${key}`);
+              } catch (error) {
+                console.error('保存标签状态失败:', error);
               }
 
               // 立即尝试调整终端大小

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useRef, useEffect, createRef } from 'react';
+import React, { createContext, useContext, useReducer, useRef, useEffect, createRef, useCallback } from 'react';
 import type { ReactNode, RefObject } from 'react';
 // 移除未使用的导入
 import { message } from 'antd';
@@ -95,20 +95,8 @@ const updateTabsInLocalStorage = (tabs: TerminalTab[], activeKey: string) => {
     // 保存所有标签信息
     localStorage.setItem('terminal_tabs', JSON.stringify(serializableTabs));
 
-    // 获取当前用户手动选择的标签
-    const userSelectedTab = localStorage.getItem('terminal_active_tab');
-
-    // 检查用户选择的标签是否存在于当前标签列表
-    const userTabExists = tabs.some(tab => tab.key === userSelectedTab);
-
-    // 只有在以下情况更新活动标签：
-    // 1. 没有用户选择的标签记录
-    // 2. 用户选择的标签不存在于当前标签列表
-    // 3. 传入的activeKey是由用户手动选择的(与userSelectedTab相同)
-    // 4. localStorage中没有存储活动标签
-    if (!userSelectedTab || !userTabExists || activeKey === userSelectedTab) {
-      localStorage.setItem('terminal_active_tab', activeKey);
-    }
+    // 保存当前活动标签
+    localStorage.setItem('terminal_active_tab', activeKey);
 
     // 移除所有标签关闭的标志
     localStorage.removeItem('all_tabs_closed');
@@ -127,11 +115,12 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       case 'ADD_TAB': {
         // 检查是否已存在相同key的标签
         const existingTabIndex = state.tabs.findIndex(tab => tab.key === action.payload.key);
+        let newTabs = [...state.tabs];
+        let isNewTab = false;
 
         if (existingTabIndex >= 0) {
           // 如果标签已存在，更新它而不是添加新标签
-          const updatedTabs = [...state.tabs];
-          updatedTabs[existingTabIndex] = {
+          const updatedTab = {
             ...state.tabs[existingTabIndex],
             ...action.payload,
             // 保留原有引用，除非新标签提供了新的引用
@@ -143,11 +132,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
             messageQueueRef: action.payload.messageQueueRef || state.tabs[existingTabIndex].messageQueueRef,
           };
 
-          newState = {
-            ...state,
-            tabs: updatedTabs,
-            activeTabKey: action.payload.key, // 设置为活动标签
-          };
+          newTabs[existingTabIndex] = updatedTab;
         } else {
           // 确保在添加前深度验证标签数据
           const newTab = {
@@ -163,22 +148,48 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           };
 
           // 在新的标签数组中添加新标签
-          const newTabs = [...state.tabs, newTab];
-
-          newState = {
-            ...state,
-            tabs: newTabs,
-            activeTabKey: action.payload.key, // 设置为活动标签
-          };
+          newTabs.push(newTab);
+          isNewTab = true;
         }
+
+        newState = {
+          ...state,
+          tabs: newTabs,
+          activeTabKey: action.payload.key, // 设置为活动标签
+        };
 
         terminalStateRef.current = newState;
 
         // 保存新创建的标签ID到localStorage
         localStorage.setItem('terminal_last_created_tab', action.payload.key);
 
-        // 延迟更新localStorage，确保状态已完全更新
-        setTimeout(() => updateTabsInLocalStorage(newState.tabs, newState.activeTabKey), 0);
+        // 保存活动标签
+        localStorage.setItem('terminal_active_tab', action.payload.key);
+
+        // 更新localStorage
+        updateTabsInLocalStorage(newState.tabs, newState.activeTabKey);
+
+        // 触发标签激活事件
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
+            detail: {
+              tabKey: action.payload.key,
+              isNewTab: true,
+              fromReducer: true
+            }
+          }));
+        }
+
+        // 触发标签添加事件
+        if (isNewTab && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('terminal-tab-added', {
+            detail: {
+              tab: action.payload,
+              activeTabKey: action.payload.key,
+              totalTabs: newTabs.length
+            }
+          }));
+        }
 
         return newState;
       }
@@ -207,88 +218,73 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
         terminalStateRef.current = newState;
 
-        // 延迟更新localStorage，确保状态已完全更新
-        setTimeout(() => updateTabsInLocalStorage(newState.tabs, newState.activeTabKey), 0);
+        // 更新localStorage
+        updateTabsInLocalStorage(newState.tabs, newState.activeTabKey);
 
         return newState;
       }
 
       case 'CLOSE_TAB': {
-        // 获取要关闭的标签
-        const tabToClose = state.tabs.find(tab => tab.key === action.payload);
-
-        // 过滤掉要关闭的标签
-        const filteredTabs = state.tabs.filter(tab => tab.key !== action.payload);
-
-        // 将关闭的标签添加到关闭记录中
-        if (tabToClose) {
-          const closedTabsStr = localStorage.getItem('terminal_closed_tabs') || '[]';
-          let closedTabs = [];
-          try {
-            closedTabs = JSON.parse(closedTabsStr);
-          } catch (e) {
-            console.error('解析关闭标签数据失败:', e);
-            closedTabs = [];
-          }
-
-          // 添加到关闭记录
-          closedTabs.push({
-            key: tabToClose.key,
-            connectionId: tabToClose.connectionId,
-            sessionId: tabToClose.sessionId
-          });
-
-          // 更新关闭记录
-          localStorage.setItem('terminal_closed_tabs', JSON.stringify(closedTabs));
-
-          // 触发关闭事件
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('terminal-tab-closed', {
-              detail: {
-                tabKey: tabToClose.key,
-                tabData: {
-                  key: tabToClose.key,
-                  connectionId: tabToClose.connectionId,
-                  sessionId: tabToClose.sessionId
-                }
-              }
-            }));
-          }
+        // 找到要关闭的标签
+        const tabIndex = state.tabs.findIndex(tab => tab.key === action.payload);
+        if (tabIndex === -1) {
+          // 标签不存在，返回原状态
+          return state;
         }
 
-        // 确定新的活动标签
-        let newActiveTabKey = state.activeTabKey;
+        // 保存关闭前的标签信息，用于触发事件
+        const closedTab = state.tabs[tabIndex];
 
-        // 如果关闭的是当前活动标签，需要选择新的活动标签
+        // 创建新的标签数组，排除要关闭的标签
+        const updatedTabs = state.tabs.filter(tab => tab.key !== action.payload);
+
+        // 如果关闭的是当前活动标签，需要更新活动标签
+        let newActiveTabKey = state.activeTabKey;
         if (state.activeTabKey === action.payload) {
-          if (filteredTabs.length > 0) {
-            // 尝试选择时间戳最新的标签
-            const sortedTabs = [...filteredTabs].sort((a, b) => {
-              const aTimestamp = parseInt(a.key.split('-').pop() || '0', 10);
-              const bTimestamp = parseInt(b.key.split('-').pop() || '0', 10);
-              return bTimestamp - aTimestamp; // 降序排列
-            });
-            newActiveTabKey = sortedTabs[0].key;
-          } else {
-            newActiveTabKey = 'no-tabs';
-          }
+          // 选择最后一个标签作为新的活动标签
+          newActiveTabKey = updatedTabs.length > 0
+            ? updatedTabs[updatedTabs.length - 1].key
+            : 'no-tabs';
         }
 
         newState = {
           ...state,
-          tabs: filteredTabs,
+          tabs: updatedTabs,
           activeTabKey: newActiveTabKey,
         };
 
         terminalStateRef.current = newState;
 
         // 更新localStorage
-        updateTabsInLocalStorage(filteredTabs, newActiveTabKey);
+        updateTabsInLocalStorage(newState.tabs, newState.activeTabKey);
+
+        // 触发标签关闭事件
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('terminal-tab-removed', {
+            detail: {
+              tabKey: action.payload,
+              tabData: {
+                key: closedTab.key,
+                connectionId: closedTab.connectionId,
+                sessionId: closedTab.sessionId,
+                timestamp: Date.now()
+              },
+              newActiveTabKey,
+              remainingTabs: updatedTabs.length
+            }
+          }));
+        }
 
         return newState;
       }
 
       case 'SET_ACTIVE_TAB': {
+        // 如果新的活动标签与当前活动标签相同，则不需要更新
+        if (state.activeTabKey === action.payload) {
+          return state;
+        }
+
+        // 设置活动标签
         newState = {
           ...state,
           activeTabKey: action.payload,
@@ -299,8 +295,19 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         // 更新活动标签到localStorage
         localStorage.setItem('terminal_active_tab', action.payload);
 
-        // 确保更新整体标签状态
+        // 更新整体标签状态
         updateTabsInLocalStorage(state.tabs, action.payload);
+
+        // 触发标签切换事件
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
+            detail: {
+              tabKey: action.payload,
+              previousTabKey: state.activeTabKey,
+              totalTabs: state.tabs.length
+            }
+          }));
+        }
 
         return newState;
       }
@@ -372,43 +379,34 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
   }, [state]);
 
   // 添加标签
-  const addTab = (tab: TerminalTab) => {
-    // 防止添加没有key的标签
+  const addTab = useCallback((tab: TerminalTab) => {
+    // 确保标签有一个唯一的key
     if (!tab.key) {
-      console.error('错误：尝试添加没有key的标签');
+      tab.key = `tab-${Date.now()}`;
+    }
+
+    // 检查标签是否已存在，如果存在则不添加
+    const exists = state.tabs.some(t => t.key === tab.key);
+    if (exists) {
       return;
     }
 
-    // 检查是否存在同样connectionId和sessionId的标签
-    // 这样可以避免为同一个连接创建多个标签
-    const existingConnectionTab = state.tabs.find(t =>
-      t.connectionId === tab.connectionId &&
-      t.sessionId === tab.sessionId &&
-      tab.connectionId !== undefined &&
-      tab.sessionId !== undefined
-    );
-
-    // 如果找到了现有标签，直接激活它而不是创建新标签
-    if (existingConnectionTab) {
-      dispatch({ type: 'SET_ACTIVE_TAB', payload: existingConnectionTab.key });
-      return;
+    // 发送添加标签事件
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('terminal-tab-added', {
+        detail: { tab }
+      }));
     }
 
-    // 准备标签数据，确保包含所有必要的引用
-    const completeTab = {
-      ...tab,
-      terminalRef: tab.terminalRef || createRef<HTMLDivElement>(),
-      xtermRef: tab.xtermRef || createRef<Terminal>(),
-      webSocketRef: tab.webSocketRef || createRef<WebSocket>(),
-      fitAddonRef: tab.fitAddonRef || createRef<FitAddon>(),
-      searchAddonRef: tab.searchAddonRef || createRef<SearchAddon>(),
-      messageQueueRef: tab.messageQueueRef || createRef<string[]>(),
-      isConnected: tab.isConnected || false,
-    };
+    // 修改localStorage以表示有活动的标签页
+    localStorage.removeItem('all_tabs_closed');
 
-    // 分发添加标签的action
-    dispatch({ type: 'ADD_TAB', payload: completeTab });
-  };
+    // 更新状态
+    dispatch({
+      type: 'ADD_TAB',
+      payload: tab
+    });
+  }, [state.tabs, dispatch]);
 
   // 更新标签
   const updateTab = (key: string, updates: Partial<TerminalTab>) => {
@@ -417,7 +415,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   // 关闭标签
   const closeTab = (key: string) => {
-    // 获取标签信息
+    // 找到要关闭的标签
     const tabToClose = state.tabs.find(tab => tab.key === key);
     if (!tabToClose) {
       console.warn(`无法关闭标签 ${key}：找不到该标签`);
@@ -531,9 +529,36 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   // 设置活动标签
-  const setActiveTab = (key: string) => {
-    dispatch({ type: 'SET_ACTIVE_TAB', payload: key });
-  };
+  const setActiveTab = useCallback((key: string) => {
+    // 不需要重复设置相同的活动标签
+    if (state.activeTabKey === key) {
+      return;
+    }
+
+    // 检查标签是否存在
+    const tabExists = state.tabs.some(tab => tab.key === key);
+    if (!tabExists) {
+      // 如果找不到指定标签，使用第一个标签
+      if (state.tabs.length > 0) {
+        const firstTabKey = state.tabs[0].key;
+        localStorage.setItem('terminal_active_tab', firstTabKey);
+        dispatch({
+          type: 'SET_ACTIVE_TAB',
+          payload: firstTabKey
+        });
+      }
+      return;
+    }
+
+    // 保存活动标签到localStorage
+    localStorage.setItem('terminal_active_tab', key);
+
+    // 更新状态
+    dispatch({
+      type: 'SET_ACTIVE_TAB',
+      payload: key
+    });
+  }, [state.activeTabKey, state.tabs, dispatch]);
 
   // 清空所有标签
   const clearTabs = () => {

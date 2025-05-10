@@ -1,0 +1,90 @@
+/**
+ * 终端滚动区域紧急修复样式表
+ */
+
+/* 全局强制覆盖 xterm-scroll-area 高度 */
+.xterm-scroll-area,
+.terminalWrapper .xterm-scroll-area,
+*:not(style):not(script):not(link) > .xterm-scroll-area,
+.xterm .xterm-scroll-area,
+.xterm-viewport .xterm-scroll-area,
+div.xterm-scroll-area {
+  /* 固定高度限制 */
+  height: 720px !important;
+  max-height: 720px !important;
+  min-height: 0 !important;
+  
+  /* 防止内容溢出 */
+  overflow: hidden !important;
+  
+  /* 确保绝对定位且不随容器变化 */
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  
+  /* 宽度控制 */
+  width: auto !important;
+  max-width: 100% !important;
+  
+  /* 避免点击事件干扰 */
+  pointer-events: none !important;
+  
+  /* 启用硬件加速，确保独立渲染层 */
+  will-change: transform !important;
+  transform: translateZ(0) !important;
+  
+  /* 阻止JavaScript修改 */
+  transition: none !important;
+  
+  /* 确保层级正确 */
+  z-index: 2 !important;
+}
+
+/* 强化视口样式，确保滚动行为正常 */
+.xterm-viewport {
+  z-index: 10 !important;
+  overflow-y: auto !important;
+  width: 100% !important;
+  height: auto !important;
+  max-height: none !important;
+  position: relative !important;
+}
+
+/* 防止元素设置过高，影响布局 */
+[style*="height:"] {
+  transition: none !important;
+}
+
+/* 确保xterm-screen正确显示 */
+.xterm-screen {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+/* 确保终端容器设置正确 */
+.terminal-container {
+  position: relative !important;
+  height: 100% !important;
+  width: 100% !important;
+  overflow: hidden !important;
+}
+
+/* 终端标签内容 */
+.terminalTabContent {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  flex: 1 !important;
+  position: relative !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+/* 终端包装容器样式 */
+.terminalWrapper {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  overflow: hidden !important;
+  flex: 1 !important;
+}

@@ -16,8 +16,6 @@ interface TerminalHeaderProps {
   networkLatency?: number | null;
   terminalMode?: string;
   fullscreen?: boolean;
-  addNewTab?: () => void;       // 添加与实际使用一致的属性名
-  onAddTab?: () => void;        // 保留旧属性以兼容
   onCopyContent?: () => void;
   onDownloadLog?: () => void;
   onShowSettings?: () => void;
@@ -37,8 +35,6 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   networkLatency,
   terminalMode = 'normal',
   fullscreen,
-  onAddTab,
-  addNewTab,
   onCopyContent,
   onDownloadLog,
   onShowSettings,
@@ -58,21 +54,12 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   const handleSettings = onShowSettings || onOpenSettings;
   const handleCodePanel = onCodePanel || onToggleCode || onOpenQuickCommands;
   const handleBuildPanel = onBuildPanel || onToggleSplit || onOpenBatchCommands;
-  const handleAddTab = addNewTab || onAddTab;
   const handleCloseSession = onCloseSession || onCloseTab;
 
   return (
     <div className={styles.terminalHeader}>
       <div className={styles.terminalInfo}>      </div>
       <div className={styles.terminalControls}>
-        <Tooltip title="新标签页">
-          <Button
-            type="text"
-            size="small"
-            icon={<PlusOutlined style={{ fontSize: '14px' }} />}
-            onClick={handleAddTab}
-          />
-        </Tooltip>
         <Tooltip title="复制终端内容">
           <Button
             type="text"

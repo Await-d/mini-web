@@ -21,7 +21,7 @@ export interface TerminalTabsProps {
   onTabChange: (activeKey: string) => void;
   onTabEdit: (targetKey: React.MouseEvent | React.KeyboardEvent | string, action: 'add' | 'remove') => void;
   onTabClose: (key: string) => void;
-  onAddTab: () => void;
+  onAddTab?: () => void;
 }
 
 /**
@@ -99,6 +99,8 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
     window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
       detail: { tabKey: key, isNewTab: false }
     }));
+    
+    console.log('【标签点击】用户点击激活标签:', key);
   };
 
   // 根据连接类型获取适当的图标
