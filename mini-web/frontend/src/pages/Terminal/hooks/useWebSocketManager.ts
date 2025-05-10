@@ -135,7 +135,6 @@ export const useWebSocketManager = () => {
           // 发送ping消息
           const pingMessage = JSON.stringify({ type: 'ping', timestamp: Date.now() });
           ws.send(pingMessage);
-          console.log('发送心跳ping消息保持连接活跃');
 
           // 更新最后活动时间
           if (activeTab.lastActivityTime) {
@@ -145,7 +144,6 @@ export const useWebSocketManager = () => {
           }
         } else if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
           // 连接已关闭，停止心跳
-          console.log('WebSocket连接已关闭，停止心跳检测');
           clearInterval(timer);
           heartbeatTimerRef.current = null;
         }
@@ -159,14 +157,12 @@ export const useWebSocketManager = () => {
 
     // 保存定时器引用
     heartbeatTimerRef.current = timer as unknown as number;
-    console.log(`已启动WebSocket心跳检测，间隔: ${interval}ms`);
 
     // 返回清理函数
     return () => {
       if (heartbeatTimerRef.current !== null) {
         clearInterval(heartbeatTimerRef.current);
         heartbeatTimerRef.current = null;
-        console.log('心跳检测已清除');
       }
     };
   }, []);
@@ -190,17 +186,45 @@ export const useWebSocketManager = () => {
     let onConnectionHelp: (() => void) | undefined;
     let onRetryInterface: (() => void) | undefined;
 
+    // 全局连接防抖处理
+    const preventDuplicateConnections = (connId: number, sessId: number | undefined, key?: string): boolean => {
+      // 创建一个全局唯一的键，用于跟踪当前正在创建的连接
+      const wsLockKey = `creating-ws-${connId}-${sessId || 'nosession'}-${Date.now()}`;
+      const wsInProgressKey = `ws-in-progress-${connId}-${sessId || 'nosession'}`;
+
+      // 检查是否已经有正在进行的连接创建
+      if ((window as any)[wsInProgressKey]) {
+        console.log(`【WebSocket】检测到正在进行中的WebSocket连接: ${wsInProgressKey}，跳过重复创建`);
+        return false;
+      }
+
+      // 设置标记，表示当前正在创建连接
+      (window as any)[wsInProgressKey] = true;
+      (window as any)[wsLockKey] = true;
+
+      // 设置自动清除计时器，确保连接创建过程不会无限阻塞
+      setTimeout(() => {
+        delete (window as any)[wsInProgressKey];
+        delete (window as any)[wsLockKey];
+      }, 5000);
+
+      return true;
+    };
+
     if (typeof activeTabOrConnectionId === 'number') {
       // 使用的是参数形式2：connectionId, sessionId, tabKey
       connectionId = activeTabOrConnectionId;
       sessionId = typeof onConnectionHelpOrSessionId === 'number' ? onConnectionHelpOrSessionId : undefined;
       tabKey = typeof onRetryInterfaceOrTabKey === 'string' ? onRetryInterfaceOrTabKey : undefined;
 
-      console.log(`【WebSocket调试】使用ID调用: connectionId=${connectionId}, sessionId=${sessionId}, tabKey=${tabKey}`);
+      // 防止重复创建连接
+      if (!preventDuplicateConnections(connectionId, sessionId, tabKey)) {
+        return;
+      }
 
       // 从terminalStateRef中查找匹配的tab
       // 使用类型断言，确保tabs数组中的元素被识别为TerminalTab类型
-      const tabs = terminalStateRef.current.tabs as unknown as TerminalTab[];
+      const tabs = (terminalStateRef.current?.tabs || []) as unknown as TerminalTab[];
       activeTab = tabs.find(t =>
         t.connectionId === connectionId &&
         t.sessionId === sessionId &&
@@ -209,7 +233,30 @@ export const useWebSocketManager = () => {
 
       if (!activeTab) {
         console.error(`【WebSocket调试】找不到匹配的标签，无法创建连接: connectionId=${connectionId}, sessionId=${sessionId}`);
+        // 释放连接锁
+        const wsInProgressKey = `ws-in-progress-${connectionId}-${sessionId || 'nosession'}`;
+        delete (window as any)[wsInProgressKey];
         return;
+      }
+
+      // 深入检查WebSocket状态
+      if (activeTab.webSocketRef?.current) {
+        const ws = activeTab.webSocketRef.current;
+        // 只有在WebSocket确实打开的情况下才跳过创建
+        if (ws.readyState === WebSocket.OPEN) {
+          console.log(`【WebSocket】标签 ${activeTab.key} 已有活动连接，不重复创建`);
+          // 释放连接锁
+          const wsInProgressKey = `ws-in-progress-${connectionId}-${sessionId || 'nosession'}`;
+          delete (window as any)[wsInProgressKey];
+          return;
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          console.log(`【WebSocket】标签 ${activeTab.key} 正在连接中，不重复创建`);
+          // 释放连接锁
+          const wsInProgressKey = `ws-in-progress-${connectionId}-${sessionId || 'nosession'}`;
+          delete (window as any)[wsInProgressKey];
+          return;
+        }
+        // 对于CLOSING或CLOSED状态，允许重新创建连接
       }
     } else {
       // 使用的是参数形式1：activeTab, onConnectionHelp, onRetryInterface
@@ -220,6 +267,33 @@ export const useWebSocketManager = () => {
       connectionId = activeTab.connectionId;
       sessionId = activeTab.sessionId;
       tabKey = activeTab.key;
+
+      // 防止重复创建连接
+      if (connectionId && sessionId) {
+        if (!preventDuplicateConnections(connectionId, sessionId, tabKey)) {
+          return;
+        }
+
+        // 深入检查WebSocket状态
+        if (activeTab.webSocketRef?.current) {
+          const ws = activeTab.webSocketRef.current;
+          // 只有在WebSocket确实打开的情况下才跳过创建
+          if (ws.readyState === WebSocket.OPEN) {
+            console.log(`【WebSocket】标签 ${activeTab.key} 已有活动连接，不重复创建`);
+            // 释放连接锁
+            const wsInProgressKey = `ws-in-progress-${connectionId}-${sessionId || 'nosession'}`;
+            delete (window as any)[wsInProgressKey];
+            return;
+          } else if (ws.readyState === WebSocket.CONNECTING) {
+            console.log(`【WebSocket】标签 ${activeTab.key} 正在连接中，不重复创建`);
+            // 释放连接锁
+            const wsInProgressKey = `ws-in-progress-${connectionId}-${sessionId || 'nosession'}`;
+            delete (window as any)[wsInProgressKey];
+            return;
+          }
+          // 对于CLOSING或CLOSED状态，允许重新创建连接
+        }
+      }
     }
 
     // 确保activeTab存在
@@ -227,11 +301,14 @@ export const useWebSocketManager = () => {
       console.error('【WebSocket】无效的活动标签，无法创建WebSocket连接');
       return;
     }
-    // 使用DOM检查函数
-    if (!activeTab) {
-      console.error('【WebSocket调试】创建WebSocket连接失败：标签页不存在');
+
+    if (!activeTab.terminalRef?.current || !activeTab.xtermRef?.current) {
+      console.error('【WebSocket调试】创建WebSocket连接失败：终端尚未初始化');
       return false;
     }
+
+    // 创建真正的WebSocket连接
+    return createSimpleConnection(activeTab, sessionId);
   }, [startHeartbeat]);
 
   /**
@@ -302,6 +379,12 @@ export const useWebSocketManager = () => {
         activeTab.webSocketRef.current = ws;
         activeTab.isConnected = true;
         setIsConnected(true);
+
+        // 释放连接锁，允许其他操作
+        if (activeTab.connectionId && activeTab.sessionId) {
+          const wsInProgressKey = `ws-in-progress-${activeTab.connectionId}-${activeTab.sessionId || 'nosession'}`;
+          delete (window as any)[wsInProgressKey];
+        }
 
         // 启动心跳检测 - 使用更短的间隔确保连接活跃
         startHeartbeat(ws, activeTab, 15000);
