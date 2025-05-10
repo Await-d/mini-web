@@ -63,7 +63,7 @@ export function sendResizeMessage(
     const messageJson = JSON.stringify(resizeMessage);
     websocket.send(messageJson);
     
-    console.log(`成功发送终端调整大小消息: ${cols}x${rows}`);
+    // 终端大小已调整
     return true;
   } catch (error) {
     console.error('创建或发送调整大小消息时出错:', error);

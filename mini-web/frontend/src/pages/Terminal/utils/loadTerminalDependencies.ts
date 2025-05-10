@@ -39,8 +39,6 @@ declare global {
 export function loadTerminalDependencies(): Promise<void> {
     return new Promise((resolve, reject) => {
         try {
-            console.log('【终端】开始加载xterm依赖');
-
             // 确保window.xterm对象存在
             if (!window.xterm) {
                 window.xterm = {} as Window['xterm'];
@@ -73,10 +71,9 @@ export function loadTerminalDependencies(): Promise<void> {
             }
             window.xterm.webgl.WebglAddon = WebglAddon;
 
-            console.log('【终端】xterm依赖加载完成');
             resolve();
         } catch (error) {
-            console.error('【终端】加载xterm依赖失败:', error);
+            console.error('加载xterm依赖失败:', error);
             reject(error);
         }
     });

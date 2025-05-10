@@ -71,23 +71,49 @@ const updateTabsInLocalStorage = (tabs: TerminalTab[], activeKey: string) => {
       return;
     }
 
-    // 创建可序列化的标签数组
-    const serializableTabs = tabs.map(tab => ({
-      key: tab.key,
-      title: tab.title,
-      connectionId: tab.connectionId,
-      sessionId: tab.sessionId,
-      isConnected: tab.isConnected,
-      timestamp: parseInt(tab.key.split('-').pop() || '0', 10)
-    }));
+    // 创建可序列化的标签数组，保存所有标签
+    const serializableTabs = tabs.map(tab => {
+      // 针对每个标签提取必要信息
+      return {
+        key: tab.key,
+        title: tab.title,
+        connectionId: tab.connectionId,
+        sessionId: tab.sessionId,
+        isConnected: tab.isConnected,
+        timestamp: parseInt(tab.key.split('-').pop() || '0', 10),
+        protocol: tab.protocol,
+        hostname: tab.hostname,
+        port: tab.port,
+        username: tab.username,
+        // 保存完整的连接对象
+        connection: tab.connection ? {
+          ...tab.connection
+        } : undefined
+      };
+    });
 
-    // 保存标签状态和活动标签
+    // 保存所有标签信息
     localStorage.setItem('terminal_tabs', JSON.stringify(serializableTabs));
-    localStorage.setItem('terminal_active_tab', activeKey);
 
-    console.log(`【持久化】已更新标签状态，活动标签: ${activeKey}`);
+    // 获取当前用户手动选择的标签
+    const userSelectedTab = localStorage.getItem('terminal_active_tab');
+
+    // 检查用户选择的标签是否存在于当前标签列表
+    const userTabExists = tabs.some(tab => tab.key === userSelectedTab);
+
+    // 只有在以下情况更新活动标签：
+    // 1. 没有用户选择的标签记录
+    // 2. 用户选择的标签不存在于当前标签列表
+    // 3. 传入的activeKey是由用户手动选择的(与userSelectedTab相同)
+    // 4. localStorage中没有存储活动标签
+    if (!userSelectedTab || !userTabExists || activeKey === userSelectedTab) {
+      localStorage.setItem('terminal_active_tab', activeKey);
+    }
+
+    // 移除所有标签关闭的标志
+    localStorage.removeItem('all_tabs_closed');
   } catch (error) {
-    console.error('【TerminalContext】保存标签状态到localStorage失败:', error);
+    console.error('保存标签状态失败:', error);
   }
 };
 
@@ -95,7 +121,7 @@ const updateTabsInLocalStorage = (tabs: TerminalTab[], activeKey: string) => {
 export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // 定义reducer函数
   const reducer = (state: TerminalContextState, action: TerminalAction): TerminalContextState => {
-    let newState;
+    let newState: TerminalContextState = state;
 
     switch (action.type) {
       case 'ADD_TAB': {
@@ -103,7 +129,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         const existingTabIndex = state.tabs.findIndex(tab => tab.key === action.payload.key);
 
         if (existingTabIndex >= 0) {
-          console.log(`【TerminalContext】标签已存在: ${action.payload.key}，更新现有标签`);
           // 如果标签已存在，更新它而不是添加新标签
           const updatedTabs = [...state.tabs];
           updatedTabs[existingTabIndex] = {
@@ -124,7 +149,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
             activeTabKey: action.payload.key, // 设置为活动标签
           };
         } else {
-          console.log(`【TerminalContext】创建新标签: ${action.payload.key}`);
           // 确保在添加前深度验证标签数据
           const newTab = {
             ...action.payload,
@@ -148,8 +172,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           };
         }
 
-        // 记录标签状态变化
-        console.log(`【TerminalContext】状态已更新，当前标签数: ${newState.tabs.length}`);
         terminalStateRef.current = newState;
 
         // 保存新创建的标签ID到localStorage
@@ -166,7 +188,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         const existingTabIndex = state.tabs.findIndex(tab => tab.key === key);
 
         if (existingTabIndex === -1) {
-          console.warn(`【TerminalContext】无法更新标签 ${key}：找不到该标签`);
+          console.warn(`无法更新标签 ${key}：找不到该标签`);
           return state;
         }
 
@@ -218,7 +240,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
           // 更新关闭记录
           localStorage.setItem('terminal_closed_tabs', JSON.stringify(closedTabs));
-          console.log(`【关闭标签】已将标签 ${tabToClose.key} 添加到关闭列表`);
 
           // 触发关闭事件
           if (typeof window !== 'undefined') {
@@ -285,8 +306,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       }
 
       case 'CLEAR_TABS': {
-        console.log('【TerminalContext】清除所有标签');
-
         // 尝试关闭所有WebSocket连接
         state.tabs.forEach(tab => {
           try {
@@ -310,7 +329,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
               tab.xtermRef.current.dispose();
             }
           } catch (e) {
-            console.error(`【TerminalContext】清理标签资源失败:`, e);
+            console.error(`清理标签资源失败:`, e);
           }
         });
 
@@ -354,12 +373,9 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   // 添加标签
   const addTab = (tab: TerminalTab) => {
-    // 增强后的标签添加功能
-    console.log(`【TerminalContext】添加标签: ${tab.key}`);
-
     // 防止添加没有key的标签
     if (!tab.key) {
-      console.error('【TerminalContext】错误：尝试添加没有key的标签');
+      console.error('错误：尝试添加没有key的标签');
       return;
     }
 
@@ -374,19 +390,9 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     // 如果找到了现有标签，直接激活它而不是创建新标签
     if (existingConnectionTab) {
-      console.log(`【TerminalContext】找到已存在的连接标签: ${existingConnectionTab.key}，激活此标签而非创建新标签`);
       dispatch({ type: 'SET_ACTIVE_TAB', payload: existingConnectionTab.key });
       return;
     }
-
-    // 检查是否已存在相同key的标签，避免重复添加
-    const existingTab = state.tabs.find(t => t.key === tab.key);
-    const refTabsCount = terminalStateRef.current?.tabs?.length || 0;
-
-    console.log(`【TerminalContext】开始添加标签: ${tab.key}`, {
-      existingTabs: existingTab ? 1 : 0,
-      newTab: tab
-    });
 
     // 准备标签数据，确保包含所有必要的引用
     const completeTab = {
@@ -402,19 +408,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     // 分发添加标签的action
     dispatch({ type: 'ADD_TAB', payload: completeTab });
-
-    // 在添加后验证标签状态
-    setTimeout(() => {
-      const contextTabsCount = terminalStateRef.current?.tabs?.length || 0;
-      const refTabsCount = terminalStateRef.current?.tabs?.length || 0;
-      const currentActiveKey = terminalStateRef.current?.activeTabKey || 'no-tabs';
-
-      console.log(`【TerminalContext】验证标签添加状态: ${currentActiveKey === tab.key ? '成功' : '失败'}`, {
-        contextTabsCount,
-        refTabsCount,
-        activeTabKey: currentActiveKey
-      });
-    }, 0);
   };
 
   // 更新标签
@@ -424,12 +417,10 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   // 关闭标签
   const closeTab = (key: string) => {
-    console.log(`【TerminalContext】关闭标签: ${key}`);
-
     // 获取标签信息
     const tabToClose = state.tabs.find(tab => tab.key === key);
     if (!tabToClose) {
-      console.warn(`【TerminalContext】无法关闭标签 ${key}：找不到该标签`);
+      console.warn(`无法关闭标签 ${key}：找不到该标签`);
       return;
     }
 
@@ -438,18 +429,15 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       if (tabToClose.webSocketRef?.current &&
         tabToClose.webSocketRef.current.readyState !== WebSocket.CLOSED &&
         tabToClose.webSocketRef.current.readyState !== WebSocket.CLOSING) {
-        console.log(`【TerminalContext】关闭WebSocket连接: ${key}`);
         tabToClose.webSocketRef.current.close();
       }
     } catch (e) {
-      console.error(`【TerminalContext】关闭WebSocket失败:`, e);
+      console.error(`关闭WebSocket失败:`, e);
     }
 
     // 尝试销毁xterm实例
     try {
       if (tabToClose.xtermRef?.current) {
-        console.log(`【TerminalContext】销毁xterm实例: ${key}`);
-
         // 先移除插件
         if (tabToClose.fitAddonRef?.current) {
           tabToClose.fitAddonRef.current.dispose();
@@ -463,7 +451,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         tabToClose.xtermRef.current.dispose();
       }
     } catch (e) {
-      console.error(`【TerminalContext】销毁xterm实例失败:`, e);
+      console.error(`销毁xterm实例失败:`, e);
     }
 
     // 保存关闭的标签信息到localStorage，防止刷新后重新出现
@@ -475,7 +463,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       try {
         closedTabs = JSON.parse(closedTabsStr);
       } catch (e) {
-        console.error('【TerminalContext】解析关闭标签数据失败:', e);
+        console.error('解析关闭标签数据失败:', e);
         closedTabs = [];
       }
 
@@ -489,14 +477,12 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
       // 保存回localStorage
       localStorage.setItem('terminal_closed_tabs', JSON.stringify(closedTabs));
-      console.log(`【TerminalContext】已保存关闭标签信息: ${key}`);
 
       // 检查最后创建的标签是否为当前关闭的标签
       const lastCreatedTab = localStorage.getItem('terminal_last_created_tab');
       if (lastCreatedTab === key) {
         // 如果是，移除此记录
         localStorage.removeItem('terminal_last_created_tab');
-        console.log(`【TerminalContext】移除最后创建的标签记录: ${key}`);
       }
 
       // 获取剩余标签的数量
@@ -504,7 +490,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
       // 如果关闭后没有标签了，或者是最后一个标签
       if (remainingTabs.length === 0 || state.tabs.length === 1) {
-        console.log('【TerminalContext】所有标签都已关闭，清空localStorage中的标签数据');
         localStorage.removeItem('terminal_tabs');
         localStorage.removeItem('terminal_active_tab');
 
@@ -518,7 +503,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         updateTabsInLocalStorage(remainingTabs, remainingTabs[0].key);
       }
     } catch (e) {
-      console.error('【TerminalContext】保存关闭标签信息失败:', e);
+      console.error('保存关闭标签信息失败:', e);
     }
 
     // 分发标签关闭事件
@@ -557,10 +542,10 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       if (tab.isConnected && tab.sessionId) {
         try {
           sessionAPI.closeSession(tab.sessionId).catch(err => {
-            console.error(`【TerminalContext】关闭会话 ${tab.sessionId} 时出错:`, err);
+            console.error(`关闭会话 ${tab.sessionId} 时出错:`, err);
           });
         } catch (error) {
-          console.error(`【TerminalContext】关闭会话异常:`, error);
+          console.error(`关闭会话异常:`, error);
         }
       }
     });

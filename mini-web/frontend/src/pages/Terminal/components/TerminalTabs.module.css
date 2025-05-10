@@ -1,1 +1,227 @@
- 
+.terminalTabsContainer {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden; /* 防止出现垂直滚动条 */
+  border-bottom: 1px solid #f0f0f0;
+  background-color: #fafafa;
+  height: 44px; /* 稍微减小高度 */
+  min-height: 44px; /* 最小高度限制 */
+  display: block; /* 使用块级布局 */
+  position: relative; /* 启用定位 */
+  padding: 0; /* 移除内边距 */
+  margin: 0; /* 移除外边距 */
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+/* 隐藏垂直滚动条 */
+.terminalTabsContainer::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari, Opera */
+}
+
+.terminalTabs {
+  margin: 0;
+  background-color: #fafafa;
+  white-space: nowrap; /* 防止标签换行 */
+  transition: all 0.3s ease; /* 添加过渡效果 */
+  width: 100%; /* 占满容器宽度 */
+  height: 44px; /* 固定高度 */
+  position: relative; /* 启用定位 */
+  overflow: visible; /* 确保内容不被裁剪 */
+}
+
+.terminalTabs :global(.ant-tabs-nav) {
+  margin: 0 !important;
+  padding: 0 8px; /* 增加左右内边距 */
+  background-color: #fafafa;
+  overflow: visible; /* 防止内容被裁剪 */
+  height: 44px; /* 固定高度与容器一致 */
+  display: flex;
+  align-items: center; /* 垂直居中标签 */
+  width: 100%; /* 占满容器宽度 */
+  position: relative; /* 启用定位 */
+}
+
+.terminalTabs :global(.ant-tabs-nav-wrap) {
+  overflow-y: hidden !important; /* 强制隐藏垂直滚动条 */
+  margin-bottom: 0 !important;
+  height: 44px !important;
+  position: relative !important;
+  width: 100% !important;
+}
+
+/* 解决标签布局问题 */
+.terminalTabs :global(.ant-tabs-nav-list) {
+  display: flex !important;
+  align-items: center !important;
+  height: 44px !important;
+  position: relative !important;
+  transition: transform 0.3s !important;
+}
+
+.terminalTabs :global(.ant-tabs-tab) {
+  padding: 6px 16px !important;
+  margin: 0 4px !important; /* 增加标签间距 */
+  transition: all 0.3s;
+  background-color: #fafafa; /* 更亮的底色 */
+  background-image: linear-gradient(to bottom, #ffffff, #f5f5f5); /* 精致渐变效果 */
+  border: 1px solid #e8e8e8;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  color: rgba(0, 0, 0, 0.65); /* 适当的文字颜色 */
+  font-weight: normal;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  height: 36px !important; /* 统一高度 */
+  display: inline-flex !important;
+  align-items: center !important;
+  position: relative; /* 启用定位 */
+  top: 5px; /* 向下微调位置 */
+  z-index: 1; /* 确保在适当层次 */
+}
+
+.terminalTabs :global(.ant-tabs-tab-active) {
+  background-color: #1677ff !important; /* 使用与左侧树形结构选中项一致的蓝色 */
+  background-image: linear-gradient(to bottom, #1677ff, #1668dc) !important; /* 更舒适的渐变效果 */
+  color: white !important;
+  box-shadow: 0 3px 6px rgba(22, 119, 255, 0.25) !important; /* 精致阴影效果 */
+  border: 1px solid #1668dc !important;
+  border-bottom: none !important;
+  height: 38px !important; /* 活动标签稍高 */
+  position: relative !important; /* 启用定位 */
+  z-index: 2 !important; /* 确保活动标签在上层 */
+  top: 2px !important; /* 调整位置 */
+  font-weight: 500 !important;
+  border-radius: 4px 4px 0 0 !important; /* 确保圆角 */
+}
+
+.terminalTabs :global(.ant-tabs-tab-active .ant-tabs-tab-btn) {
+  color: white !important;
+  font-weight: 500;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); /* 增强文字立体感 */
+  letter-spacing: 0.3px; /* 字母间距增加可读性 */
+}
+
+.terminalTabs :global(.ant-tabs-tab:hover) {
+  background-color: #f0f7ff; /* 更浅的蓝色背景 */
+  background-image: linear-gradient(to bottom, #ffffff, #e6f7ff); /* 悬停渐变 */
+  color: #1677ff; /* 与活动标签匹配的颜色 */
+  border-color: #aed1ff; /* 悬停时显示浅色边框 */
+  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.1); /* 悬停时轻微阴影增强 */
+}
+
+.terminalTabs :global(.ant-tabs-tab-active:hover) {
+  background-color: #1668dc !important; /* 深蓝色 */
+  background-image: linear-gradient(to bottom, #1677ff, #1668dc) !important; /* 悬停时的渐变 */
+  color: white !important;
+  border-color: #1668dc !important; /* 保持活动标签的边框 */
+}
+
+.terminalTabs :global(.ant-tabs-tab-btn) {
+  color: inherit;
+  font-weight: inherit;
+}
+
+.terminalTabs :global(.ant-tabs-nav-add) {
+  display: none !important; /* 隐藏添加按钮 */
+}
+
+.tabLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+}
+
+.tabIcon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 16px; /* 稍微大一点的图标 */
+  margin-right: 6px; /* 增加与标题的间距 */
+  transition: all 0.3s ease;
+}
+
+.tabTitle {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  letter-spacing: 0.3px; /* 增加字母间距 */
+  font-weight: 500; /* 中等粗细 */
+}
+
+/* 关闭按钮样式 */
+.terminalTabs :global(.ant-tabs-tab-remove) {
+  margin-left: 8px;
+  color: inherit;
+  transition: all 0.3s;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  opacity: 0.7; /* 默认稍微透明 */
+  font-size: 12px; /* 稍小的关闭图标 */
+  margin-top: 0 !important; /* 防止上下错位 */
+  position: relative !important;
+}
+
+.terminalTabs :global(.ant-tabs-tab-active .ant-tabs-tab-remove) {
+  color: rgba(255, 255, 255, 0.95);
+  opacity: 0.9;
+}
+
+.terminalTabs :global(.ant-tabs-tab-remove:hover) {
+  color: #ff4d4f;
+  background-color: rgba(255, 255, 255, 0.3);
+  opacity: 1;
+  transform: scale(1.1); /* 悬停时稍微放大 */
+}
+
+/* 自定义协议图标颜色 */
+.ssh {
+  color: #52c41a;
+  font-size: 16px;
+}
+
+.rdp {
+  color: #1890ff;
+  font-size: 16px;
+}
+
+.vnc {
+  color: #722ed1;
+  font-size: 16px;
+}
+
+.telnet {
+  color: #fa8c16;
+  font-size: 16px;
+}
+
+/* 优化小尺寸标签样式 */
+.terminalTabs :global(.ant-tabs-small) :global(.ant-tabs-tab) {
+  padding: 6px 12px;
+}
+
+/* 标签栏底部线条 */
+.terminalTabs :global(.ant-tabs-ink-bar) {
+  background-color: #1677ff; /* 与活动标签匹配 */
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  box-shadow: 0 1px 3px rgba(22, 119, 255, 0.3); /* 为底部线条添加阴影 */
+}
+
+/* 优化移动设备上的显示 */
+@media (max-width: 768px) {
+  .terminalTabs :global(.ant-tabs-tab) {
+    padding: 6px 10px;
+    margin: 0 1px;
+  }
+  
+  .tabTitle {
+    max-width: 120px;
+  }
+}

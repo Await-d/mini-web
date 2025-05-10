@@ -141,7 +141,7 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({
         // 保存设置到localStorage
         localStorage.setItem('terminal_settings', JSON.stringify(newSettings));
 
-        console.log('应用新设置:', newSettings);
+        // 应用新终端设置
         setCurrentSettings(newSettings);
         if (onApply) {
             onApply(newSettings);
@@ -157,7 +157,7 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({
         setTimeout(() => {
             if (form) {
                 form.setFieldsValue({ ...defaultSettings });
-                console.log('重置表单为默认设置');
+                // 重置表单为默认设置
             }
         }, 0);
         setCurrentSettings({ ...defaultSettings });
@@ -298,7 +298,7 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({
                                             break;
                                         }
                                     } catch (error) {
-                                        console.error('WebSocket测试失败:', error);
+                                        // 不再记录测试失败的详细错误
                                     }
                                 }
 

@@ -41,11 +41,9 @@ export const initializeTerminal = (
 ) => {
   try {
     if (!containerRef) {
-      console.error('【终端初始化】容器引用为空');
+      console.error('容器引用为空');
       return null;
     }
-
-    console.log('【终端初始化】开始初始化终端');
 
     // 使用最新的xterm依赖和插件
     const { Terminal } = window.xterm;
@@ -110,7 +108,6 @@ export const initializeTerminal = (
 
     // 数据输入事件
     term.onData((data: string) => {
-      console.log(`【终端输入】发送数据: ${data.length} 字节`);
       if (onData) {
         onData(data);
       }
@@ -118,8 +115,6 @@ export const initializeTerminal = (
 
     // 设置终端元素样式
     if (term.element) {
-      console.log('【终端初始化】设置终端元素样式');
-
       // 确保终端元素样式
       term.element.style.width = '100%';
       term.element.style.height = '100%';
@@ -131,10 +126,9 @@ export const initializeTerminal = (
 
     // 尝试调整终端大小
     try {
-      console.log('【终端初始化】调整终端尺寸');
       fitAddon.fit();
     } catch (error) {
-      console.error('【终端初始化】调整终端尺寸失败:', error);
+      console.error('调整终端尺寸失败:', error);
     }
 
     return {

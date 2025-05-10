@@ -124,8 +124,6 @@ function ConnectedTerminal() {
 
     // 如果有连接ID但没有活动的标签或活动标签为no-tabs，或者没有匹配的标签，则创建新标签
     if (connectionId && (!activeTab || activeTab?.key === 'no-tabs' || !existingTab)) {
-      console.log('【终端】检测到连接ID但无活动标签或匹配标签，立即创建新标签');
-
       // 解析参数
       const connId = parseInt(connectionId, 10);
       const sessId = sessionParam ? parseInt(sessionParam, 10) : undefined;
@@ -133,8 +131,6 @@ function ConnectedTerminal() {
       // 生成唯一的标签键 - 即使没有sessionParam也能工作
       const timestamp = Date.now();
       const tabKey = `conn-${connId}-session-${sessId || 'direct'}-${timestamp}`;
-
-      console.log(`【终端】生成标签键: ${tabKey}, 会话ID: ${sessId || '无'}`);
 
       // 创建引用
       const terminalRef = React.createRef<HTMLDivElement>();
@@ -169,19 +165,16 @@ function ConnectedTerminal() {
 
       // 添加标签到状态
       addTab(newTab);
-      console.log(`【终端】新标签已创建: ${tabKey}，设置为活动标签`);
 
       // 设置活动标签键
       setActiveTab(tabKey);
 
       // 同时在引用中直接设置，确保立即生效
       if (terminalStateRef && terminalStateRef.current) {
-        console.log(`【终端】直接设置terminalStateRef.current.activeTabKey = ${tabKey}`);
         terminalStateRef.current.activeTabKey = tabKey;
 
         // 确保在引用中也正确添加了标签
         if (!terminalStateRef.current.tabs.some(t => t.key === tabKey)) {
-          console.log(`【终端】手动添加标签到terminalStateRef`);
           terminalStateRef.current.tabs.push(newTab);
         }
       }
@@ -200,7 +193,6 @@ function ConnectedTerminal() {
 
       // 延迟触发DOM就绪事件
       setTimeout(() => {
-        console.log(`【终端】触发终端就绪事件: ${tabKey}`);
         window.dispatchEvent(new CustomEvent('terminal-ready', {
           detail: { tabKey: tabKey }
         }));
@@ -303,8 +295,7 @@ function ConnectedTerminal() {
       setConnectionStatus('disconnected');
     }
 
-    // 记录标签状态变化
-    console.log(`【标签状态】标签 ${activeTab.key} 状态: isConnected=${activeTab.isConnected}, UI状态=${connectionStatus}`);
+    // 跟踪标签状态变化
   }, [activeTab, connectionStatus]);
 
   // 处理复制终端内容

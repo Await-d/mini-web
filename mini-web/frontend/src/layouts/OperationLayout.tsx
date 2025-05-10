@@ -120,7 +120,34 @@ const OperationLayout: React.FC = () => {
           console.log(`【连接】跳转到终端页面: /terminal/${connection.id}?session=${sessionId}`);
           navigate(`/terminal/${connection.id}?session=${sessionId}`);
 
+          // 为防止创建多个相同的标签，先检查最近是否已经创建过同样的标签
+          const lastConnection = localStorage.getItem('last_created_connection');
+          const now = Date.now();
+          const createConnectionKey = `${connection.id}-${sessionId}`;
+
+          // 检查是否在最近1秒内创建过完全相同的连接
+          if (lastConnection) {
+            try {
+              const { key, timestamp } = JSON.parse(lastConnection);
+              if (key === createConnectionKey && (now - timestamp) < 1000) {
+                console.log(`【连接】跳过创建重复连接: ${createConnectionKey}, 距上次创建仅 ${now - timestamp}ms`);
+                // 仍然导航到终端页面，但是不触发事件创建标签
+                navigate(`/terminal/${connection.id}?session=${sessionId}`);
+                return;
+              }
+            } catch (e) {
+              console.error('解析上次连接信息失败', e);
+            }
+          }
+
+          // 记录这次连接创建
+          localStorage.setItem('last_created_connection', JSON.stringify({
+            key: createConnectionKey,
+            timestamp: now
+          }));
+
           // 直接发布会话创建事件，通知相关组件
+          console.log(`【连接】发布会话创建事件: connectionId=${connection.id}, sessionId=${sessionId}, tabKey=${tabKey}`);
           window.dispatchEvent(new CustomEvent('session-created', {
             detail: {
               connectionId: connection.id,

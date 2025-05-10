@@ -13,17 +13,21 @@ import {
 import styles from '../styles.module.css';
 
 interface TerminalHeaderProps {
-  networkLatency?: number;
+  networkLatency?: number | null;
   terminalMode?: string;
   fullscreen?: boolean;
-  onAddTab?: () => void;
+  addNewTab?: () => void;       // 添加与实际使用一致的属性名
+  onAddTab?: () => void;        // 保留旧属性以兼容
   onCopyContent?: () => void;
   onDownloadLog?: () => void;
   onShowSettings?: () => void;
-  onCodePanel?: () => void;
+  onToggleCode?: () => void;    // 添加与实际使用一致的属性名
+  onToggleSplit?: () => void;   // 添加与实际使用一致的属性名
+  onCodePanel?: () => void;     // 保留旧属性以兼容
   onBuildPanel?: () => void;
   onToggleFullscreen?: () => void;
   onCloseSession?: () => void;
+  onCloseTab?: () => void;      // 添加与实际使用一致的属性名
   onOpenSettings?: () => void;
   onOpenQuickCommands?: () => void;
   onOpenBatchCommands?: () => void;
@@ -34,13 +38,17 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   terminalMode = 'normal',
   fullscreen,
   onAddTab,
+  addNewTab,
   onCopyContent,
   onDownloadLog,
   onShowSettings,
   onCodePanel,
+  onToggleCode,
+  onToggleSplit,
   onBuildPanel,
   onToggleFullscreen,
   onCloseSession,
+  onCloseTab,
   onOpenSettings,
   onOpenQuickCommands,
   onOpenBatchCommands
@@ -48,8 +56,10 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   // 从connection中获取名称和信息（如果未直接提供）
   // 兼容处理回调函数
   const handleSettings = onShowSettings || onOpenSettings;
-  const handleCodePanel = onCodePanel || onOpenQuickCommands;
-  const handleBuildPanel = onBuildPanel || onOpenBatchCommands;
+  const handleCodePanel = onCodePanel || onToggleCode || onOpenQuickCommands;
+  const handleBuildPanel = onBuildPanel || onToggleSplit || onOpenBatchCommands;
+  const handleAddTab = addNewTab || onAddTab;
+  const handleCloseSession = onCloseSession || onCloseTab;
 
   return (
     <div className={styles.terminalHeader}>
@@ -60,7 +70,7 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
             type="text"
             size="small"
             icon={<PlusOutlined style={{ fontSize: '14px' }} />}
-            onClick={onAddTab}
+            onClick={handleAddTab}
           />
         </Tooltip>
         <Tooltip title="复制终端内容">
@@ -136,7 +146,7 @@ const TerminalHeader: React.FC<TerminalHeaderProps> = ({
             danger
             size="small"
             icon={<CloseOutlined style={{ fontSize: '14px' }} />}
-            onClick={onCloseSession}
+            onClick={handleCloseSession}
             className="close-session-btn"
           />
         </Tooltip>

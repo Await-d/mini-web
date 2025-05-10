@@ -29,6 +29,8 @@ export interface ConnectionChildProps {
     toggleFullscreen?: () => void;
     sendDataToServer?: (data: string) => void;
     clearRetryTimers?: () => void;
+    createConnectionHelp?: any; // 添加缺失的属性
+    createRetryInterface?: any; // 添加缺失的属性
     [key: string]: any; // 支持其他可能的属性
 }
 

@@ -14,25 +14,9 @@ export const useTerminalInitialization = () => {
     handleTerminalData: (data: string) => void
   ) => {
     if (!activeTab.terminalRef?.current) {
-      console.error('【初始化调试】终端容器不存在，无法初始化终端');
-      console.log('【初始化调试】终端标签页详情:', {
-        key: activeTab.key,
-        connectionId: activeTab.connectionId,
-        sessionId: activeTab.sessionId,
-        terminalRef: {
-          exists: !!activeTab.terminalRef,
-          hasCurrentValue: !!activeTab.terminalRef?.current
-        },
-        allRefs: {
-          xtermRef: !!activeTab.xtermRef?.current,
-          webSocketRef: !!activeTab.webSocketRef?.current,
-          fitAddonRef: !!activeTab.fitAddonRef?.current
-        }
-      });
+      console.error('终端容器不存在，无法初始化终端');
       return false;
     }
-
-    console.log('【初始化调试】初始化终端实例...');
     
     // 设置关键样式确保终端容器正确显示
     activeTab.terminalRef.current.style.height = '100%';

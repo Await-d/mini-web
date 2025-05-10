@@ -28,13 +28,13 @@ const Terminal: React.FC = () => {
         // 页面可见性变化处理函数
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
-                console.log('【连接监控】页面变为可见状态，检查连接');
+                // 页面变为可见状态，检查连接
 
                 // 尝试恢复连接
                 if (typeof window !== 'undefined') {
                     // 优先使用全局恢复函数
                     if ((window as any).attemptGlobalRecovery) {
-                        console.log('【连接监控】使用全局恢复函数尝试恢复连接');
+                        // 使用全局恢复函数尝试恢复连接
                         const success = (window as any).attemptGlobalRecovery();
                         if (success) {
                             setIsConnectionRestored(true);
@@ -42,7 +42,7 @@ const Terminal: React.FC = () => {
                     }
                     // 其次使用reconnectAfterNavigation函数
                     else if ((window as any).reconnectAfterNavigation) {
-                        console.log('【连接监控】使用重连函数尝试恢复连接');
+                        // 使用重连函数尝试恢复连接
                         (window as any).reconnectAfterNavigation();
                         setIsConnectionRestored(true);
                     }
@@ -50,7 +50,7 @@ const Terminal: React.FC = () => {
                     else if ((window as any).quickConnect) {
                         const savedSessionId = localStorage.getItem('last_session_id');
                         if (savedSessionId) {
-                            console.log('【连接监控】使用快速连接函数尝试恢复连接,会话ID:', savedSessionId);
+                            // 使用快速连接函数尝试恢复连接
                             (window as any).quickConnect(parseInt(savedSessionId, 10));
                             setIsConnectionRestored(true);
                         }
@@ -64,13 +64,13 @@ const Terminal: React.FC = () => {
 
         // 页面加载后检查一次
         setTimeout(() => {
-            console.log('【连接监控】页面加载后检查连接状态');
+            // 页面加载后检查连接状态
             handleVisibilityChange();
         }, 500);
 
         // 每隔10秒检查一次连接状态，防止意外断开
         const intervalId = setInterval(() => {
-            console.log('【连接监控】定期检查连接状态');
+            // 定期检查连接状态
             // 如果页面可见，尝试恢复连接
             if (document.visibilityState === 'visible' &&
                 typeof window !== 'undefined' &&
@@ -88,7 +88,7 @@ const Terminal: React.FC = () => {
     // URL参数变化时的处理
     useEffect(() => {
         if (connectionId || sessionId) {
-            console.log('【连接监控】URL参数变化，连接ID:', connectionId, '会话ID:', sessionId);
+            // URL参数变化，读取连接ID和会话ID
 
             // 保存到localStorage以备恢复
             if (sessionId) {
@@ -112,9 +112,7 @@ const Terminal: React.FC = () => {
         <div className="terminal-page">
             <TerminalConnectionWrapper connectionParams={connectionParams}>
                 {({ hasConnection, tabsCount, activeTabKey, isConnected, tabs }) => {
-                    console.log('【主组件调试】终端连接组件就绪，接收到的属性:', {
-                        hasConnection, tabsCount, activeTabKey, isConnected
-                    });
+                    // 终端连接组件就绪
 
                     // 判断是否显示已连接终端
                     if (hasConnection || tabsCount > 0 || activeTabKey !== 'no-tabs' || isConnected || isConnectionRestored) {
