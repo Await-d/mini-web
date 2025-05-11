@@ -6,6 +6,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import TerminalToolbar from './TerminalToolbar';
 import TerminalStatus from './TerminalStatus';
 import '../Terminal.css';
+import '../styles/terminal-fixes.css'; // 确保加载终端修复样式
 import { PlusOutlined, CopyOutlined, DownloadOutlined, CodeOutlined, BuildOutlined, SettingOutlined, FullscreenOutlined, CloseOutlined } from '@ant-design/icons';
 import { Tabs } from 'antd';
 import { Button } from 'antd';
@@ -15,6 +16,22 @@ type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | '
 
 // 终端连接组件 - 显示并管理已连接的终端
 function ConnectedTerminal() {
+  // 确保样式正确加载
+  useEffect(() => {
+    // 添加terminal-fixes.css的样式链接
+    const linkId = 'terminal-fixes-css';
+    if (!document.getElementById(linkId)) {
+      const link = document.createElement('link');
+      link.id = linkId;
+      link.rel = 'stylesheet';
+      link.type = 'text/css';
+      link.href = '/src/pages/Terminal/styles/terminal-fixes.css';
+      document.head.appendChild(link);
+
+      console.log('动态加载了terminal-fixes.css样式');
+    }
+  }, []);
+
   const { state, updateTab, addTab, setActiveTab, closeTab } = useTerminal();
   const { tabs, activeTabKey } = state;
   const [fontSize, setFontSize] = useState(14); // 默认字体大小

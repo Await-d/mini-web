@@ -21,9 +21,9 @@ const root = ReactDOM.createRoot(document.getElementById('root')!, {
 
 root.render(
   <React.StrictMode>
-    <ConfigProvider 
-      locale={zhCN} 
-      warning={{compatibleReact19: true}}
+    <ConfigProvider
+      locale={zhCN}
+      warning={{ compatibleReact19: true }}
     >
       <TerminalProvider>
         <RouterProvider router={router} future={{ v7_startTransition: true }} />

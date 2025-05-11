@@ -41,22 +41,15 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
     // 监听终端准备就绪事件
     useEffect(() => {
         const handleTerminalReady = (event: CustomEvent) => {
-            const { tabKey, domId, connectionId, sessionId } = event.detail;
-
+            const { tabKey,  connectionId, sessionId } = event.detail;
             // 查找对应的标签
             const tab = tabs.find(t => t.key === tabKey);
             if (!tab) {
-                console.error(`找不到对应的标签: ${tabKey}`);
                 return;
             }
 
-            // 如果设置了连接ID和会话ID，初始化WebSocket连接
-            if (connectionId && sessionId && createWebSocketConnection) {
-                // 创建WebSocket连接
-                createWebSocketConnection(connectionId, sessionId, tabKey);
-            }
-
-            // 初始化终端
+            // 先初始化终端
+            let terminalInitialized = false;
             if (tab && initTerminal) {
                 // 创建数据处理器函数
                 const dataHandler = (data: string) => {
@@ -70,10 +63,20 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
                 };
 
                 // 初始化终端
-                const success = initTerminal(tab, dataHandler);
-                if (!success) {
+                terminalInitialized = initTerminal(tab, dataHandler);
+                if (!terminalInitialized) {
                     console.error(`初始化终端失败: ${tabKey}`);
+                    return;
                 }
+            }
+
+            // 确保终端初始化成功后，再创建WebSocket连接
+            if (terminalInitialized && connectionId && sessionId && createWebSocketConnection) {
+                // 延迟一点创建WebSocket连接，确保终端完全初始化
+                setTimeout(() => {
+                    // 创建WebSocket连接
+                    createWebSocketConnection(connectionId, sessionId, tabKey);
+                }, 100);
             }
         };
 
@@ -105,4 +108,4 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
     return <>{children}</>;
 };
 
-export default TerminalEventManager; 
+export default TerminalEventManager;

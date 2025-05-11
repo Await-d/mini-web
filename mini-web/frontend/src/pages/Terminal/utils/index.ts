@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-08 18:19:21
  * @LastEditors: Await
- * @LastEditTime: 2025-05-08 20:34:51
+ * @LastEditTime: 2025-05-11 10:44:12
  * @Description: 请填写简介
  */
 // 终端工具函数索引文件
@@ -22,6 +22,7 @@ export * from './networkUtils';
 
 import { sessionAPI } from '../../../services/api';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
+import terminalInit, { initTerminal, refreshTerminal, clearTerminal, writeWelcomeMessage } from './initTerminal';
 
 /**
  * 关闭所有会话
@@ -85,4 +86,16 @@ export const createNewSession = async (connectionId: number): Promise<number | n
     console.error('创建会话API调用失败:', error);
     return null;
   }
+};
+
+/**
+ * 导出所有终端相关工具函数
+ */
+export {
+  // 终端初始化工具
+  initTerminal,
+  refreshTerminal,
+  clearTerminal,
+  writeWelcomeMessage,
+  terminalInit as default
 };

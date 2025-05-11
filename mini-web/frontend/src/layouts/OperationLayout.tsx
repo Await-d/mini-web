@@ -90,6 +90,9 @@ const OperationLayout: React.FC = () => {
 
   // 处理连接
   const handleConnect = (connection: Connection) => {
+    // 清除手动关闭标记，允许创建新标签
+    localStorage.removeItem('manually_closed_tabs');
+
     message.info(`正在连接到 ${connection.name}...`);
 
     // 创建会话
@@ -204,12 +207,11 @@ const OperationLayout: React.FC = () => {
           setTimeout(triggerActivation, 1000);
           setTimeout(triggerActivation, 2000);
           setTimeout(triggerActivation, 3000);
-        } else {
-          message.error(`创建会话失败: ${response.data?.message || '未知错误'}`);
         }
       })
       .catch(error => {
-        message.error(`连接失败: ${error.message || '网络错误'}`);
+        console.error('创建会话失败:', error);
+        message.error('创建会话失败，请稍后再试');
       });
   };
 
@@ -404,26 +406,34 @@ const OperationLayout: React.FC = () => {
 
   // 处理删除连接
   const handleDeleteConnection = () => {
-    if (selectedNode?.connection) {
-      closeContextMenu();
-      Modal.confirm({
-        title: '确认删除',
-        content: `确定要删除连接 "${selectedNode.connection.name}" 吗？`,
-        okText: '删除',
-        okType: 'danger',
-        cancelText: '取消',
-        onOk: async () => {
-          try {
+    // 检查是否选中了连接
+    if (!selectedNode || !selectedNode.connection) {
+      message.error('请先选择一个连接');
+      return;
+    }
+
+    // 确认删除
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定要删除连接 "${selectedNode.connection.name}" 吗？`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          // 确保connection存在后再访问其属性
+          if (selectedNode.connection && selectedNode.connection.id) {
             await connectionAPI.deleteConnection(selectedNode.connection.id);
             message.success('连接删除成功');
             fetchConnections(); // 刷新连接列表
-          } catch (error) {
-            console.error('删除连接失败:', error);
-            message.error('删除连接失败，请稍后再试');
+          } else {
+            message.error('删除失败：无效的连接');
           }
-        },
-      });
-    }
+        } catch (error) {
+          message.error(`删除失败: ${error instanceof Error ? error.message : '未知错误'}`);
+        }
+      }
+    });
   };
 
   // 处理搜索

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense, useRef, createRef, useCallback } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Spin, Empty, message, Button } from 'antd';
 import { useTerminal } from '../../contexts/TerminalContext';
 import { Terminal as XTerminal } from 'xterm';
@@ -83,18 +83,45 @@ const saveSessionInfo = (connectionId: number, sessionId: number, tabKey: string
  * 集成了SSH, Telnet, RDP, VNC等多种远程连接协议支持
  */
 function TerminalComponent(): React.ReactNode {
+  // 使用上下文获取标签页状态和操作
+  const {
+    state: terminalState,
+    addTab,
+    closeTab,
+    setActiveTab,
+    updateTab
+  } = useTerminal();
+  const tabs = terminalState?.tabs || [];
+
+  // 获取路由参数
   const { connectionId } = useParams<{ connectionId: string }>();
-  const [settingsVisible, setSettingsVisible] = useState(false);
+  const navigate = useNavigate();
+
+  // 从URL搜索参数获取会话值
+  const searchParams = useSearchParams();
+  const sessionParam = searchParams[0]?.get('session');
+  const quickReconnect = searchParams[0]?.get('reconnect') === 'true';
+
+  // 加载状态
   const [loading, setLoading] = useState(true);
-  const [quickCommandsVisible, setQuickCommandsVisible] = useState(false);
-  const [batchCommandsVisible, setBatchCommandsVisible] = useState(false);
-  // 添加一个标记，用于跟踪是否已经从localStorage恢复过标签
-  const [tabsRestored, setTabsRestored] = useState(false);
+
+  // 设置面板显示状态
+  const [settingsVisible, setSettingsVisible] = useState(false);
+
+  // 侧边栏折叠状态
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // 使用终端连接Hook
+  const connectionProps = useTerminalConnection();
+
+  // 每次加载组件时清除手动关闭标记，确保可以正常创建标签
+  useEffect(() => {
+    localStorage.removeItem('manually_closed_tabs');
+  }, []);
 
   // 使用状态存储连接参数
   const { search } = useLocation();
   const queryParams = new URLSearchParams(search);
-  const sessionId = queryParams.get('session');
 
   // 添加一个标记表示是否应该处理URL参数
   const shouldProcessUrlParams = useRef(true);
@@ -102,7 +129,7 @@ function TerminalComponent(): React.ReactNode {
   // 将连接信息转换为正确的类型
   const connectionParamsForConnector = connectionId ? {
     connectionId: parseInt(connectionId),
-    sessionId: sessionId ? parseInt(sessionId) : undefined
+    sessionId: sessionParam ? parseInt(sessionParam) : undefined
   } : undefined;
 
   // 终端事件处理
@@ -115,11 +142,6 @@ function TerminalComponent(): React.ReactNode {
     getActiveTab
   } = useTerminalEvents();
 
-  // 从useTerminal中获取状态
-  const { state: terminalState, closeTab, setActiveTab, updateTab, addTab } = useTerminal();
-
-  const { tabs, activeTabKey } = terminalState;
-
   // 获取WebSocket管理hook
   const {
     createWebSocketConnection
@@ -129,9 +151,6 @@ function TerminalComponent(): React.ReactNode {
   const {
     initTerminal
   } = useTerminalInitialization();
-
-  // 添加导航函数
-  const navigate = useNavigate();
 
   // 标签切换处理函数，负责更新活动标签并清理URL参数
   const handleTabChange = (key: string) => {
@@ -170,7 +189,7 @@ function TerminalComponent(): React.ReactNode {
     }
 
     // 如果没有URL参数，也不需要处理
-    if (!connectionId || !sessionId) {
+    if (!connectionId || !sessionParam) {
       return;
     }
 
@@ -202,7 +221,7 @@ function TerminalComponent(): React.ReactNode {
 
     // 如果没有已保存的有效活动标签，继续处理URL参数
     // 此时会保留处理标志为true，以便fetchConnectionAndCreateTab可以处理
-  }, [tabs, connectionId, sessionId, navigate, setActiveTab]);
+  }, [tabs, connectionId, navigate, setActiveTab]);
 
   // 在组件初始化时，尝试从localStorage恢复标签状态
   useEffect(() => {
@@ -304,7 +323,7 @@ function TerminalComponent(): React.ReactNode {
         });
 
         // 设置标记表示已经从localStorage恢复了标签
-        setTabsRestored(true);
+        localStorage.setItem('tabs_restored', 'true');
 
         // 设置一个标志，表示标签已从localStorage恢复，避免useTerminalConnection中重复恢复
         localStorage.setItem('tabs_restored', 'true');
@@ -397,7 +416,7 @@ function TerminalComponent(): React.ReactNode {
 
       // 检查每个标签的连接状态
       currentTabs.forEach(tab => {
-        if (tab && tab.key === activeTabKey) {
+        if (tab && tab.key === terminalState.activeTabKey) {
           // 如果WebSocket已关闭或不存在，但标签仍标记为已连接
           if (tab.isConnected && (!tab.webSocketRef?.current ||
             tab.webSocketRef.current.readyState === WebSocket.CLOSED ||
@@ -422,7 +441,7 @@ function TerminalComponent(): React.ReactNode {
     return () => {
       clearInterval(intervalId);
     };
-  }, [tabs, activeTabKey, updateTab]);
+  }, [tabs, terminalState.activeTabKey, updateTab]);
 
   // 终端DOM引用
   const termRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -470,9 +489,9 @@ function TerminalComponent(): React.ReactNode {
 
   useEffect(() => {
     // 如果没有标签被恢复，则需要处理URL参数
-    if (connectionId && sessionId) {
+    if (connectionId && sessionParam) {
       // 创建连接标识符
-      const connectionKey = `${connectionId}-${sessionId}`;
+      const connectionKey = `${connectionId}-${sessionParam}`;
 
       // 检查是否已处理过这个连接，避免重复处理导致无限循环
       if (processedConnectionsRef.current.has(connectionKey)) {
@@ -480,7 +499,7 @@ function TerminalComponent(): React.ReactNode {
       }
 
       // 检查全局锁以防止与useTerminalConnection中的逻辑重复创建标签
-      const lockKey = `global_tab_creation_lock_${connectionId}_${sessionId || 'nosession'}`;
+      const lockKey = `global_tab_creation_lock_${connectionId}_${sessionParam || 'nosession'}`;
       if ((window as any)[lockKey]) {
         return;
       }
@@ -545,11 +564,11 @@ function TerminalComponent(): React.ReactNode {
           });
 
           // 查找匹配的标签
-          const lookupKey = `${parseInt(connectionId)}-${parseInt(sessionId)}`;
+          const lookupKey = `${parseInt(connectionId)}-${parseInt(sessionParam)}`;
           const existingTab = uniqueTabs.get(lookupKey) || allTabs.find(tab =>
             tab.connectionId === parseInt(connectionId) &&
-            (tab.sessionId === parseInt(sessionId) ||
-              (tab.sessionId === undefined && sessionId === 'undefined'))
+            (tab.sessionId === parseInt(sessionParam) ||
+              (tab.sessionId === undefined && sessionParam === 'undefined'))
           );
 
           if (existingTab) {
@@ -590,7 +609,7 @@ function TerminalComponent(): React.ReactNode {
         clearTimeout(createTabDebouncedRef.current);
       }
     };
-  }, [connectionId, sessionId]);
+  }, [connectionId, sessionParam]);
 
   // 获取连接信息并创建标签页
   const fetchConnectionAndCreateTab = async () => {
@@ -619,7 +638,7 @@ function TerminalComponent(): React.ReactNode {
       }
 
       // 创建新标签
-      const parsedSessionId = sessionId ? parseInt(sessionId) : undefined;
+      const parsedSessionId = sessionParam ? parseInt(sessionParam) : undefined;
       addTabWithConnection(connection, parseInt(connectionId), parsedSessionId);
 
     } catch (error) {
@@ -761,18 +780,11 @@ function TerminalComponent(): React.ReactNode {
                       tabs={finalTabs}
                       activeTabKey={connProps.activeTabKey}
                     />
-                  ) : connProps.hasConnection ? (
+                  ) : (
                     <TerminalGuide
                       onToggleSidebar={handleToggleSidebar}
                       sidebarCollapsed={!!connProps.sidebarCollapsed}
                     />
-                  ) : (
-                    <div className={styles.notConnectedContainer}>
-                      <Empty
-                        description="未连接到任何终端"
-                        image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      />
-                    </div>
                   )}
 
                   {/* 设置面板 */}
@@ -799,8 +811,13 @@ function TerminalComponent(): React.ReactNode {
 
                   {/* 快速命令面板 */}
                   <QuickCommands
-                    visible={quickCommandsVisible}
-                    onClose={() => setQuickCommandsVisible(false)}
+                    visible={quickReconnect}
+                    onClose={() => {
+                      // 关闭快速重连
+                      localStorage.removeItem('reconnect');
+                      localStorage.removeItem('session');
+                      navigate('/terminal/');
+                    }}
                     onSendCommand={(command: string) => {
                       const activeTab = getActiveTab();
                       if (
@@ -810,37 +827,17 @@ function TerminalComponent(): React.ReactNode {
                       ) {
                         activeTab.webSocketRef.current.send(command + '\r');
                       }
-                      setQuickCommandsVisible(false);
+                      localStorage.setItem('reconnect', 'true');
+                      localStorage.setItem('session', sessionParam || '');
+                      navigate('/terminal/');
                     }}
                   />
 
                   {/* 批量命令面板 */}
                   <BatchCommands
-                    visible={batchCommandsVisible}
-                    onClose={() => setBatchCommandsVisible(false)}
-                    onSendCommands={(commands: string[]) => {
-                      const activeTab = getActiveTab();
-                      if (
-                        activeTab &&
-                        activeTab.webSocketRef?.current &&
-                        activeTab.webSocketRef.current.readyState === WebSocket.OPEN
-                      ) {
-                        // 顺序执行命令
-                        let delay = 0;
-                        commands.forEach((cmd: string) => {
-                          setTimeout(() => {
-                            if (
-                              activeTab.webSocketRef?.current &&
-                              activeTab.webSocketRef.current.readyState === WebSocket.OPEN
-                            ) {
-                              activeTab.webSocketRef.current.send(cmd.trim() + '\r');
-                            }
-                          }, delay);
-                          delay += 500; // 每条命令间隔500ms
-                        });
-                      }
-                      setBatchCommandsVisible(false);
-                    }}
+                    visible={false}
+                    onClose={() => { }}
+                    onSendCommands={(commands: string[]) => { }}
                   />
 
                   {/* Loading状态遮罩 */}

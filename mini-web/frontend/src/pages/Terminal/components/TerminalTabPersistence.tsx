@@ -74,6 +74,13 @@ const TerminalTabPersistence: FC<PropsWithChildren<TerminalTabPersistenceProps>>
     // 从localStorage加载标签数据
     const loadTabsFromLocalStorage = useCallback(async () => {
         try {
+            // 检查是否有手动关闭标记
+            const manuallyClosedTabs = localStorage.getItem('manually_closed_tabs') === 'true';
+            if (manuallyClosedTabs) {
+                console.log('检测到标签页是手动关闭的，不自动恢复');
+                return;
+            }
+
             const tabsJson = localStorage.getItem('terminal_tabs');
             const savedActiveTab = localStorage.getItem('terminal_active_tab');
 
@@ -172,6 +179,9 @@ const TerminalTabPersistence: FC<PropsWithChildren<TerminalTabPersistenceProps>>
         const handleTabAdd = (event: CustomEvent) => {
             const { tab } = event.detail;
             if (!tab || !tab.key) return;
+
+            // 清除手动关闭标记，因为现在有新标签了
+            localStorage.removeItem('manually_closed_tabs');
 
             // 添加标签后立即保存
             setTimeout(() => {

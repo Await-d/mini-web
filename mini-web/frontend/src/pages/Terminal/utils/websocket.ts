@@ -301,7 +301,7 @@ export const handleWebSocketMessage = (
 
           if (message.type === 'data' && message.data) {
             console.debug('收到data类型消息');
-            term.write(message.data);
+            processTerminalText(message.data, term);
             return;
           }
 
@@ -336,9 +336,9 @@ export const handleWebSocketMessage = (
             return;
           }
 
-          // 正常的文本消息，直接写入终端
+          // 正常的文本消息，确保换行符处理正确
           console.debug('非JSON格式消息，直接写入终端');
-          term.write(event.data);
+          processTerminalText(event.data, term);
         }
       } else if (event.data instanceof ArrayBuffer) {
         // 二进制数据处理
@@ -409,7 +409,8 @@ export const handleWebSocketMessage = (
 
             console.log('将Blob处理为文本并写入终端，内容预览:',
               content.length > 50 ? content.substring(0, 50) + '...' : content);
-            term.write(content);
+
+            processTerminalText(content, term);
           } else {
             console.log('Blob文本内容为空或无效，尝试二进制处理');
             // 文本内容无效，尝试二进制处理
@@ -442,7 +443,8 @@ export const handleWebSocketMessage = (
                   const decoder = new TextDecoder('utf-8', { fatal: false });
                   const text = decoder.decode(uint8Array);
                   console.log('二进制数据解码为UTF-8，写入终端');
-                  term.write(text);
+
+                  processTerminalText(text, term);
                 } else {
                   console.log('二进制数据不包含可打印字符，不写入终端');
                 }
@@ -548,9 +550,66 @@ function isSystemMessage(message: string): boolean {
   return isSystemPattern || ansiControlSeqOnly;
 }
 
-// 移除全局导出函数和调试代码
-if (typeof window !== 'undefined') {
-  setTimeout(() => {
-    console.log('WebSocket准备就绪');
-  }, 100);
+/**
+ * 处理终端文本，确保行正确显示，防止堆叠问题
+ * @param text 原始文本
+ * @param term xterm终端实例
+ */
+function processTerminalText(text: string, term: XTerm): void {
+  if (!text || !term) return;
+
+  // 系统消息跳过特殊处理，直接写入
+  if (isSystemMessage(text)) {
+    term.writeln(text);
+    return;
+  }
+
+  // 将ANSI转义序列正则表达式
+  const ansiEscapeRegex = /(\x1b\[[0-9;]*[a-zA-Z])/g;
+
+  // 将文本按换行符分割成行
+  const lines = text
+    .replace(/\r\n/g, '\n')  // 统一换行符为\n
+    .replace(/\r/g, '\n')    // 将单独的\r也转换为\n
+    .split('\n');            // 按\n分割
+
+  // 收集和处理ANSI转义序列
+  const parts = text.split(ansiEscapeRegex);
+  let currentAnsi = '';
+  for (const part of parts) {
+    if (part.match(ansiEscapeRegex)) {
+      currentAnsi += part;
+    }
+  }
+
+  // 处理每一行
+  for (let i = 0; i < lines.length; i++) {
+    // 清理每行内容，去除零宽字符但保留空格和ANSI序列
+    let cleanLine = lines[i].replace(/[\u200B-\u200D\uFEFF]/g, '');
+
+    // 对于完全空行，只在非最后行时写入换行
+    if (cleanLine === '') {
+      if (i < lines.length - 1) {
+        term.write('\r\n');
+      }
+      continue;
+    }
+
+    // 保留当前ANSI状态，应用到每行文本
+    if (currentAnsi && !cleanLine.includes(currentAnsi)) {
+      cleanLine = currentAnsi + cleanLine;
+    }
+
+    // 关键修改：使用writeln代替write+\r\n组合
+    // writeln会确保每行都有一个完整的换行
+    if (i < lines.length - 1 || text.endsWith('\n') || text.endsWith('\r')) {
+      // 对非最后行或以换行结束的文本使用writeln
+      term.writeln(cleanLine);
+    } else {
+      // 对不需要换行的最后一行使用write
+      term.write(cleanLine);
+    }
+  }
 }
+
+// 移除全局导出函数和调试代码

@@ -2,19 +2,20 @@
  * @Author: Await
  * @Date: 2025-05-09 17:49:44
  * @LastEditors: Await
- * @LastEditTime: 2025-05-09 18:29:24
+ * @LastEditTime: 2025-05-11 08:17:12
  * @Description: 请填写简介
  */
 import { useState, useRef, useCallback, useEffect, createRef } from 'react';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
-import { handleWebSocketMessage } from '../utils';
+import { handleWebSocketMessage } from '../utils/websocket';
 import { terminalStateRef } from '../../../contexts/TerminalContext';
 import { writeColorText } from '../utils/terminalUtils';
 
-// 扩展TerminalTab接口以支持lastActivityTime属性
+// 扩展TerminalTab接口以支持lastActivityTime和isGraphical属性
 declare module '../../../contexts/TerminalContext' {
   interface TerminalTab {
     lastActivityTime?: number;
+    isGraphical?: boolean;
   }
 }
 
@@ -92,6 +93,11 @@ export const useWebSocketManager = () => {
   // 定义updateTab函数
   const updateTab = useCallback((key: string, updates: Partial<TerminalTab>) => {
     // 获取所有标签
+    if (!terminalStateRef.current) {
+      console.error(`【更新标签】状态引用不存在，无法更新标签: ${key}`);
+      return;
+    }
+
     const tabs = terminalStateRef.current.tabs as TerminalTab[];
 
     // 找到要更新的标签
@@ -105,11 +111,13 @@ export const useWebSocketManager = () => {
     const updatedTab = { ...tabs[tabIndex], ...updates };
     tabs[tabIndex] = updatedTab;
 
-    // 更新状态引用
-    terminalStateRef.current = {
-      ...terminalStateRef.current,
-      tabs: [...tabs],
-    };
+    // 更新状态引用，确保类型安全
+    if (terminalStateRef.current) {
+      terminalStateRef.current = {
+        ...terminalStateRef.current,
+        tabs: [...tabs],
+      };
+    }
 
     console.log(`【更新标签】标签已更新: ${key}`, updates);
   }, []);
@@ -175,7 +183,7 @@ export const useWebSocketManager = () => {
    */
   const createWebSocketConnection = useCallback((
     activeTabOrConnectionId: TerminalTab | number,
-    onConnectionHelpOrSessionId: (() => void) | number,
+    onConnectionHelpOrSessionId: (() => void) | number | undefined,
     onRetryInterfaceOrTabKey?: (() => void) | string
   ) => {
     // 判断参数类型并处理
@@ -304,6 +312,37 @@ export const useWebSocketManager = () => {
 
     if (!activeTab.terminalRef?.current || !activeTab.xtermRef?.current) {
       console.error('【WebSocket调试】创建WebSocket连接失败：终端尚未初始化');
+
+      // 检查是否手动关闭过标签页
+      const manuallyClosedTabs = localStorage.getItem('manually_closed_tabs') === 'true';
+      if (manuallyClosedTabs) {
+        console.log('【WebSocket】检测到标签页是手动关闭的，不创建WebSocket连接');
+        return false;
+      }
+
+      // 添加重试机制，如果终端尚未初始化，等待一段时间后重试
+      if (activeTab.key) {
+        console.log(`【WebSocket】等待终端初始化，将在300ms后重试连接...`);
+        setTimeout(() => {
+          // 重新检查终端是否已初始化和手动关闭标记
+          const stillManuallyClosedTabs = localStorage.getItem('manually_closed_tabs') === 'true';
+          if (stillManuallyClosedTabs) {
+            console.log('【WebSocket】检测到标签页是手动关闭的，取消重试连接');
+            return;
+          }
+
+          if (activeTab.terminalRef?.current && activeTab.xtermRef?.current) {
+            console.log('【WebSocket】终端已初始化，重新尝试创建连接');
+            if (typeof connectionId === 'number') {
+              createWebSocketConnection(activeTab, connectionId as number, undefined);
+            } else {
+              createSimpleConnection(activeTab, activeTab.sessionId);
+            }
+          } else {
+            console.error('【WebSocket】终端初始化超时，请手动刷新页面');
+          }
+        }, 300);
+      }
       return false;
     }
 
@@ -320,6 +359,13 @@ export const useWebSocketManager = () => {
   ) => {
     if (!activeTab || !activeTab.xtermRef?.current) {
       console.error('创建简易连接失败：缺少必要参数');
+      return null;
+    }
+
+    // 检查是否手动关闭过标签页
+    const manuallyClosedTabs = localStorage.getItem('manually_closed_tabs') === 'true';
+    if (manuallyClosedTabs) {
+      console.log('【WebSocket】检测到标签页是手动关闭的，不创建简易WebSocket连接');
       return null;
     }
 
@@ -430,7 +476,20 @@ export const useWebSocketManager = () => {
       };
 
       // 错误和关闭处理
-      ws.onclose = () => {
+      // 用于标记是否是编程方式关闭连接的标志
+      let isProgrammaticClose = false;
+
+      // 保存原始的close方法
+      const originalClose = ws.close;
+
+      // 重写WebSocket的close方法，添加标记
+      ws.close = function (code?: number, reason?: string) {
+        console.log('WebSocket主动关闭，设置编程方式关闭标志');
+        isProgrammaticClose = true;
+        return originalClose.call(this, code, reason);
+      };
+
+      ws.onclose = (event) => {
         activeTab.isConnected = false;
         setIsConnected(false);
         term.writeln('\r\n\x1b[31m简易WebSocket连接已关闭\x1b[0m');
@@ -441,18 +500,92 @@ export const useWebSocketManager = () => {
           heartbeatTimerRef.current = null;
         }
 
-        // 添加重试逻辑
-        if (reconnectCountRef.current < 7) {  // 增加重试次数
+        // 如果是编程方式关闭，禁止重连
+        if (isProgrammaticClose) {
+          console.log('WebSocket由程序主动关闭，不进行重连');
+          reconnectCountRef.current = 0;
+          connectionAttemptRef.current = false;
+          return;
+        }
+
+        // 检查标签是否已被手动关闭
+        const manuallyClosedTabs = localStorage.getItem('manually_closed_tabs') === 'true';
+
+        // 检查标签是否仍存在于状态中
+        const tabStillExists = terminalStateRef.current && terminalStateRef.current.tabs?.some(t =>
+          t.key === activeTab.key &&
+          t.connectionId === activeTab.connectionId &&
+          t.sessionId === activeTab.sessionId
+        ) || false;
+
+        // 检查标签是否是当前活动标签
+        const isActiveTabCurrent = terminalStateRef.current && terminalStateRef.current.activeTabKey === activeTab.key;
+
+        // 用于确定是否需要重连的标志 - 增加了必须是当前活动标签的条件
+        const shouldReconnect = !manuallyClosedTabs && tabStillExists &&
+          isActiveTabCurrent && connectionAttemptRef.current !== true;
+
+        // 设置正在尝试连接的标志以防止重复连接
+        connectionAttemptRef.current = true;
+
+        // 记录标签状态
+        console.log('WebSocket连接关闭，标签状态:', {
+          tabKey: activeTab.key,
+          manuallyClosedTabs,
+          tabStillExists,
+          isActiveTabCurrent,
+          shouldReconnect,
+          reconnectCount: reconnectCountRef.current,
+          closeCode: event.code,
+          closeReason: event.reason
+        });
+
+        // 添加重试逻辑，仅在标签没有被手动关闭并且仍然存在时重试
+        if (shouldReconnect && reconnectCountRef.current < 3) {  // 减少重试次数
           reconnectCountRef.current++;
-          term.writeln(`\r\n\x1b[33m尝试重新连接 (${reconnectCountRef.current}/7)...\x1b[0m`);
+          term.writeln(`\r\n\x1b[33m尝试重新连接 (${reconnectCountRef.current}/3)...\x1b[0m`);
 
           setTimeout(() => {
-            // 再次尝试连接
-            createSimpleConnection(activeTab, sessionId);
-          }, 2000 * reconnectCountRef.current);  // 随着重试次数增加延迟
+            // 再次检查标签是否仍存在
+            const stillExistsBeforeRetry = terminalStateRef.current && terminalStateRef.current.tabs?.some(t =>
+              t.key === activeTab.key &&
+              t.connectionId === activeTab.connectionId &&
+              t.sessionId === activeTab.sessionId
+            ) || false;
+
+            // 再次检查标签是否已被手动关闭
+            const stillManuallyClosedTabs = localStorage.getItem('manually_closed_tabs') === 'true';
+
+            // 检查标签是否仍是当前活动标签
+            const isStillActiveTab = terminalStateRef.current && terminalStateRef.current.activeTabKey === activeTab.key;
+
+            if (stillExistsBeforeRetry && !stillManuallyClosedTabs && isStillActiveTab) {
+              // 重置连接尝试标志
+              connectionAttemptRef.current = false;
+              // 再次尝试连接
+              createSimpleConnection(activeTab, activeTab.sessionId);
+            } else {
+              console.log('标签已被关闭、不再活动或移除，取消重连', {
+                tabKey: activeTab.key,
+                stillExistsBeforeRetry,
+                stillManuallyClosedTabs,
+                isStillActiveTab
+              });
+              // 重置重连计数和连接尝试标志
+              reconnectCountRef.current = 0;
+              connectionAttemptRef.current = false;
+            }
+          }, 3000);  // 固定3秒后重试，避免过快重连
         } else {
-          term.writeln('\r\n\x1b[31m达到最大重试次数，请手动重新连接\x1b[0m');
+          if (!tabStillExists || manuallyClosedTabs) {
+            console.log('标签已关闭或不存在，不再尝试重连');
+          } else if (reconnectCountRef.current >= 3) {
+            term.writeln('\r\n\x1b[31m达到最大重试次数，请手动重新连接\x1b[0m');
+          }
+
+          // 重置重连计数和连接尝试标志
           reconnectCountRef.current = 0;
+          connectionAttemptRef.current = false;
         }
       };
 
@@ -673,7 +806,7 @@ export const useWebSocketManager = () => {
 
                   // 尝试从localStorage恢复会话信息
                   const savedSession = localStorage.getItem('terminal_last_session');
-                  if (savedSession) {
+                  if (savedSession && terminalStateRef.current && terminalStateRef.current.tabs && terminalStateRef.current.tabs.length > 0) {
                     try {
                       const sessionInfo = JSON.parse(savedSession);
                       if (sessionInfo.sessionId && sessionInfo.connectionId) {
@@ -705,7 +838,7 @@ export const useWebSocketManager = () => {
             console.log('【连接流程】没有可用的标签页，尝试从localStorage恢复会话');
             // 尝试从localStorage恢复会话信息
             const savedSession = localStorage.getItem('terminal_last_session');
-            if (savedSession && terminalStateRef.current?.tabs?.length > 0) {
+            if (savedSession && terminalStateRef.current && terminalStateRef.current.tabs && terminalStateRef.current.tabs.length > 0) {
               try {
                 const sessionInfo = JSON.parse(savedSession);
                 // 使用类型断言确保安全访问
@@ -726,13 +859,13 @@ export const useWebSocketManager = () => {
       } else {
         // 即使没有明确的重连标记，也检查是否可以从localStorage恢复
         const savedSession = localStorage.getItem('terminal_last_session');
-        if (savedSession && terminalStateRef.current?.tabs?.length > 0) {
+        if (savedSession && terminalStateRef.current && terminalStateRef.current.tabs && terminalStateRef.current.tabs.length > 0) {
           try {
             const sessionInfo = JSON.parse(savedSession);
             console.log('【连接流程】检测到保存的会话信息，尝试恢复:', sessionInfo);
 
-            // 类型断言确保tabs是TerminalTab[]类型
-            const tabs = terminalStateRef.current.tabs as TerminalTab[];
+            // 安全地获取tabs数组
+            const tabs = terminalStateRef.current.tabs as TerminalTab[] || [];
 
             // 找到第一个有效的标签页
             const availableTab = tabs.find(t => t.xtermRef?.current);
@@ -869,4 +1002,11 @@ export const quickReconnect = () => {
 // 导出到window对象便于全局调用
 if (typeof window !== 'undefined') {
   (window as any).quickReconnect = quickReconnect;
+
+  // 添加一个辅助函数，用于确保在标签关闭后WebSocket不会重连
+  (window as any).markTabsAsClosed = () => {
+    // 设置手动关闭标记
+    localStorage.setItem('manually_closed_tabs', 'true');
+    console.log('【WebSocket】标记所有标签为已手动关闭');
+  };
 }

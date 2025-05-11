@@ -23,6 +23,7 @@ export interface TerminalTab {
   fitAddonRef: RefObject<FitAddon | null>;
   searchAddonRef: RefObject<SearchAddon | null>;
   messageQueueRef: RefObject<string[] | null>;
+  cleanupRef?: RefObject<(() => void) | null>; // 添加清理函数引用
   protocol?: string; // 添加协议类型
   hostname?: string; // 添加主机名
   port?: number; // 添加端口
@@ -422,6 +423,14 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       return;
     }
 
+    // 设置手动关闭标记，防止WebSocket重连
+    localStorage.setItem('manually_closed_tabs', 'true');
+
+    // 如果存在全局标记函数，调用它
+    if (typeof window !== 'undefined' && (window as any).markTabsAsClosed) {
+      (window as any).markTabsAsClosed();
+    }
+
     // 尝试关闭WebSocket连接
     try {
       if (tabToClose.webSocketRef?.current &&
@@ -494,8 +503,15 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         // 设置标记，表示所有标签都已关闭
         localStorage.setItem('all_tabs_closed', 'true');
 
-        // 保留关闭标签列表，防止刷新后重新创建
-        // localStorage.removeItem('terminal_closed_tabs');
+        // 添加手动关闭标记，区分手动关闭和自动关闭
+        localStorage.setItem('manually_closed_tabs', 'true');
+
+        // 清除可能导致自动恢复的会话信息
+        localStorage.removeItem('terminal_last_session');
+        localStorage.removeItem('current_terminal_session');
+
+        // 记录关闭时间，可用于判断是否需要恢复
+        localStorage.setItem('tabs_closed_time', Date.now().toString());
       } else {
         // 更新标签状态到localStorage
         updateTabsInLocalStorage(remainingTabs, remainingTabs[0].key);

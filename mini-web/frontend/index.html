@@ -6,6 +6,77 @@
   <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Vite + React + TS</title>
+
+  <!-- 预加载xterm CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.1.0/css/xterm.css" id="xterm-core-css" />
+
+  <!-- 终端修复内联样式 -->
+  <style id="terminal-fixes-inline">
+    /* 终端修复内联样式 */
+    .xterm-container,
+    .xterm {
+      width: 100% !important;
+      height: 100% !important;
+      position: relative !important;
+      visibility: visible !important;
+      display: block !important;
+      opacity: 1 !important;
+      z-index: 5 !important;
+      background-color: #1e1e1e !important;
+    }
+
+    .xterm-text-layer {
+      z-index: 25 !important;
+      visibility: visible !important;
+      display: block !important;
+      position: absolute !important;
+      opacity: 1 !important;
+      color: #f0f0f0 !important;
+    }
+
+    .xterm-text-layer span,
+    .xterm-rows span {
+      visibility: visible !important;
+      display: inline-block !important;
+      opacity: 1 !important;
+    }
+
+    /* 确保行容器可见 */
+    .xterm-rows {
+      visibility: visible !important;
+      display: block !important;
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      overflow: visible !important;
+      z-index: 20 !important;
+      color: #f0f0f0 !important;
+      opacity: 1 !important;
+    }
+
+    /* 确保行可见 */
+    .xterm-rows>div {
+      visibility: visible !important;
+      display: block !important;
+      white-space: nowrap !important;
+      color: inherit !important;
+      opacity: 1 !important;
+    }
+
+    /* 修复屏幕容器 */
+    .xterm-screen {
+      position: relative !important;
+      width: 100% !important;
+      height: 100% !important;
+      display: block !important;
+      visibility: visible !important;
+      overflow: hidden !important;
+      z-index: 1 !important;
+      background-color: #1e1e1e !important;
+    }
+  </style>
 </head>
 
 <body>
