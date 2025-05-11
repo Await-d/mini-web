@@ -8,16 +8,49 @@ import { handleWebSocketMessage, detectTerminalMode } from '../utils';
 export const useTerminalData = () => {
   const [terminalMode, setTerminalMode] = useState<string>("normal");
   const [networkLatency, setNetworkLatency] = useState<number | null>(null);
+  const [enableLocalEcho, setEnableLocalEcho] = useState<boolean>(true); // 默认启用本地回显
+
+  /**
+   * 切换本地回显功能
+   */
+  const toggleLocalEcho = useCallback((value?: boolean) => {
+    const newValue = value !== undefined ? value : !enableLocalEcho;
+    setEnableLocalEcho(newValue);
+    console.log(`本地回显功能已${newValue ? '启用' : '禁用'}`);
+
+    // 保存设置到localStorage
+    try {
+      const settings = JSON.parse(localStorage.getItem('terminal_settings') || '{}');
+      settings.enableLocalEcho = newValue;
+      localStorage.setItem('terminal_settings', JSON.stringify(settings));
+    } catch (e) {
+      console.error('保存终端设置失败:', e);
+    }
+
+    return newValue;
+  }, [enableLocalEcho]);
+
+  // 从localStorage加载设置
+  useEffect(() => {
+    try {
+      const settings = JSON.parse(localStorage.getItem('terminal_settings') || '{}');
+      if (settings.enableLocalEcho !== undefined) {
+        setEnableLocalEcho(settings.enableLocalEcho);
+      }
+    } catch (e) {
+      console.error('读取终端设置失败:', e);
+    }
+  }, []);
 
   /**
    * 测量网络延迟
    */
   const measureLatency = useCallback((ws: WebSocket, callback: (latency: number) => void) => {
     if (ws.readyState !== WebSocket.OPEN) return;
-    
+
     const start = Date.now();
     const latencyMessage = JSON.stringify({ type: 'ping', timestamp: start });
-    
+
     // 创建一个事件处理器用于处理响应
     const handlePong = (event: MessageEvent) => {
       try {
@@ -31,10 +64,10 @@ export const useTerminalData = () => {
         // 忽略非JSON或不匹配的消息
       }
     };
-    
+
     // 添加临时消息处理器
     ws.addEventListener('message', handlePong);
-    
+
     // 发送ping消息
     try {
       ws.send(latencyMessage);
@@ -42,7 +75,7 @@ export const useTerminalData = () => {
       console.error('发送延迟测量消息失败:', e);
       ws.removeEventListener('message', handlePong);
     }
-    
+
     // 设置超时以清理事件监听器
     setTimeout(() => {
       ws.removeEventListener('message', handlePong);
@@ -54,7 +87,7 @@ export const useTerminalData = () => {
    */
   const detectMode = useCallback((activeTab: TerminalTab) => {
     if (!activeTab.xtermRef?.current) return;
-    
+
     try {
       const mode = detectTerminalMode(activeTab.xtermRef.current);
       setTerminalMode(mode);
@@ -69,15 +102,15 @@ export const useTerminalData = () => {
    */
   const setupModeDetection = useCallback((activeTab: TerminalTab) => {
     if (!activeTab.xtermRef?.current) return null;
-    
+
     // 立即检测一次模式
     detectMode(activeTab);
-    
+
     // 设置定期检测
     const interval = setInterval(() => {
       detectMode(activeTab);
     }, 5000);
-    
+
     // 返回清理函数
     return () => {
       clearInterval(interval);
@@ -89,11 +122,11 @@ export const useTerminalData = () => {
    */
   const setupLatencyMeasurement = useCallback((activeTab: TerminalTab) => {
     if (!activeTab.xtermRef?.current) return null;
-    
+
     // 设置定期测量
     const interval = setInterval(() => {
       if (!activeTab.isConnected || !activeTab.webSocketRef?.current) return;
-      
+
       if (activeTab.webSocketRef.current.readyState === WebSocket.OPEN) {
         measureLatency(activeTab.webSocketRef.current, (latency) => {
           setNetworkLatency(latency);
@@ -101,7 +134,7 @@ export const useTerminalData = () => {
         });
       }
     }, 10000);
-    
+
     // 返回清理函数
     return () => {
       clearInterval(interval);
@@ -113,12 +146,12 @@ export const useTerminalData = () => {
    */
   const createTerminalTools = useCallback((activeTab: TerminalTab) => {
     if (!activeTab.terminalRef?.current) return;
-    
+
     // 创建复制按钮
     const createCopyButton = () => {
       // 检查是否已经存在复制按钮
-      if (activeTab.terminalRef.current?.querySelector('#copy-button')) return;
-      
+      if (activeTab.terminalRef?.current?.querySelector('#copy-button')) return;
+
       const copyButton = document.createElement('button');
       copyButton.id = 'copy-button';
       copyButton.innerHTML = '复制内容';
@@ -132,10 +165,10 @@ export const useTerminalData = () => {
       copyButton.style.border = 'none';
       copyButton.style.borderRadius = '4px';
       copyButton.style.cursor = 'pointer';
-      
+
       copyButton.onclick = () => {
         if (!activeTab.xtermRef?.current) return;
-        
+
         try {
           const content = activeTab.xtermRef.current.buffer.active.getLine(0)?.translateToString() || '';
           navigator.clipboard.writeText(content)
@@ -151,9 +184,9 @@ export const useTerminalData = () => {
               message.style.borderRadius = '4px';
               message.style.zIndex = '100';
               message.innerText = '复制成功';
-              
-              activeTab.terminalRef.current?.appendChild(message);
-              
+
+              activeTab.terminalRef?.current?.appendChild(message);
+
               // 2秒后移除提示
               setTimeout(() => {
                 if (message.parentNode) {
@@ -168,15 +201,15 @@ export const useTerminalData = () => {
           console.error('获取终端内容失败:', e);
         }
       };
-      
-      activeTab.terminalRef.current.appendChild(copyButton);
+
+      activeTab.terminalRef?.current?.appendChild(copyButton);
     };
-    
+
     // 创建清屏按钮
     const createClearButton = () => {
       // 检查是否已经存在清屏按钮
-      if (activeTab.terminalRef.current?.querySelector('#clear-button')) return;
-      
+      if (activeTab.terminalRef?.current?.querySelector('#clear-button')) return;
+
       const clearButton = document.createElement('button');
       clearButton.id = 'clear-button';
       clearButton.innerHTML = '清屏';
@@ -190,13 +223,13 @@ export const useTerminalData = () => {
       clearButton.style.border = 'none';
       clearButton.style.borderRadius = '4px';
       clearButton.style.cursor = 'pointer';
-      
+
       clearButton.onclick = () => {
         if (!activeTab.xtermRef?.current) return;
-        
+
         try {
           activeTab.xtermRef.current.clear();
-          
+
           // 添加清屏成功提示
           const message = document.createElement('div');
           message.style.position = 'absolute';
@@ -208,9 +241,9 @@ export const useTerminalData = () => {
           message.style.borderRadius = '4px';
           message.style.zIndex = '100';
           message.innerText = '已清屏';
-          
-          activeTab.terminalRef.current?.appendChild(message);
-          
+
+          activeTab.terminalRef?.current?.appendChild(message);
+
           // 2秒后移除提示
           setTimeout(() => {
             if (message.parentNode) {
@@ -221,10 +254,13 @@ export const useTerminalData = () => {
           console.error('清屏失败:', e);
         }
       };
-      
-      activeTab.terminalRef.current.appendChild(clearButton);
+
+      // 确保terminalRef.current存在再添加按钮
+      if (activeTab.terminalRef?.current) {
+        activeTab.terminalRef.current.appendChild(clearButton);
+      }
     };
-    
+
     // 创建按钮
     createCopyButton();
     createClearButton();
@@ -233,8 +269,10 @@ export const useTerminalData = () => {
   return {
     terminalMode,
     setTerminalMode,
-    networkLatency, 
+    networkLatency,
     setNetworkLatency,
+    enableLocalEcho,
+    toggleLocalEcho,
     measureLatency,
     detectMode,
     setupModeDetection,

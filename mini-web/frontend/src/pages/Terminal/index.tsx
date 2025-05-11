@@ -43,6 +43,13 @@ import './Terminal.css'; // 引入额外的终端样式
 // 添加import导入loadTerminalDependencies
 import loadTerminalDependencies from './utils/loadTerminalDependencies';
 
+// 在文件顶部添加全局类型声明
+declare global {
+  interface Window {
+    removeTerminalContextMenu?: () => void;
+  }
+}
+
 /**
  * 保存会话信息到localStorage
  */
@@ -77,6 +84,15 @@ const saveSessionInfo = (connectionId: number, sessionId: number, tabKey: string
     console.error('保存会话信息失败:', error);
   }
 };
+
+// 添加类型声明，确保TypeScript能识别_closeTerminalMenu全局函数
+declare global {
+  interface Window {
+    _terminalMenuVisible?: boolean;
+    _closeTerminalMenu?: () => void;
+    _terminalMenu?: HTMLElement | null;
+  }
+}
 
 /**
  * 终端组件
@@ -703,6 +719,329 @@ function TerminalComponent(): React.ReactNode {
 
     return tabKey;
   };
+
+  // 在TerminalComponent函数开始处添加CSS加载逻辑
+  useEffect(() => {
+    // 加载终端菜单增强CSS
+    const linkId = 'terminal-menu-css';
+    if (!document.getElementById(linkId)) {
+      const link = document.createElement('link');
+      link.id = linkId;
+      link.rel = 'stylesheet';
+      link.href = '/terminal-menu.css';
+      document.head.appendChild(link);
+      console.log('已加载终端菜单增强CSS');
+    }
+
+    // 修改全局右键事件处理函数，添加自定义事件触发
+    const handleGlobalContextMenu = (e: MouseEvent) => {
+      // 检查点击是否在终端区域内
+      const terminalElements = document.querySelectorAll('.terminal');
+      for (let i = 0; i < terminalElements.length; i++) {
+        const terminal = terminalElements[i];
+        if (terminal.contains(e.target as Node)) {
+          console.log('全局拦截器: 检测到终端区域内的右键点击');
+          e.preventDefault();
+          e.stopPropagation();
+
+          // 触发自定义事件，传递点击位置
+          const customEvent = new CustomEvent('terminal-contextmenu', {
+            detail: {
+              x: e.clientX,
+              y: e.clientY,
+              timestamp: Date.now()
+            }
+          });
+
+          // 分发事件到window和document对象
+          window.dispatchEvent(customEvent);
+          document.dispatchEvent(customEvent);
+
+          // 额外的方法: 直接创建和显示菜单元素
+          const createAndShowMenu = () => {
+            // 检查是否已存在菜单
+            let menu = document.querySelector('.terminal-context-menu') as HTMLElement;
+
+            // 不存在则创建
+            if (!menu) {
+              menu = document.createElement('div');
+              menu.className = 'terminal-context-menu';
+              menu.innerHTML = `
+                <ul class="ant-menu">
+                  <li class="ant-menu-item">复制</li>
+                  <li class="ant-menu-item">粘贴</li>
+                  <li class="ant-menu-item">全选</li>
+                  <li class="ant-menu-item">清空屏幕</li>
+                  <li class="ant-menu-item">终端设置</li>
+                </ul>
+              `;
+              document.body.appendChild(menu);
+
+              // 添加点击事件关闭菜单
+              menu.addEventListener('click', () => {
+                menu.style.display = 'none';
+              });
+
+              // 点击外部关闭菜单
+              document.addEventListener('click', (event) => {
+                if (!menu.contains(event.target as Node)) {
+                  menu.style.display = 'none';
+                }
+              }, { once: true });
+            }
+
+            // 设置样式并显示
+            Object.assign(menu.style, {
+              display: 'block',
+              position: 'fixed',
+              top: `${e.clientY}px`,
+              left: `${e.clientX}px`,
+              zIndex: '99999',
+              backgroundColor: '#fff',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+              border: '1px solid #d9d9d9',
+              borderRadius: '2px',
+              padding: '4px 0',
+              minWidth: '160px'
+            });
+          };
+
+          // 200ms后尝试直接创建菜单元素（如果自定义事件没有被正确处理）
+          setTimeout(createAndShowMenu, 200);
+
+          return false;
+        }
+      }
+    };
+
+    // 使用捕获阶段注册全局右键拦截器
+    document.addEventListener('contextmenu', handleGlobalContextMenu, true);
+
+    return () => {
+      // 清理函数
+      document.removeEventListener('contextmenu', handleGlobalContextMenu, true);
+    };
+  }, []);
+
+  // 改进右键菜单和覆盖层删除函数
+  const removeMenuAndOverlay = () => {
+    console.log('【右键菜单】执行移除菜单和覆盖层');
+
+    // 查找所有可能的菜单元素
+    const menuSelectors = [
+      '#terminal-context-menu',
+      '.terminal-context-menu',
+      'div.ant-menu',
+      'ul.ant-menu'
+    ];
+
+    // 针对每个选择器查找并删除元素
+    menuSelectors.forEach(selector => {
+      const elements = document.querySelectorAll(selector);
+      elements.forEach(element => {
+        try {
+          document.body.removeChild(element);
+          console.log(`【右键菜单】成功移除菜单元素: ${selector}`);
+        } catch (error) {
+          // 可能不是document.body的直接子元素，尝试使用parentNode
+          try {
+            if (element.parentNode) {
+              element.parentNode.removeChild(element);
+              console.log(`【右键菜单】通过父元素移除菜单: ${selector}`);
+            }
+          } catch (err) {
+            console.warn(`【右键菜单】移除菜单失败: ${selector}`, err);
+          }
+        }
+      });
+    });
+
+    // 移除覆盖层
+    const overlaySelectors = [
+      '#terminal-context-menu-overlay',
+      'div[style*="position: fixed"][style*="width: 100%"][style*="height: 100%"][style*="background-color: transparent"]'
+    ];
+
+    overlaySelectors.forEach(selector => {
+      const elements = document.querySelectorAll(selector);
+      elements.forEach(element => {
+        try {
+          document.body.removeChild(element);
+          console.log(`【右键菜单】成功移除覆盖层: ${selector}`);
+        } catch (error) {
+          // 可能不是document.body的直接子元素
+          try {
+            if (element.parentNode) {
+              element.parentNode.removeChild(element);
+              console.log(`【右键菜单】通过父元素移除覆盖层: ${selector}`);
+            }
+          } catch (err) {
+            console.warn(`【右键菜单】移除覆盖层失败: ${selector}`, err);
+          }
+        }
+      });
+    });
+  };
+
+  // 修改全局点击处理函数
+  const handleGlobalClick = (e: MouseEvent) => {
+    console.log('【右键菜单调试】检测到全局点击:', {
+      target: e.target,
+      button: e.button,
+      x: e.clientX,
+      y: e.clientY,
+      className: (e.target as HTMLElement)?.className || 'no-class',
+      tagName: (e.target as HTMLElement)?.tagName || 'unknown'
+    });
+
+    // 检查是否存在菜单元素
+    const menu = document.querySelector('#terminal-context-menu') ||
+      document.querySelector('.terminal-context-menu');
+
+    if (!menu) {
+      // 菜单不存在，无需处理
+      return;
+    }
+
+    // 改进点击检测逻辑
+    const clickTarget = e.target as HTMLElement;
+
+    // 检查是否点击了菜单项或菜单内部元素
+    const isMenuItem =
+      clickTarget.classList?.contains('ant-menu-item') ||
+      clickTarget.classList?.contains('terminal-menu-item') ||
+      clickTarget.closest('.ant-menu-item') !== null ||
+      clickTarget.closest('.terminal-menu-item') !== null;
+
+    const isInsideMenu = menu.contains(clickTarget);
+
+    console.log('【右键菜单调试】点击检查:', {
+      isMenuItem,
+      isInsideMenu,
+      targetElement: clickTarget.outerHTML?.substring(0, 50)
+    });
+
+    // 如果点击了菜单项或菜单外部，应该关闭菜单
+    if (isMenuItem || !isInsideMenu) {
+      console.log('【右键菜单调试】需要关闭菜单 - ' +
+        (isMenuItem ? '点击了菜单项' : '点击了菜单外部'));
+
+      // 如果是菜单项，稍微延迟关闭，让菜单项点击事件先执行
+      if (isMenuItem) {
+        setTimeout(removeMenuAndOverlay, 10);
+      } else {
+        removeMenuAndOverlay();
+      }
+    }
+  };
+
+  // 在组件顶部添加一个全局键盘事件监听器
+  useEffect(() => {
+    console.log('【右键菜单调试】设置全局事件监听器');
+
+    // ESC键关闭菜单处理函数
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      console.log('【右键菜单调试】检测到键盘事件:', e.key);
+
+      // ESC键关闭菜单
+      if (e.key === 'Escape') {
+        console.log('【右键菜单调试】检测到ESC键，尝试关闭菜单');
+        removeMenuAndOverlay();
+      }
+    };
+
+    // 右键菜单事件处理
+    const handleGlobalContextMenu = (e: MouseEvent) => {
+      console.log('【右键菜单调试】检测到全局右键点击:', {
+        target: e.target,
+        classes: (e.target as HTMLElement)?.className || 'no-class'
+      });
+
+      // 检查是否在终端区域内
+      const isInTerminal = (e.target as HTMLElement)?.closest?.('.terminal');
+
+      if (isInTerminal) {
+        console.log('【右键菜单调试】右键点击位于终端区域内');
+      }
+    };
+
+    // 初始检查是否有残留的菜单元素
+    const checkForExistingMenu = () => {
+      const menu = document.querySelector('#terminal-context-menu') ||
+        document.querySelector('.terminal-context-menu');
+      const overlay = document.getElementById('terminal-context-menu-overlay');
+
+      if (menu) {
+        console.log('【右键菜单调试】发现残留的菜单元素:', menu);
+      }
+
+      if (overlay) {
+        console.log('【右键菜单调试】发现残留的覆盖层:', overlay);
+      }
+    };
+
+    // 注册所有事件监听器
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    window.addEventListener('click', handleGlobalClick, true);
+    window.addEventListener('contextmenu', handleGlobalContextMenu, true);
+
+    // 立即检查一次
+    checkForExistingMenu();
+
+    // 定期检查是否有菜单元素
+    const checkInterval = setInterval(checkForExistingMenu, 3000);
+
+    // 返回清理函数
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown, true);
+      window.removeEventListener('click', handleGlobalClick, true);
+      window.removeEventListener('contextmenu', handleGlobalContextMenu, true);
+      clearInterval(checkInterval);
+      console.log('【右键菜单调试】已清理全局事件监听器');
+    };
+  }, []);
+
+  // 在Terminal组件内部添加ESC键监听
+  useEffect(() => {
+    // 添加ESC键监听，用于关闭菜单和取消操作
+    const handleEscKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        console.log('【终端页面】检测到ESC键，尝试关闭菜单');
+
+        // 尝试调用全局菜单关闭函数
+        if (typeof window.removeTerminalContextMenu === 'function') {
+          window.removeTerminalContextMenu();
+          console.log('【终端页面】已调用全局菜单关闭函数');
+        }
+
+        // 尝试删除DOM中的菜单元素
+        const menu = document.getElementById('terminal-context-menu');
+        const overlay = document.getElementById('terminal-context-menu-overlay');
+
+        if (menu || overlay) {
+          console.log('【终端页面】发现菜单元素，尝试删除');
+
+          if (menu && document.body.contains(menu)) {
+            document.body.removeChild(menu);
+          }
+
+          if (overlay && document.body.contains(overlay)) {
+            document.body.removeChild(overlay);
+          }
+
+          console.log('【终端页面】菜单元素已删除');
+        }
+      }
+    };
+
+    // 添加全局键盘事件监听
+    document.addEventListener('keydown', handleEscKey, true);
+
+    // 清理函数
+    return () => {
+      document.removeEventListener('keydown', handleEscKey, true);
+    };
+  }, []);
 
   // 如果正在加载，显示加载指示器
   if (loading) {

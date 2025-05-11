@@ -28,6 +28,10 @@ export interface TerminalTab {
   hostname?: string; // 添加主机名
   port?: number; // 添加端口
   username?: string; // 添加用户名
+  sendDataToServer?: (data: string) => boolean; // 添加发送数据到服务器的方法
+  networkLatency?: number | null; // 添加网络延迟属性
+  terminalMode?: string; // 添加终端模式属性
+  isGraphical?: boolean; // 添加是否图形化属性
 }
 
 // 定义上下文状态类型

@@ -5,10 +5,11 @@ import { useWebSocketManager } from '../../../hooks/useWebSocketManager';
 import { useParams, useSearchParams } from 'react-router-dom';
 import TerminalToolbar from './TerminalToolbar';
 import TerminalStatus from './TerminalStatus';
+import TerminalContextMenu from './TerminalContextMenu';
 import '../Terminal.css';
 import '../styles/terminal-fixes.css'; // 确保加载终端修复样式
 import { PlusOutlined, CopyOutlined, DownloadOutlined, CodeOutlined, BuildOutlined, SettingOutlined, FullscreenOutlined, CloseOutlined } from '@ant-design/icons';
-import { Tabs } from 'antd';
+import { Tabs, message } from 'antd';
 import { Button } from 'antd';
 
 // 终端连接状态类型
@@ -816,6 +817,43 @@ function ConnectedTerminal() {
                       tab.terminalRef.current = node;
                       console.log(`【DOM调试】成功绑定terminalRef到DOM元素, 标签: ${tab.key}`);
 
+                      // 禁用浏览器默认右键菜单，确保自定义右键菜单可用
+                      const disableContextMenu = (e: MouseEvent) => {
+                        console.log('【右键菜单】终端容器右键点击，阻止默认行为', {
+                          x: e.clientX,
+                          y: e.clientY,
+                          target: e.target,
+                          currentTarget: e.currentTarget,
+                          button: e.button,
+                          timestamp: Date.now()
+                        });
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        // 注意：由TerminalContextMenu组件处理菜单显示
+                        // 仅防止默认菜单显示，不在这里创建菜单
+
+                        // 触发自定义事件让TerminalContextMenu处理
+                        window.dispatchEvent(new CustomEvent('terminal-contextmenu', {
+                          detail: { x: e.clientX, y: e.clientY }
+                        }));
+                      };
+
+                      // 使用原生DOM方法强制阻止默认右键菜单
+                      node.oncontextmenu = disableContextMenu;
+
+                      // 同时在捕获阶段注册事件，确保事件在早期被捕获
+                      node.addEventListener('contextmenu', disableContextMenu, true);
+
+                      // 防止其他事件干扰
+                      node.addEventListener('mousedown', (e) => {
+                        if (e.button === 2) { // 右键
+                          console.log('捕获到右键mousedown事件');
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }
+                      }, true);
+
                       // 触发DOM已准备好的事件
                       const event = new CustomEvent('terminal-ready', {
                         detail: { tabKey: tab.key }
@@ -826,8 +864,34 @@ function ConnectedTerminal() {
                   }}
                   className="terminal"
                   data-tab-key={tab.key}
-                  style={{ width: '100%', height: '100%' }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    userSelect: 'text',
+                    WebkitUserSelect: 'text',
+                    MozUserSelect: 'text',
+                    msUserSelect: 'text'
+                  }}
                 ></div>
+
+                {/* 添加右键菜单组件 */}
+                <TerminalContextMenu
+                  terminal={tab.xtermRef?.current || null}
+                  terminalRef={tab.terminalRef}
+                  onClearScreen={() => {
+                    handleClear();
+                    message.success('终端屏幕已清空');
+                  }}
+                  onPaste={(text) => {
+                    console.log('尝试粘贴文本到终端:', text.substring(0, 20) + (text.length > 20 ? '...' : ''));
+                    if (tab.sendDataToServer) {
+                      tab.sendDataToServer(text);
+                      message.success('文本已粘贴到终端');
+                    } else {
+                      message.error('无法粘贴：终端数据发送接口不可用');
+                    }
+                  }}
+                />
               </div>
             )
           }))}

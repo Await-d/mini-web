@@ -67,6 +67,26 @@ export const useWebSocketConnection = () => {
       (window as any).lastWebSocket = ws;
       (window as any).lastWebSocketTime = new Date().toISOString();
 
+      // 为了让用户输入正确发送，创建一个辅助发送函数
+      const sendToServer = (data: string) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(data);
+            console.log('发送数据到服务器:', data);
+            return true;
+          } catch (e) {
+            console.error('发送数据到服务器失败:', e);
+            return false;
+          }
+        } else {
+          console.warn('WebSocket未连接，无法发送数据');
+          return false;
+        }
+      };
+
+      // 将发送函数保存到activeTab
+      activeTab.sendDataToServer = sendToServer;
+
       // 连接超时处理
       const connectionTimeout = setTimeout(() => {
         if (ws.readyState !== WebSocket.OPEN) {
@@ -86,6 +106,37 @@ export const useWebSocketConnection = () => {
         activeTab.webSocketRef.current = ws;
         activeTab.isConnected = true;
         setIsConnected(true);
+
+        // 设置输入处理
+        term.onData((data) => {
+          console.log('🔍 终端收到输入，准备发送到WebSocket:', data, '输入长度:', data.length, '字符码:', Array.from(data).map(c => c.charCodeAt(0)));
+
+          // 首先发送数据到WebSocket
+          if (ws.readyState === WebSocket.OPEN) {
+            try {
+              // 对回车键特殊处理，确保命令执行
+              if (data === '\r' || data === '\n') {
+                console.log('🔍 检测到回车键，发送\\r\\n确保命令执行');
+                ws.send('\r\n');
+                console.log('✅ 回车键数据已发送到WebSocket');
+                // 对于回车键，确保终端显示换行
+                term.write('\r\n');
+              } else {
+                console.log('🔍 准备发送普通输入到WebSocket');
+                ws.send(data);
+                console.log('✅ 普通输入已发送到WebSocket');
+                // 本地回显确保输入显示在终端上
+                term.write(data);
+              }
+            } catch (e) {
+              console.error('❌ 通过WebSocket发送数据失败:', e);
+            }
+          } else {
+            console.error('❌ 无法发送数据：WebSocket未连接，当前状态:', ws.readyState, getWebSocketStateText(ws.readyState));
+            // 即使WebSocket未连接，也显示本地回显
+            term.write(data);
+          }
+        });
 
         // 发送认证消息
         try {
@@ -384,20 +435,25 @@ export const useWebSocketConnection = () => {
     term: any
   ) => {
     if (!data) {
-      console.warn('尝试发送空数据');
+      console.warn('⚠️ 尝试发送空数据');
       return;
     }
 
-    console.log(`尝试发送数据到服务器: ${data.length > 20 ? data.substring(0, 20) + '...' : data}`);
+    console.log(`🔍 尝试发送数据到服务器:`, {
+      数据: data.length > 20 ? data.substring(0, 20) + '...' : data,
+      数据长度: data.length,
+      数据类型: typeof data,
+      字符码: Array.from(data.substring(0, 10)).map(c => c.charCodeAt(0))
+    });
 
     if (!activeTab) {
-      console.error('无法发送数据：activeTab不存在');
+      console.error('❌ 无法发送数据：activeTab不存在');
       return;
     }
 
     // WebSocket状态检查
     if (!activeTab.webSocketRef?.current) {
-      console.warn('无法发送数据：WebSocket引用不存在');
+      console.error('❌ 无法发送数据：WebSocket引用不存在');
 
       // 在本地终端显示错误
       if (term) {
@@ -407,8 +463,10 @@ export const useWebSocketConnection = () => {
       return;
     }
 
+    console.log('🔍 WebSocket状态检查：', activeTab.webSocketRef.current.readyState, getWebSocketStateText(activeTab.webSocketRef.current.readyState));
+
     if (activeTab.webSocketRef.current.readyState !== WebSocket.OPEN) {
-      console.warn(`无法发送数据：WebSocket未处于开启状态 (当前状态: ${activeTab.webSocketRef.current.readyState})`);
+      console.error(`❌ 无法发送数据：WebSocket未处于开启状态 (当前状态: ${activeTab.webSocketRef.current.readyState})`);
 
       // 在本地终端显示错误
       if (term) {
@@ -435,10 +493,12 @@ export const useWebSocketConnection = () => {
       // 对于回车键，确保发送\r\n
       if (data === '\r' || data === '\n') {
         processedData = '\r\n';
+        console.log('🔍 检测到回车键，处理为: \\r\\n');
       }
       // 对于其他字符串，如果以\r结尾但不是\r\n，则添加\n
       else if (data.endsWith('\r') && !data.endsWith('\r\n')) {
         processedData = data + '\n';
+        console.log('🔍 检测到字符串以\\r结尾，添加\\n');
       }
 
       // 记录发送的命令
@@ -446,49 +506,59 @@ export const useWebSocketConnection = () => {
 
       // 确保存在连接信息
       if (!activeTab.connection) {
-        console.warn('无法确定连接协议，默认使用SSH协议');
+        console.warn('⚠️ 无法确定连接协议，默认使用SSH协议');
 
         // 直接发送数据
+        console.log('🔍 准备直接发送数据 (无协议信息)');
         activeTab.webSocketRef.current.send(processedData);
+        console.log('✅ 数据已直接发送到WebSocket');
         return;
       }
 
       // 检查是否需要包装为JSON格式
       if (activeTab.connection.protocol === 'ssh' || activeTab.connection.protocol === 'telnet') {
         // SSH/Telnet协议直接发送数据
-        console.log('直接发送数据到SSH/Telnet连接');
+        console.log(`🔍 准备发送数据到${activeTab.connection.protocol}连接`);
         activeTab.webSocketRef.current.send(processedData);
+        console.log('✅ 数据已发送到SSH/Telnet连接');
       } else {
         // 其他协议尝试包装为JSON格式
-        console.log('包装为JSON格式发送数据');
+        console.log('🔍 准备以JSON格式包装数据');
         const jsonData = JSON.stringify({
           type: 'data',
           data: processedData
         });
         activeTab.webSocketRef.current.send(jsonData);
+        console.log('✅ JSON格式数据已发送');
 
         // 备份机制：如果包装发送后没有响应，尝试直接发送
         setTimeout(() => {
           if (activeTab.webSocketRef?.current?.readyState === WebSocket.OPEN) {
-            console.log('备份：直接发送数据');
+            console.log('🔍 备份：准备直接发送数据');
             activeTab.webSocketRef.current.send(processedData);
+            console.log('✅ 备份：数据已直接发送');
+          } else {
+            console.error('❌ 备份发送失败：WebSocket已关闭');
           }
         }, 100);
       }
 
-      console.log('数据发送成功');
+      console.log('✅ 数据发送成功');
 
       // 对于命令行输入，等待短暂延迟后再发送一个空回车，增加命令处理的可靠性
       if (data.includes('\r') || data.includes('\n')) {
         setTimeout(() => {
           if (activeTab.webSocketRef?.current?.readyState === WebSocket.OPEN) {
-            console.log('发送额外的回车增强响应性');
+            console.log('🔍 发送额外的回车增强响应性');
             activeTab.webSocketRef.current.send('\r\n');
+            console.log('✅ 额外回车已发送');
+          } else {
+            console.error('❌ 无法发送额外回车：WebSocket已关闭');
           }
         }, 300);
       }
     } catch (error) {
-      console.error('发送数据失败:', error);
+      console.error('❌ 发送数据失败:', error);
 
       // 在本地终端显示错误
       if (term) {

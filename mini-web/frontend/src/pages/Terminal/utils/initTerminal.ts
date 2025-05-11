@@ -82,8 +82,31 @@ export const initTerminal = (
 
         // 添加数据处理器
         term.onData((data) => {
-            // 将数据发送到处理函数
-            dataHandler(data);
+            console.log('⭐ 终端接收到用户输入:', data, '长度:', data.length, '字符码:', Array.from(data).map(c => c.charCodeAt(0)));
+
+            // 检查dataHandler是否存在且是函数
+            if (typeof dataHandler === 'function') {
+                console.log('⭐ 准备调用dataHandler函数处理输入');
+                // 将数据发送到处理函数
+                const result = dataHandler(data);
+                console.log('⭐ dataHandler调用结果:', result);
+            } else {
+                console.error('❌ dataHandler不存在或不是函数:', dataHandler);
+                // 如果没有数据处理器，也确保添加本地回显
+                term.write(data);
+            }
+
+            // 注意：不在这里添加额外的本地回显，由dataHandler负责回显或在上面的else分支中处理
+        });
+
+        // 添加特殊按键事件监听器
+        term.onKey((event) => {
+            console.log('⭐ 终端接收到按键事件:', event.key, event.domEvent);
+
+            // 特别检查回车键
+            if (event.domEvent.key === 'Enter') {
+                console.log('⭐ 检测到回车键事件，domEvent:', event.domEvent);
+            }
         });
 
         // 添加终端就绪事件

@@ -241,230 +241,113 @@ export const connectWebSocket = async (
 /**
  * 处理WebSocket消息
  */
-export const handleWebSocketMessage = (
-  event: MessageEvent,
-  term: XTerm | null,
-  isGraphical: boolean = false
-) => {
-  if (!term) return;
+export function handleWebSocketMessage(event: MessageEvent, term: XTerm, isGraphical?: boolean) {
+  console.log('🌐 收到WebSocket消息 类型:' + typeof event.data, '是否图形模式:', isGraphical);
 
-  // 使用requestAnimationFrame优化渲染性能
-  window.requestAnimationFrame(() => {
+  if (!term) {
+    console.error('❌ 终端实例不存在，无法处理WebSocket消息');
+    return;
+  }
+
+  // 处理二进制数据
+  if (event.data instanceof Blob) {
+    const blobSize = event.data.size;
+    console.log('🌐 处理Blob数据，大小:', blobSize, '字节');
+
+    // 小于5KB的Blob尝试转换为文本
+    if (blobSize < 5120) {
+      const textReader = new FileReader();
+
+      textReader.onload = () => {
+        const content = textReader.result as string;
+        console.log('🌐 Blob已转换为文本，长度:', content?.length || 0);
+
+        if (content && content.length > 0) {
+          try {
+            // 记录部分内容以便调试
+            const previewContent = content.length > 50 ?
+              content.substring(0, 20) + '...' + content.substring(content.length - 20) :
+              content;
+            const contentChars = Array.from(previewContent.substring(0, 10)).map(c => c.charCodeAt(0));
+            console.log('🌐 Blob文本内容预览:', previewContent, '字符码:', contentChars);
+
+            // 检查是否为系统消息
+            if (isSystemMessage(content)) {
+              console.log('🌐 过滤Blob系统消息');
+            } else {
+              // 显示内容到终端
+              console.log('🌐 将Blob内容显示到终端');
+              processTerminalText(content, term);
+            }
+          } catch (e) {
+            console.error('❌ 处理Blob文本内容失败:', e);
+          }
+        } else {
+          console.warn('⚠️ Blob转换为文本内容为空');
+        }
+      };
+
+      textReader.onerror = (error) => {
+        console.error('❌ 读取Blob为文本失败:', error);
+      };
+
+      textReader.readAsText(event.data);
+    } else {
+      console.log('🌐 Blob数据过大，长度:', blobSize, '以二进制处理');
+      // 大型二进制数据处理...
+    }
+    return;
+  }
+
+  // 处理文本数据
+  if (typeof event.data === 'string') {
+    const data = event.data;
+    console.log('🌐 收到WebSocket文本消息，长度:', data.length);
+
     try {
-      // 记录收到的消息内容，帮助调试
-      console.log(`收到WebSocket消息 类型:${typeof event.data}`,
-        typeof event.data === 'string' ?
-          (event.data.length > 100 ? event.data.substring(0, 100) + '...' : event.data) :
-          '二进制数据');
-
-      // 记录最后活动时间到window对象，便于调试
-      if (typeof window !== 'undefined') {
-        (window as any).lastTerminalActivity = Date.now();
-      }
-
-      if (typeof event.data === 'string') {
-        // 增强对Shell错误消息的检测
-        if (event.data.includes('-sh:') &&
-          (event.data.includes('command not found') ||
-            event.data.includes('type:') ||
-            event.data.includes('not found') ||
-            event.data.includes('errno'))) {
-          console.debug('过滤Shell错误消息:', event.data);
-          return;
-        }
-
-        // 检查是否为系统消息
-        if (isSystemMessage(event.data)) {
-          console.debug('过滤系统消息:', event.data.substring(0, 30) + (event.data.length > 30 ? '...' : ''));
-          return;
-        }
-
-        // 尝试解析JSON
+      // 尝试解析为JSON
+      if (data.startsWith('{') && data.endsWith('}')) {
         try {
-          const message = JSON.parse(event.data) as TerminalMessage;
+          const jsonData = JSON.parse(data);
+          console.log('🌐 解析为JSON成功:', jsonData.type || '未知类型');
 
-          // 处理不同类型的消息
-          if (message.type === 'error') {
-            term.writeln(`\r\n\x1b[31m错误: ${message.error || '未知错误'}\x1b[0m`);
-            return;
+          // 根据消息类型进行处理...
+          if (jsonData.type) {
+            console.log('🌐 处理JSON消息类型:', jsonData.type);
+            // 处理不同类型的JSON消息...
           }
 
-          if (message.type === 'ping' || message.type === 'pong') {
-            console.debug(`收到${message.type}消息`);
-            return;
+          // 如果存在data字段，将其显示在终端
+          if (jsonData.data && typeof jsonData.data === 'string') {
+            console.log('🌐 在终端中显示JSON中的data字段');
+            processTerminalText(jsonData.data, term);
           }
 
-          if (message.type === 'auth') {
-            console.debug('收到认证消息，不显示到终端');
-            return;
-          }
-
-          if (message.type === 'data' && message.data) {
-            console.debug('收到data类型消息');
-            processTerminalText(message.data, term);
-            return;
-          }
-
-          // 对于其他系统类型消息，不要直接显示
-          if (message.type && ['system', 'control', 'latency', 'resize', 'config'].includes(message.type)) {
-            console.debug(`收到系统消息类型: ${message.type}`);
-            return;
-          }
-
-          // 未知类型的JSON，记录但不显示在终端上
-          console.log('未知类型的JSON消息:', message);
-          // 不再直接写入未知类型的JSON到终端
           return;
         } catch (e) {
-          // 不是JSON，但再次检查是否为系统消息
-          if (event.data.includes('-sh:') &&
-            (event.data.includes('type:') ||
-              event.data.includes('command not found') ||
-              event.data.includes('not found'))) {
-            console.debug('过滤shell错误消息:', event.data);
-            return;
-          }
-
-          // 检查是否包含常见的系统消息部分
-          if (event.data.includes('type:') ||
-            event.data.includes('ping') ||
-            event.data.includes('auth') ||
-            event.data.includes('token') ||
-            event.data.includes('{"') ||
-            event.data.includes('timestamp')) {
-            console.debug('过滤疑似系统消息:', event.data);
-            return;
-          }
-
-          // 正常的文本消息，确保换行符处理正确
-          console.debug('非JSON格式消息，直接写入终端');
-          processTerminalText(event.data, term);
+          console.warn('⚠️ 尝试解析为JSON失败，当作普通文本处理:', e);
         }
-      } else if (event.data instanceof ArrayBuffer) {
-        // 二进制数据处理
-        if (isGraphical) {
-          console.log('收到二进制数据，长度:', event.data.byteLength);
-        } else {
-          console.log('非图形模式下收到二进制数据，忽略');
-        }
-      } else if (event.data instanceof Blob) {
-        // 增强的Blob数据处理
-        console.log(`处理Blob数据，大小: ${event.data.size} 字节`);
-
-        // 使用两种方法处理Blob，确保数据不丢失
-
-        // 1. 优先作为文本处理
-        const textReader = new FileReader();
-        textReader.onload = () => {
-          const content = textReader.result as string;
-
-          // 检查是否为有效文本内容
-          const hasTextContent = content && content.length > 0 &&
-            (content.match(/[\x20-\x7E\r\n\t]/) !== null);
-
-          if (hasTextContent) {
-            // 增强对Shell错误消息的检测
-            if (content.includes('-sh:') &&
-              (content.includes('command not found') ||
-                content.includes('type:') ||
-                content.includes('not found') ||
-                content.includes('errno'))) {
-              console.log('过滤Shell错误消息 (Blob)');
-              return;
-            }
-
-            // 检查是否为系统消息或JSON格式
-            if (isSystemMessage(content)) {
-              console.log('过滤Blob系统消息');
-              return;
-            }
-
-            // 额外检查是否为JSON格式的系统消息
-            try {
-              const jsonData = JSON.parse(content);
-              if (jsonData.type && ['auth', 'ping', 'pong', 'system', 'control', 'latency', 'resize', 'config'].includes(jsonData.type)) {
-                console.log(`过滤JSON系统消息类型: ${jsonData.type}`);
-                return;
-              }
-            } catch (e) {
-              // 不是JSON或者解析错误，继续检查是否包含系统消息特征
-              if (content.includes('-sh:') &&
-                (content.includes('type:') ||
-                  content.includes('command not found') ||
-                  content.includes('not found'))) {
-                console.log('过滤shell错误消息 (Blob)');
-                return;
-              }
-
-              if (content.includes('type:') ||
-                content.includes('ping') ||
-                content.includes('auth') ||
-                content.includes('token') ||
-                content.includes('{"') ||
-                content.includes('timestamp')) {
-                console.log('过滤疑似系统消息 (Blob)');
-                return;
-              }
-            }
-
-            console.log('将Blob处理为文本并写入终端，内容预览:',
-              content.length > 50 ? content.substring(0, 50) + '...' : content);
-
-            processTerminalText(content, term);
-          } else {
-            console.log('Blob文本内容为空或无效，尝试二进制处理');
-            // 文本内容无效，尝试二进制处理
-            processAsBinary();
-          }
-        };
-
-        // 2. 备用的二进制处理方法
-        const processAsBinary = () => {
-          const binaryReader = new FileReader();
-          binaryReader.onload = () => {
-            const arrayBuffer = binaryReader.result as ArrayBuffer;
-            if (arrayBuffer) {
-              try {
-                // 处理二进制数据
-                const uint8Array = new Uint8Array(arrayBuffer);
-                console.log(`二进制数据大小: ${uint8Array.length} 字节`);
-
-                // 检查数据是否包含可打印字符
-                let hasPrintable = false;
-                for (let i = 0; i < Math.min(uint8Array.length, 100); i++) {
-                  if (uint8Array[i] >= 32 && uint8Array[i] <= 126) {
-                    hasPrintable = true;
-                    break;
-                  }
-                }
-
-                if (hasPrintable || uint8Array.length > 10) {
-                  // 尝试以UTF-8解码并写入
-                  const decoder = new TextDecoder('utf-8', { fatal: false });
-                  const text = decoder.decode(uint8Array);
-                  console.log('二进制数据解码为UTF-8，写入终端');
-
-                  processTerminalText(text, term);
-                } else {
-                  console.log('二进制数据不包含可打印字符，不写入终端');
-                }
-              } catch (e) {
-                console.error('处理二进制Blob数据失败:', e);
-              }
-            }
-          };
-          binaryReader.readAsArrayBuffer(event.data);
-        };
-
-        // 首先尝试文本处理
-        textReader.readAsText(event.data);
       }
-    } catch (error) {
-      console.error('处理WebSocket消息失败:', error);
-      term.writeln(`\r\n\x1b[31m处理消息失败: ${error}\x1b[0m`);
+
+      // 不是有效的JSON或未包含type字段，作为普通文本处理
+      console.log('🌐 处理为普通文本，内容预览:',
+        data.length > 50 ? data.substring(0, 20) + '...' + data.substring(data.length - 20) : data);
+
+      // 检查是否为系统消息
+      if (isSystemMessage(data)) {
+        console.log('🌐 过滤普通文本系统消息');
+      } else {
+        processTerminalText(data, term);
+      }
+    } catch (e) {
+      console.error('❌ 处理WebSocket文本消息失败:', e);
     }
-  });
-};
+    return;
+  }
+
+  // 处理其他类型的数据
+  console.warn('⚠️ 未知的WebSocket数据类型:', typeof event.data);
+}
 
 /**
  * 判断是否为系统消息
@@ -475,6 +358,59 @@ function isSystemMessage(message: string): boolean {
 
   // 消息长度很短，可能是回车符等，不过滤
   if (message.length <= 2) return false;
+
+  // 打印调试信息，查看需要过滤的消息
+  console.log('🔎 检查是否为系统消息:', message.length > 50 ?
+    message.substring(0, 25) + '...' + message.substring(message.length - 25) : message);
+
+  // 检查消息是否包含命令输出 - 如果是，不过滤
+  if (message.includes('\n') && message.length > 10) {
+    // 检查是否是合法的命令输出（包含终端输出但不是系统消息）
+    // 如果文本包含多行且不是纯JSON格式，很可能是合法的命令输出
+    if (!message.startsWith('{"') && !message.endsWith('"}')) {
+      console.log('🔍 检测到多行命令输出，不过滤');
+      return false;
+    }
+  }
+
+  // 确保命令提示符不被过滤 - 通常包含用户名@主机名和路径
+  // 添加更多的模式匹配以避免命令提示符被错误过滤
+  if (message.match(/[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+/) || // 匹配任何用户名@主机名格式
+    message.match(/\$\s*$/) || // 以$结尾
+    message.match(/\#\s*$/) || // 以#结尾
+    message.match(/\>\s*$/) || // 以>结尾
+    message.match(/[a-zA-Z0-9]+:[\/~][a-zA-Z0-9\/\.]+/) || // 典型的路径格式
+    message.match(/^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+:/) ||  // 如 user@host:path
+    message.match(/^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+[\s\$\#]/) || // 如 user@host $
+    message.match(/[\r\n][a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+:/) || // 包含换行的提示符
+    message.match(/[\r\n][a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+[\s\$\#]/)) {
+    console.log('🔍 检测到命令提示符或路径，不过滤');
+    return false;
+  }
+
+  // 检查是否为常见命令输出，如ls、ps等的表格格式输出
+  if (message.match(/^\s*[a-zA-Z0-9\-]+\s+[a-zA-Z0-9]+/) &&
+    message.includes(' ') &&
+    message.split(' ').filter(Boolean).length > 3) {
+    console.log('🔍 检测到表格式命令输出，不过滤');
+    return false;
+  }
+
+  // 命令输出通常包含以下格式，不应被过滤
+  if (message.match(/^\w+.*[@#].*[\$#]\s/) ||
+    message.match(/^\w+:\/\//) || // URL格式
+    message.match(/^[a-zA-Z0-9\/\._-]+$/)) { // 文件路径格式
+    console.log('🔍 检测到命令输出或路径格式，不过滤');
+    return false; // Unix类型命令提示符或路径，不应被过滤
+  }
+
+  // 检查是否为命令结果（通常包含多行文本）
+  if ((message.includes('\r\n') || message.includes('\n')) &&
+    message.length > 20 &&
+    !message.includes('{"')) {
+    console.log('🔍 检测到多行命令输出，不过滤');
+    return false; // 很可能是命令输出，不应被过滤
+  }
 
   // 检查是否为shell命令错误消息
   if (message.includes('-sh:') &&
@@ -527,7 +463,6 @@ function isSystemMessage(message: string): boolean {
     'timesstamp',  // 捕获拼写错误的字段
     'timestamp',
     '"token":',
-    'command not found'  // 捕获shell错误消息
   ];
 
   // 匹配任一系统消息模式
@@ -556,59 +491,138 @@ function isSystemMessage(message: string): boolean {
  * @param term xterm终端实例
  */
 function processTerminalText(text: string, term: XTerm): void {
-  if (!text || !term) return;
+  if (!text || !term) {
+    console.warn('⚠️ 无法处理文本：文本为空或终端不存在');
+    return;
+  }
+
+  console.log('🌐 处理终端文本，长度:', text.length);
+
+  // 如果是用户输入的命令（不是从服务器返回的），跳过特殊处理直接写入
+  if (text.length < 10 && text.match(/^[a-zA-Z0-9\s]+$/)) {
+    console.log('🌐 检测到简单命令输入，直接写入');
+    term.write(text);
+    return;
+  }
+
+  // 特殊处理：检测是否为命令前缀(PS1)，如常见的用户名@主机名:路径$ 格式
+  if (text.match(/^[\w-]+@[\w-]+:/) || text.match(/[\r\n][\w-]+@[\w-]+:/)) {
+    console.log('🌐 检测到命令提示符，确保正确显示');
+    term.write(text);
+    return;
+  }
 
   // 系统消息跳过特殊处理，直接写入
   if (isSystemMessage(text)) {
+    console.log('🌐 检测到系统消息，直接写入');
     term.writeln(text);
     return;
   }
 
-  // 将ANSI转义序列正则表达式
-  const ansiEscapeRegex = /(\x1b\[[0-9;]*[a-zA-Z])/g;
-
-  // 将文本按换行符分割成行
-  const lines = text
-    .replace(/\r\n/g, '\n')  // 统一换行符为\n
-    .replace(/\r/g, '\n')    // 将单独的\r也转换为\n
-    .split('\n');            // 按\n分割
-
-  // 收集和处理ANSI转义序列
-  const parts = text.split(ansiEscapeRegex);
-  let currentAnsi = '';
-  for (const part of parts) {
-    if (part.match(ansiEscapeRegex)) {
-      currentAnsi += part;
-    }
+  // 特殊处理常见命令的输出，如ls、ps等
+  if (text.includes('\n') && text.length > 20 && !text.includes('{"type":')) {
+    console.log('🌐 检测到可能是命令输出，确保正确显示');
+    term.write(text);
+    return;
   }
 
-  // 处理每一行
-  for (let i = 0; i < lines.length; i++) {
-    // 清理每行内容，去除零宽字符但保留空格和ANSI序列
-    let cleanLine = lines[i].replace(/[\u200B-\u200D\uFEFF]/g, '');
-
-    // 对于完全空行，只在非最后行时写入换行
-    if (cleanLine === '') {
-      if (i < lines.length - 1) {
+  try {
+    // 对于命令提示符特别处理
+    if (text.match(/^[\w-]+@[\w-]+:[\~\w\/]+[$#]\s$/)) {
+      console.log('🌐 检测到命令提示符，确保正确显示');
+      // 确保命令提示符前有换行
+      if (!text.startsWith('\r\n') && !text.startsWith('\n')) {
         term.write('\r\n');
       }
-      continue;
+      term.write(text);
+      return;
     }
 
-    // 保留当前ANSI状态，应用到每行文本
-    if (currentAnsi && !cleanLine.includes(currentAnsi)) {
-      cleanLine = currentAnsi + cleanLine;
+    // 对于包含转义序列的文本进行处理
+    if (text.includes('\x1b[')) {
+      console.log('🌐 检测到ANSI转义序列，保持原样写入');
+      term.write(text);
+      return;
     }
 
-    // 关键修改：使用writeln代替write+\r\n组合
-    // writeln会确保每行都有一个完整的换行
-    if (i < lines.length - 1 || text.endsWith('\n') || text.endsWith('\r')) {
-      // 对非最后行或以换行结束的文本使用writeln
-      term.writeln(cleanLine);
-    } else {
-      // 对不需要换行的最后一行使用write
-      term.write(cleanLine);
+    // 对于普通多行文本，确保行分隔符处理正确
+    if (text.includes('\n') || text.includes('\r\n')) {
+      console.log('🌐 处理多行文本，确保换行正确');
+
+      // 分割行并逐行写入
+      const lines = text.split(/\r\n|\r|\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (i > 0) {
+          term.write('\r\n'); // 确保每行前有回车换行
+        }
+        if (line.length > 0) {
+          term.write(line);
+        }
+      }
+      return;
     }
+
+    // 其他情况：直接写入文本
+    console.log('🌐 直接写入文本到终端');
+    term.write(text);
+    console.log('🌐 文本已成功写入终端');
+  } catch (e) {
+    console.error('❌ 将文本写入终端失败:', e);
+  }
+}
+
+/**
+ * 创建并返回WebSocket连接的助手函数
+ */
+export function createWebSocketConnection(url: string): WebSocket {
+  console.log('🌐 正在创建WebSocket连接:', url);
+
+  const ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    console.log('🌐 WebSocket连接已打开:', url);
+
+    // 发送初始消息以测试连接
+    try {
+      const testMessage = JSON.stringify({ type: 'connection_test', timestamp: Date.now() });
+      ws.send(testMessage);
+      console.log('🌐 已发送WebSocket测试消息');
+    } catch (e) {
+      console.error('🌐 发送WebSocket测试消息失败:', e);
+    }
+  };
+
+  ws.onclose = (event) => {
+    console.log(`🌐 WebSocket连接已关闭:`, {
+      code: event.code,
+      reason: event.reason,
+      wasClean: event.wasClean
+    });
+  };
+
+  ws.onerror = (error) => {
+    console.error('🌐 WebSocket连接错误:', error);
+  };
+
+  return ws;
+}
+
+/**
+ * 返回WebSocket状态的文字描述
+ */
+export function getWebSocketStateText(readyState: number): string {
+  switch (readyState) {
+    case WebSocket.CONNECTING:
+      return '正在连接';
+    case WebSocket.OPEN:
+      return '已连接';
+    case WebSocket.CLOSING:
+      return '正在关闭';
+    case WebSocket.CLOSED:
+      return '已关闭';
+    default:
+      return '未知状态';
   }
 }
 
