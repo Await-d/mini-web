@@ -1031,6 +1031,8 @@ function ConnectedTerminal() {
                           >
                             <RdpTerminal
                               webSocketRef={tab.webSocketRef}
+                              connectionId={tab.connectionId as number}
+                              sessionId={(tab.sessionId || 'defaultSession').toString()}
                               onResize={(width, height) => {
                                 console.log(`【RDP调整大小】宽度=${width}，高度=${height}`);
                                 if (tab.webSocketRef.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {

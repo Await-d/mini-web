@@ -1,465 +1,162 @@
-/* Terminal.css - 终端基础样式 */
+/* 
+ * Terminal.css - 终端页面基础样式
+ * 包含终端容器布局和标签页切换所需的基本样式
+ */
 
-.terminal-page {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-  position: relative;
-  background-color: #1e1e1e;
-  color: #f0f0f0;
-}
-
-/* 终端加载状态样式 */
-.terminal-loading {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-  width: 100%;
-  background-color: #1e1e1e;
-  color: #fff;
-}
-
-.terminal-loading-spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid rgba(255, 255, 255, 0.1);
-  border-left-color: #1677ff;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 16px;
-}
-
-.terminal-loading-text {
-  font-size: 16px;
-}
-
-/* 旋转动画 */
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-/* 未连接状态样式 */
-.terminal-not-connected {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-  width: 100%;
-  background-color: #1e1e1e;
-}
-
-.terminal-not-connected-content {
-  text-align: center;
-  padding: 30px;
-  background-color: #2d2d2d;
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  max-width: 400px;
-  color: #f0f0f0;
-}
-
-.terminal-not-connected-actions {
-  margin-top: 20px;
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-}
-
-/* 已连接状态样式 */
-.terminal-connected-container {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background-color: #1e1e1e;
-  z-index: 1;
-}
-
-.terminal-connected-content {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
-  width: 100%;
-  height: 100%;
-}
-
-/* 终端区域样式 */
-.terminal-area {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-  position: relative;
-  background-color: #1e1e1e;
-  height: 100%;
-  box-sizing: border-box;
-  z-index: 20;
-}
-
-.terminal-tab-content {
-  display: flex;
-  flex: 1;
-  height: 100%;
-  width: 100%;
-  position: relative;
-  overflow: hidden;
-  box-sizing: border-box;
-  z-index: 30;
-}
-
-.terminal-wrapper {
-  width: 100%;
-  height: 100%;
-  position: relative;
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-  background-color: #1e1e1e;
-  box-sizing: border-box;
-  z-index: 40;
-}
-
-.empty-terminal {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 100%;
-  height: 100%;
-  background-color: #1e1e1e;
-  color: #aaa;
-}
-
-/* 使所有 xterm 元素正确显示 */
-.xterm {
-  height: 100% !important;
-  width: 100% !important;
-  display: block !important;
-  box-sizing: border-box !important;
-  position: relative !important;
-  z-index: 2 !important;
-}
-
-/* 修改标签页相关样式 */
-.ant-tabs-nav {
-  height: 32px;
-  min-height: 32px;
-  background-color: #252525;
-  border-bottom: 1px solid #333;
-}
-
-.ant-tabs-tab {
-  font-size: 12px !important;
-  padding: 4px 8px !important;
-  height: 28px !important;
-  color: #bbb !important;
-}
-
-.ant-tabs-tab.ant-tabs-tab-active {
-  background-color: #1677ff !important; /* 使用统一的蓝色 */
-  border-top: none !important;
-  color: #fff !important;
-}
-
-.xterm-screen {
+/* 全局容器基础样式 */
+#root,
+.ant-layout-content,
+.ant-layout,
+.terminalPage,
+.terminalMainContainer,
+.terminalContainers,
+.terminal-container,
+.rdp-container,
+.rdpTerminalContainer,
+.xterm-container,
+.graphical-terminal-container {
   width: 100% !important;
   height: 100% !important;
-  display: block !important;
-  box-sizing: border-box !important;
-  position: relative !important;
-}
-
-.xterm-rows {
-  width: 100% !important;
-  display: block !important;
-}
-
-.xterm-viewport {
-  z-index: 3 !important;
-  overflow-y: auto !important;
-  width: 100% !important;
-  position: relative !important;
-}
-
-.xterm-screen,
-.xterm-text-layer,
-.xterm-cursor-layer {
-  position: relative !important;
-}
-
-/* 确保文本层在最上层 */
-.xterm-text-layer {
-  z-index: 20 !important;
-  opacity: 1 !important;
-}
-
-/* 确保光标可见 */
-.xterm-cursor-layer {
-  z-index: 25 !important;
-  opacity: 1 !important;
-}
-
-/* 完全隐藏链接层 */
-.xterm-link-layer {
-  display: none !important; 
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
-
-/* 隐藏 xterm-helpers */
-.xterm-helpers {
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  z-index: -10 !important;
-  width: 0 !important;
-  height: 0 !important;
-  overflow: visible !important;
-  pointer-events: none !important;
-}
-
-/* 修复工具按钮位置 */
-.terminal-tools {
-  position: absolute !important;
-  top: 10px !important;
-  right: 10px !important;
-  z-index: 1000 !important;
   display: flex !important;
-  gap: 5px !important;
-  background-color: rgba(30, 30, 30, 0.7) !important;
-  border-radius: 4px !important;
-  padding: 4px !important;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3) !important;
-}
-
-/* 底部按钮容器 */
-.terminal-buttons {
-  position: absolute !important;
-  bottom: 10px !important;
-  right: 10px !important;
-  z-index: 1000 !important;
-  display: flex !important;
-  gap: 5px !important;
-  background-color: rgba(30, 30, 30, 0.7) !important;
-  border-radius: 4px !important;
-  padding: 4px !important;
-}
-
-/* 全局修复 - 确保终端内部所有元素正确显示 */
-#terminal-container,
-.terminal-element-*,
-[data-terminal-id],
-[id^="terminal-element-"] {
+  flex: 1 1 auto !important;
   position: relative !important;
+  overflow: hidden !important;
+}
+
+/* 终端容器基础布局 */
+.terminalContainers {
+  position: relative !important;
+  flex: 1 1 auto !important;
+  display: flex !important;
+  flex-direction: column !important;
   width: 100% !important;
   height: 100% !important;
   overflow: hidden !important;
-  z-index: 50 !important;
-  box-sizing: border-box !important;
 }
 
-/* 终端全屏模式 */
-.terminal-fullscreen {
-  position: fixed !important;
+/* 终端容器 */
+.terminal-container {
+  position: absolute !important;
   top: 0 !important;
   left: 0 !important;
   right: 0 !important;
   bottom: 0 !important;
-  z-index: 1000 !important;
-  background: #000 !important;
-  width: 100vw !important;
-  height: 100vh !important;
-}
-
-/* 确保复制内容和清屏按钮不受布局影响 */
-button[class*="复制内容"],
-button[class*="清屏"] {
-  position: relative !important;
-  z-index: 100 !important;
-  background: rgba(0, 0, 0, 0.7) !important;
-  color: white !important;
-  border: none !important;
-  border-radius: 4px !important;
-  padding: 5px 10px !important;
-  cursor: pointer !important;
-  margin-right: 5px !important;
-}
-
-/* 添加终端状态覆盖层样式 */
-.terminal-status-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background-color: rgba(0, 0, 0, 0.7);
-  z-index: 45;
-}
-
-.terminal-status-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px;
-  background-color: rgba(30, 30, 30, 0.9);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.terminal-status-spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid rgba(255, 255, 255, 0.1);
-  border-left-color: #1677ff;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 16px;
-}
-
-.terminal-status-text {
-  color: #fff;
-  font-size: 14px;
-}
-
-/* 连接状态指示器 */
-.terminal-status-indicator {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  background-color: rgba(30, 30, 30, 0.8);
-  padding: 5px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: #fff;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-}
-
-.terminal-status-indicator .status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 8px;
-}
-
-.status-dot.connected {
-  background-color: #52c41a;
-  box-shadow: 0 0 5px #52c41a;
-}
-
-.status-dot.connecting {
-  background-color: #faad14;
-  box-shadow: 0 0 5px #faad14;
-  animation: blink 1s infinite;
-}
-
-.status-dot.disconnected {
-  background-color: #ff4d4f;
-  box-shadow: 0 0 5px #ff4d4f;
-}
-
-.status-dot.error {
-  background-color: #ff4d4f;
-  box-shadow: 0 0 5px #ff4d4f;
-}
-
-@keyframes blink {
-  0% { opacity: 0.5; }
-  50% { opacity: 1; }
-  100% { opacity: 0.5; }
-}
-
-.terminal-latency {
-  margin-left: 10px;
-  font-size: 11px;
-  color: #bbb;
-}
-
-/* 控制按钮容器 */
-.terminal-controls {
-  position: absolute !important;
-  bottom: 10px !important;
-  left: 10px !important;
-  z-index: 50 !important;
-  display: flex;
-  flex-direction: row;
-  background-color: rgba(30, 30, 30, 0.7) !important;
-  border-radius: 4px !important;
-  padding: 4px !important;
-}
-
-/* 终端内部容器 */
-.terminal-container-inner {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background-color: #1e1e1e;
-  position: relative;
-  z-index: 1;
-}
-
-/* 强制终端右键菜单显示 */
-.terminal {
-  /* 禁用浏览器默认右键菜单 */
-  -webkit-touch-callout: none !important;
-  -webkit-user-select: text !important;
-  -khtml-user-select: text !important;
-  -moz-user-select: text !important;
-  -ms-user-select: text !important;
-  user-select: text !important;
-}
-
-/* RDP终端样式修复 */
-.rdp-container {
-  position: absolute;
-  top: 0;
-  left: 0;
   width: 100% !important;
   height: 100% !important;
-  z-index: 100 !important;
-  display: block !important;
-  background-color: #000;
+  z-index: 10 !important;
 }
 
-/* 当RDP容器存在时隐藏xterm */
-.rdp-container + .xterm-container,
-.terminal-container:has(.rdp-container) .xterm-container {
+/* 隐藏的终端容器 */
+.terminal-container.hidden {
+  display: none !important;
+  visibility: hidden !important;
+  z-index: -999 !important;
+  opacity: 0 !important;
+}
+
+/* 可见的终端容器 */
+.terminal-container.visible {
+  display: flex !important;
+  visibility: visible !important;
+  z-index: 10 !important;
+  opacity: 1 !important;
+}
+
+/* RDP容器样式 */
+.rdp-container {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background-color: #000 !important;
+  overflow: hidden !important;
+}
+
+/* 图形终端容器 */
+.graphical-terminal-container {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  background-color: #000 !important;
+  overflow: hidden !important;
+}
+
+/* 标签页容器样式 */
+.ant-tabs-content,
+.ant-tabs-content-holder,
+.ant-tabs-tabpane {
+  height: 100% !important;
+  flex: 1 1 auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+/* 终端状态显示覆盖层 */
+.statusOverlay,
+.errorOverlay {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  background-color: rgba(0, 0, 0, 0.7) !important;
+  z-index: 20 !important;
+}
+
+/* 终端控制栏 */
+.terminalHeader {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 8px !important;
+  background-color: #f0f0f0 !important;
+  border-bottom: 1px solid #d9d9d9 !important;
+}
+
+/* 确保不同协议的终端容器正确显示/隐藏 */
+.terminal-container.visible[data-protocol="rdp"] .xterm-container,
+.terminal-container.visible[data-protocol="rdp"] .xterm-placeholder {
   display: none !important;
 }
 
-/* 修复终端容器样式 */
-.terminal-container {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-
-/* 显示区样式 */
-.rdp-display-area {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: #000;
-  background-size: contain;
-  background-position: center;
-  background-repeat: no-repeat;
-}
-
-/* 强制RDP模式样式 */
-body.force-rdp-mode .xterm-container {
+.terminal-container.visible:not([data-protocol="rdp"]) .rdp-container {
   display: none !important;
 }
 
-body.force-rdp-mode .rdp-container {
-  display: block !important;
+/* RDP显示区域样式 */
+.displayArea {
+  width: 100% !important;
+  height: 100% !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  background-color: #000 !important;
+  background-size: contain !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  z-index: 15 !important;
+}
+
+/* RDP终端组件容器 */
+.rdpTerminalContainer {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  background-color: #000 !important;
+  overflow: hidden !important;
+}
+
+/* 确保Layout组件内容区域有正确高度 */
+.ant-layout .ant-layout-content {
+  height: calc(100vh - 36px) !important;
+  min-height: calc(100vh - 36px) !important;
 } 

@@ -1,0 +1,93 @@
+/**
+ * RDP终端专用样式
+ */
+
+.rdp-terminal-container {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  background-color: #000 !important;
+}
+
+.rdp-display-area {
+  width: 100% !important;
+  height: 100% !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  background-color: #000 !important;
+  background-size: contain !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  z-index: 15 !important;
+}
+
+.rdp-status-overlay,
+.rdp-error-overlay {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  background-color: rgba(0, 0, 0, 0.7) !important;
+  z-index: 20 !important;
+}
+
+.rdp-controls {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  z-index: 100 !important;
+  opacity: 0.7 !important;
+  transition: opacity 0.3s ease !important;
+  display: flex !important;
+  gap: 4px !important;
+  background-color: rgba(0, 0, 0, 0.6) !important;
+  padding: 4px !important;
+  border-radius: 4px !important;
+}
+
+.rdp-controls:hover {
+  opacity: 1 !important;
+}
+
+.rdp-error-message {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  height: 100% !important;
+  width: 100% !important;
+  padding: 20px !important;
+  text-align: center !important;
+  background-color: rgba(0, 0, 0, 0.85) !important;
+}
+
+/* 确保RDP容器始终可见 */
+.terminal-container[data-protocol="rdp"] {
+  display: block !important;
+  visibility: visible !important;
+  z-index: 10 !important;
+  opacity: 1 !important;
+}
+
+/* 确保当前活动的RDP容器显示 */
+.terminal-container.visible[data-protocol="rdp"] {
+  z-index: 10 !important;
+}
+
+/* 确保非活动的RDP容器隐藏 */
+.terminal-container.hidden[data-protocol="rdp"] {
+  display: none !important;
+  visibility: hidden !important;
+  z-index: -999 !important;
+  opacity: 0 !important;
+} 

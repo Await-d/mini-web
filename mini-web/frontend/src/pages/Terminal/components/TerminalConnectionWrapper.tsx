@@ -22,6 +22,10 @@ export interface ConnectionChildProps {
  * 终端连接包装器组件属性
  */
 export interface TerminalConnectorProps {
+  connectionParams?: {
+    connectionId: number;
+    sessionId?: number;
+  };
   children: (props: ConnectionChildProps) => React.ReactNode;
 }
 
@@ -29,12 +33,20 @@ export interface TerminalConnectorProps {
  * 终端连接包装器组件
  * 负责维护终端连接的状态，并将其传递给子组件
  */
-const TerminalConnector: React.FC<TerminalConnectorProps> = ({
+const TerminalConnectionWrapper: React.FC<TerminalConnectorProps> = ({
+  connectionParams,
   children
 }) => {
   // 获取终端连接属性
   const connectionProps = useTerminalConnection();
-  const { tabs = [] } = connectionProps;
+
+  // 使用connectionParams进行处理(如果需要)
+  useEffect(() => {
+    // 当连接参数变化时的逻辑
+    if (connectionParams) {
+      console.log('【连接参数更新】', connectionParams);
+    }
+  }, [connectionParams]);
 
   // 记录终端状态更新
   useEffect(() => {
@@ -43,20 +55,14 @@ const TerminalConnector: React.FC<TerminalConnectorProps> = ({
     }
   }, [connectionProps]);
 
-  // 构建传递给子组件的完整props，先复制连接属性，再添加辅助字段
+  // 构建传递给子组件的完整props
   const childProps: ConnectionChildProps = {
-    // 先包含所有原始属性，确保WebSocket引用等被正确传递
-    ...connectionProps,
-    // 然后添加辅助属性(只有在原始属性不存在时才提供默认值)
     hasConnection: !!connectionProps.connection,
     tabsCount: connectionProps.tabs?.length || 0,
     activeTabKey: connectionProps.activeTabKey || 'no-tabs',
     isConnected: connectionProps.isConnected || false,
-    // 不再覆盖tabs属性，保持原始引用
-    // tabs: connectionProps.tabs || terminalStateRef.current?.tabs || [],
-    // 同样不覆盖connection
-    // connection: connectionProps.connection,
-    // 确保其他必要属性存在
+    tabs: connectionProps.tabs || terminalStateRef.current?.tabs || [],
+    connection: connectionProps.connection,
     fullscreen: connectionProps.fullscreen,
     terminalSize: connectionProps.terminalSize,
     networkLatency: connectionProps.networkLatency,
@@ -76,10 +82,10 @@ const TerminalConnector: React.FC<TerminalConnectorProps> = ({
   });
 
   return (
-    <div className={styles.terminalMainContainer}>
+    <div className={styles.terminalMainContainer} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', flex: '1 1 auto', position: 'relative' }}>
       {children(childProps)}
     </div>
   );
 };
 
-export default TerminalConnector;
+export default TerminalConnectionWrapper;
