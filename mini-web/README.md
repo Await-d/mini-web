@@ -1,132 +1,204 @@
-# Mini Web 远程连接平台
+# Mini Web 远程终端管理平台
 
-Mini Web是一个基于Web的远程连接平台，支持SSH、RDP、VNC和Telnet等多种远程连接协议，使用户能够通过浏览器直接访问和管理远程服务器、设备和系统。
+支持多种协议（RDP、SSH、Telnet）的Web远程终端管理平台，前端使用React + TypeScript，后端使用Go语言。
 
-## 核心功能
+## 主要功能
 
-- **多协议支持**：SSH、RDP、VNC和Telnet
-- **Web界面**：无需安装客户端，通过浏览器直接连接
-- **安全认证**：支持多种认证方式
-- **会话管理**：保存和管理多个连接配置
-- **文件传输**：在SSH连接中支持文件上传和下载
+- RDP远程桌面连接
+- SSH终端连接
+- Telnet终端连接
+- 会话管理
+- 用户权限控制
+- 终端录制与回放
+- 多标签页支持
 
-## 使用RDP远程桌面功能
+## 项目结构
 
-### FreeRDP依赖安装
+```
+mini-web/
+├── backend/             # Go语言后端
+│   ├── cmd/             # 程序入口
+│   ├── internal/        # 内部包
+│   ├── Dockerfile       # 后端Docker配置
+├── frontend/            # React前端
+│   ├── src/             # 源代码
+│   ├── Dockerfile       # 前端Docker配置
+│   ├── nginx/           # Nginx配置
+└── docker-compose.yml   # Docker Compose配置
+```
 
-要使用RDP远程桌面功能，您需要安装FreeRDP客户端：
+## 环境要求
 
-#### Windows
+### 开发环境
 
-1. 从[FreeRDP官方GitHub](https://github.com/FreeRDP/FreeRDP/releases)下载最新版本
-2. 安装到默认位置（通常是`C:\Program Files\FreeRDP`）
-3. 使用`start.bat`启动服务，它会自动设置FreeRDP环境变量
+- Go 1.19+
+- Node.js 18+
+- Yarn 1.22+
 
-#### Linux
+### 生产环境
 
-1. 安装FreeRDP客户端：
-   ```bash
-   # Debian/Ubuntu
-   sudo apt install freerdp2-x11
-   
-   # Fedora/RHEL
-   sudo dnf install freerdp
-   
-   # Arch Linux
-   sudo pacman -S freerdp
-   ```
+- Docker 20.10+
+- Docker Compose 2.0+
 
-2. 赋予启动脚本执行权限：
-   ```bash
-   chmod +x start.sh
-   ```
+## 部署指南
 
-3. 使用启动脚本运行服务：
-   ```bash
-   ./start.sh
-   ```
+### 使用Docker Compose部署（推荐）
 
-#### macOS
-
-使用Homebrew安装：
+1. **克隆仓库**
 
 ```bash
-brew install freerdp
-export FREERDP_PATH=$(which xfreerdp)
+git clone https://github.com/yourname/mini-web.git
+cd mini-web
 ```
 
-### 手动配置环境变量
-
-如果自动探测失败，可以手动设置环境变量：
-
-#### Windows
-```
-set FREERDP_PATH=C:\Program Files\FreeRDP\wfreerdp.exe
-```
-
-#### Linux/macOS
-```
-export FREERDP_PATH=/usr/bin/xfreerdp  # 路径可能因系统而异
-```
-
-### 性能调整
-
-可以通过以下环境变量调整RDP连接性能：
-
-```
-# Windows
-set RDP_SCREENSHOT_INTERVAL=2000
-set RDP_JPEG_QUALITY=75
-
-# Linux/macOS
-export RDP_SCREENSHOT_INTERVAL=2000
-export RDP_JPEG_QUALITY=75
-```
-
-### 故障排除
-
-如果遇到RDP连接问题：
-
-1. **连接停留在"正在连接..."状态**
-   - 检查FreeRDP是否正确安装
-   - 确认环境变量正确设置（可在日志中查看）
-   - 查看服务器日志中的错误信息
-
-2. **连接失败或频繁断开**
-   - 确认目标服务器已启用RDP服务（通常在TCP端口3389）
-   - 检查网络防火墙设置
-   - 尝试降低屏幕截图频率以减少带宽使用
-
-3. **键盘或鼠标操作无响应**
-   - 尝试刷新浏览器页面
-   - 检查浏览器控制台是否有JavaScript错误
-
-## 构建与部署
-
-### 前端
-
-```bash
-cd frontend
-yarn install
-yarn build
-```
-
-### 后端
-
-```bash
-# Windows
-start.bat
-
-# Linux/macOS
-./start.sh
-```
-
-### Docker部署
+2. **启动服务**
 
 ```bash
 docker-compose up -d
 ```
 
+3. **访问服务**
+
+打开浏览器访问 `http://localhost`
+
+### 无界面环境部署说明
+
+本项目已针对无界面环境（如Docker容器）做了特别优化：
+
+- RDP连接在无界面环境中使用虚拟会话模式
+- 后端自动检测无界面环境并调整适当策略
+- 环境变量`HEADLESS=true`和`CONTAINER=true`用于控制行为
+
+Docker部署默认已配置为无界面模式，无需额外设置。
+
+### 手动部署后端
+
+1. **进入后端目录**
+
+```bash
+cd backend
+```
+
+2. **编译程序**
+
+```bash
+go build -o mini-web-server ./cmd/server
+```
+
+3. **运行程序**
+
+```bash
+./mini-web-server
+```
+
+默认监听`8080`端口。
+
+### 手动部署前端
+
+1. **进入前端目录**
+
+```bash
+cd frontend
+```
+
+2. **安装依赖**
+
+```bash
+yarn install
+```
+
+3. **构建前端资源**
+
+```bash
+yarn build
+```
+
+4. **使用Nginx托管**
+
+配置Nginx将请求代理到后端API：
+
+```nginx
+server {
+    listen 80;
+    
+    # 静态资源
+    location / {
+        root /path/to/frontend/dist;
+        try_files $uri $uri/ /index.html;
+    }
+    
+    # API代理
+    location /api {
+        proxy_pass http://localhost:8080;
+        # WebSocket支持
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+## 配置选项
+
+### 环境变量
+
+后端支持以下环境变量：
+
+- `DB_TYPE`: 数据库类型（默认：sqlite）
+- `DB_PATH`: SQLite数据库路径
+- `LOG_LEVEL`: 日志级别（debug, info, warn, error）
+- `HEADLESS`: 无界面模式（true/false）
+- `CONTAINER`: 容器环境（true/false）
+
+### Docker环境变量
+
+在`docker-compose.yml`中可以修改环境变量：
+
+```yaml
+services:
+  backend:
+    environment:
+      - DB_TYPE=sqlite
+      - DB_PATH=/app/data/mini-web.db
+      - LOG_LEVEL=info
+      - HEADLESS=true
+```
+
+## RDP功能说明
+
+RDP功能支持连接Windows远程桌面，主要特性：
+
+- 屏幕实时更新
+- 键盘和鼠标控制
+- 剪贴板共享
+- 多分辨率支持
+
+### RDP无界面环境部署
+
+在无界面环境（如Docker容器）中，RDP功能将：
+
+1. 自动检测环境并使用虚拟会话模式
+2. 提供占位图像代替实际屏幕
+3. 降低屏幕刷新频率以节省资源
+4. 自动重连和错误恢复
+
+## 故障排除
+
+### RDP连接问题
+
+1. **无法连接到RDP服务器**
+   - 检查服务器地址和端口是否正确
+   - 验证网络连接和防火墙设置
+   - 检查用户名和密码是否正确
+
+2. **屏幕截图不显示**
+   - 在无界面环境这是预期行为，将使用占位图像
+   - 有界面环境中需要安装适当的截图工具（scrot或ImageMagick）
+
+3. **连接缓慢**
+   - 调整docker-compose.yml中的网络设置
+   - 提高资源限制（CPU/内存）
+
 ## 许可证
 
-本项目采用MIT许可证
+[MIT License](LICENSE)

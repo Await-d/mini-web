@@ -1,12 +1,13 @@
 // 终端初始化函数
 
-import {Terminal} from 'xterm';
-import {FitAddon} from 'xterm-addon-fit';
-import {WebLinksAddon} from 'xterm-addon-web-links';
-import {SearchAddon} from 'xterm-addon-search';
-import {createTerminalMessageQueue} from './messageQueue';
-import {monitorAndFixTerminalElements, setupLineStackingFix, fixLineStacking} from './terminalFixes';
+import { Terminal } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
+import { WebLinksAddon } from 'xterm-addon-web-links';
+import { SearchAddon } from 'xterm-addon-search';
+import { createTerminalMessageQueue } from './messageQueue';
+import { monitorAndFixTerminalElements, setupLineStackingFix, fixLineStacking } from './terminalFixes';
 import '../styles/terminal-fixes.css'; // 确保样式加载
+import { isGraphicalProtocol, getTabProtocol } from './protocolHandler';
 
 // 直接定义常量，避免导入不存在的模块
 const TERMINAL_FONT_SIZE = 16;
@@ -124,28 +125,85 @@ function fixTerminalDomStyles(containerRef: HTMLElement) {
 /**
  * 创建并初始化xterm终端
  */
-export const initializeTerminal = (
-    containerRef: HTMLDivElement,
-    onData: (data: string) => void
-) => {
+export const initializeTerminal = async (tab: any, options?: any): Promise<any> => {
     try {
-        if (!containerRef) {
+        if (!tab) {
             console.error('容器引用为空');
-            return null;
+            return false;
+        }
+
+        // 确定协议类型
+        const protocol = getTabProtocol(tab);
+        const isGraphical = isGraphicalProtocol(protocol);
+
+        // 如果是图形化协议（RDP或VNC），使用不同的初始化逻辑
+        if (isGraphical) {
+            console.log(`初始化图形化终端 (${protocol}), 跳过xterm初始化`);
+
+            // 对于图形化协议，我们不需要初始化xterm终端
+            // 只需确保WebSocket连接正常即可
+            try {
+                // 创建WebSocket连接
+                if (!tab.webSocketRef.current && tab.sessionId) {
+                    console.log(`创建图形协议 (${protocol}) WebSocket连接`);
+
+                    // 获取WebSocket URL（根据你的系统修改）
+                    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsHost = window.location.hostname;
+                    const wsPort = 8080; // 假设后端端口是8080，根据实际情况修改
+                    const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws/${protocol}/${tab.sessionId}`;
+
+                    // 创建WebSocket
+                    const ws = new WebSocket(wsUrl);
+                    tab.webSocketRef.current = ws;
+
+                    // 设置WebSocket事件处理
+                    ws.onopen = () => {
+                        console.log(`图形协议 (${protocol}) WebSocket连接成功`);
+
+                        // 发送初始化命令
+                        const initMessage = {
+                            type: 'init',
+                            protocol: protocol,
+                            width: window.innerWidth * 0.9,
+                            height: window.innerHeight * 0.8
+                        };
+                        ws.send(JSON.stringify(initMessage));
+                    };
+
+                    ws.onerror = (error) => {
+                        console.error(`图形协议 (${protocol}) WebSocket连接失败:`, error);
+                    };
+                }
+
+                // 为图形协议创建一个虚拟的终端对象，确保接口一致性
+                return {
+                    term: null,
+                    fitAddon: null,
+                    searchAddon: null,
+                    messageQueue: [],
+                    observer: null,
+                    lineMonitor: null,
+                    cleanup: () => { console.log('清理图形终端资源'); }
+                };
+            } catch (error) {
+                console.error(`初始化图形协议 (${protocol}) 终端失败:`, error);
+                return false;
+            }
         }
 
         // 应用容器级别的样式修复
-        containerRef.classList.add('xterm-container');
-        containerRef.style.backgroundColor = TERMINAL_BG_COLOR;
-        containerRef.style.color = TERMINAL_FG_COLOR;
-        containerRef.style.overflow = 'hidden';
-        containerRef.style.position = 'relative';
-        containerRef.style.width = '100%';
-        containerRef.style.height = '100%';
-        containerRef.style.zIndex = '5';
-        containerRef.style.visibility = 'visible';
-        containerRef.style.display = 'block';
-        containerRef.style.opacity = '1';
+        tab.classList.add('xterm-container');
+        tab.style.backgroundColor = TERMINAL_BG_COLOR;
+        tab.style.color = TERMINAL_FG_COLOR;
+        tab.style.overflow = 'hidden';
+        tab.style.position = 'relative';
+        tab.style.width = '100%';
+        tab.style.height = '100%';
+        tab.style.zIndex = '5';
+        tab.style.visibility = 'visible';
+        tab.style.display = 'block';
+        tab.style.opacity = '1';
 
         // 检查XTerm是否直接可用
         let term: Terminal;
@@ -250,8 +308,8 @@ export const initializeTerminal = (
         }
 
         // 确保容器是干净的
-        while (containerRef.firstChild) {
-            containerRef.removeChild(containerRef.firstChild);
+        while (tab.firstChild) {
+            tab.removeChild(tab.firstChild);
         }
 
         // 加载插件
@@ -272,7 +330,7 @@ export const initializeTerminal = (
         */
 
         // 打开终端并挂载到DOM
-        term.open(containerRef);
+        term.open(tab);
 
         // 显式设置终端字体大小
         term.options.fontSize = TERMINAL_FONT_SIZE;
@@ -282,8 +340,8 @@ export const initializeTerminal = (
 
         // 数据输入事件
         term.onData((data: string) => {
-            if (onData) {
-                onData(data);
+            if (options && options.onData) {
+                options.onData(data);
             }
         });
 
@@ -303,8 +361,7 @@ export const initializeTerminal = (
         }
 
         // 修复DOM元素样式
-        fixTerminalDomStyles(containerRef);
-
+        fixTerminalDomStyles(tab);
 
         // 确保终端样式被正确应用
         ensureTerminalStyles(term);
@@ -338,7 +395,7 @@ export const initializeTerminal = (
             term.writeln('\x1b[31m警告: 终端尺寸调整失败，可能影响显示效果\x1b[0m');
         }
 
-        const observer = monitorAndFixTerminalElements(containerRef);
+        const observer = monitorAndFixTerminalElements(tab);
 
         // 应用行堆叠修复 - 降低频率，避免过度刷新
         const lineStackingInterval = setupLineStackingFix(term as any);
@@ -359,7 +416,7 @@ export const initializeTerminal = (
         console.log('终端初始化成功', {
             cols: term.cols,
             rows: term.rows,
-            容器ID: containerRef.id,
+            容器ID: tab.id,
             终端DOM: term.element ? '已创建' : '未创建'
         });
 
@@ -404,7 +461,7 @@ export const initializeTerminal = (
         };
     } catch (error) {
         console.error('【终端初始化】发生错误:', error);
-        return null;
+        return false;
     }
 };
 

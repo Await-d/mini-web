@@ -5,11 +5,12 @@
  * @LastEditTime: 2025-05-11 08:17:12
  * @Description: 请填写简介
  */
-import {useState, useRef, useCallback} from 'react';
-import type {TerminalTab} from '../../../contexts/TerminalContext';
-import {handleWebSocketMessage, getWebSocketStateText} from '../utils/websocket';
-import {terminalStateRef} from '../../../contexts/TerminalContext';
-import {writeColorText} from '../utils/terminalUtils';
+import { useState, useRef, useCallback } from 'react';
+import type { TerminalTab } from '../../../contexts/TerminalContext';
+import { handleWebSocketMessage, getWebSocketStateText } from '../utils/websocket';
+import { terminalStateRef } from '../../../contexts/TerminalContext';
+import { writeColorText } from '../utils/terminalUtils';
+import { getTabProtocol, isGraphicalProtocol } from '../utils/protocolHandler';
 
 // 扩展TerminalTab接口以支持lastActivityTime和isGraphical属性
 declare module '../../../contexts/TerminalContext' {
@@ -109,7 +110,7 @@ export const useWebSocketManager = () => {
             try {
                 if (ws.readyState === WebSocket.OPEN) {
                     // 发送ping消息
-                    const pingMessage = JSON.stringify({type: 'ping', timestamp: Date.now()});
+                    const pingMessage = JSON.stringify({ type: 'ping', timestamp: Date.now() });
                     ws.send(pingMessage);
 
                     // 更新最后活动时间
@@ -310,7 +311,218 @@ export const useWebSocketManager = () => {
             return false;
         }
 
-        // 创建真正的WebSocket连接
+        // 检查是否有协议参数
+        const protocol = getTabProtocol(activeTab);
+        const isRdp = protocol === 'rdp';
+
+        console.log(`【WebSocket】准备创建连接，协议类型: ${protocol}, 是否RDP: ${isRdp}`);
+
+        // 如果是RDP协议，使用特殊的WebSocket处理流程
+        if (isRdp) {
+            // 确保sessionId存在
+            if (!sessionId) {
+                console.error(`【WebSocket】创建RDP WebSocket连接失败: 缺少sessionId`);
+                return null;
+            }
+
+            try {
+                // 获取WebSocket URL
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsHost = window.location.hostname;
+                const wsPort = 8080; // 假设默认端口是8080
+
+                // 获取认证令牌
+                const token = localStorage.getItem('token') || '';
+
+                // 添加token参数到URL以解决认证问题
+                const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws/rdp/${sessionId}?token=${encodeURIComponent(token)}`;
+
+                console.log(`【WebSocket】RDP连接URL: ${wsUrl}`);
+
+                // 创建WebSocket
+                const ws = new WebSocket(wsUrl);
+                activeTab.webSocketRef.current = ws;
+
+                // 设置事件处理
+                ws.onopen = () => {
+                    console.log(`【WebSocket】RDP WebSocket连接成功`);
+
+                    // 发送初始化命令
+                    const initMessage = JSON.stringify({
+                        type: 'init',
+                        protocol: 'rdp',
+                        width: window.innerWidth * 0.9,
+                        height: window.innerHeight * 0.8
+                    });
+
+                    console.log(`【WebSocket】发送RDP初始化命令: ${initMessage}`);
+                    ws.send(initMessage);
+
+                    // 更新连接状态
+                    activeTab.isConnected = true;
+                };
+
+                ws.onerror = (error) => {
+                    console.error(`【WebSocket】RDP WebSocket连接错误:`, error);
+                    activeTab.isConnected = false;
+                };
+
+                ws.onclose = () => {
+                    console.log(`【WebSocket】RDP WebSocket连接关闭`);
+                    activeTab.isConnected = false;
+                };
+
+                // 检查协议类型
+                const protocol = getTabProtocol(activeTab);
+                const isRdp = protocol === 'rdp';
+                console.log(`【WebSocket管理器】创建WebSocket连接：
+                  标签键: ${activeTab.key}
+                  协议: ${protocol || '未知'}
+                  是否为RDP: ${isRdp}
+                  是否为图形协议: ${isGraphicalProtocol(protocol)}
+                  连接ID: ${activeTab.connectionId}
+                  会话ID: ${activeTab.sessionId}
+                  WebSocket状态: ${ws.readyState === WebSocket.CONNECTING ? '连接中' :
+                        ws.readyState === WebSocket.OPEN ? '已连接' :
+                            ws.readyState === WebSocket.CLOSING ? '关闭中' : '已关闭'}
+                `);
+
+                // 修改消息处理函数来正确处理RDP消息
+                ws.addEventListener('message', (event) => {
+                    try {
+                        // 先检查是否是RDP消息
+                        if (isRdp && typeof event.data === 'string' && event.data.startsWith('RDP_')) {
+                            console.log(`【WebSocket】收到RDP消息前缀: ${event.data.substring(0, Math.min(30, event.data.length))}${event.data.length > 30 ? '...' : ''}`);
+
+                            // 处理RDP_SCREENSHOT消息，保存截图数据到全局变量，便于手动刷新
+                            if (event.data.startsWith('RDP_SCREENSHOT:')) {
+                                const dataWithoutPrefix = event.data.substring('RDP_SCREENSHOT:'.length);
+                                // 分割宽度、高度和图像数据
+                                const firstColonIndex = dataWithoutPrefix.indexOf(':');
+                                const secondColonIndex = dataWithoutPrefix.indexOf(':', firstColonIndex + 1);
+
+                                if (firstColonIndex > 0 && secondColonIndex > 0) {
+                                    const width = parseInt(dataWithoutPrefix.substring(0, firstColonIndex));
+                                    const height = parseInt(dataWithoutPrefix.substring(firstColonIndex + 1, secondColonIndex));
+                                    const base64Data = dataWithoutPrefix.substring(secondColonIndex + 1);
+
+                                    // 保存最后收到的图像到全局变量
+                                    (window as any).lastBase64Image = base64Data;
+                                    (window as any).lastRdpWidth = width;
+                                    (window as any).lastRdpHeight = height;
+
+                                    console.log(`【RDP截图】收到截图数据, 宽度=${width}, 高度=${height}, 数据长度=${base64Data.length}`);
+
+                                    // 检查是否需要强制刷新图像
+                                    // 这里我们可以尝试自动调用forceUpdateRdpImage，但需要确保RDP组件已经初始化
+                                    setTimeout(() => {
+                                        if ((window as any).forceUpdateRdpImage && typeof (window as any).forceUpdateRdpImage === 'function') {
+                                            console.log(`【RDP截图】尝试自动刷新RDP图像`);
+                                            (window as any).forceUpdateRdpImage(base64Data);
+                                        }
+                                    }, 500);
+                                }
+                            } else if (event.data.startsWith('RDP_ERROR:')) {
+                                // 处理RDP错误消息
+                                const errorMessage = event.data.substring('RDP_ERROR:'.length);
+                                console.error(`【RDP错误】${errorMessage}`);
+
+                                // 在DOM中显示错误状态
+                                const container = document.getElementById(`rdp-container-${activeTab.key}`);
+                                if (container) {
+                                    // 创建或获取错误消息元素
+                                    let errorElement = container.querySelector('.rdp-error-message');
+                                    if (!errorElement) {
+                                        errorElement = document.createElement('div');
+                                        errorElement.className = 'rdp-error-message';
+                                        errorElement.style.position = 'absolute';
+                                        errorElement.style.top = '10px';
+                                        errorElement.style.left = '10px';
+                                        errorElement.style.padding = '10px';
+                                        errorElement.style.borderRadius = '5px';
+                                        errorElement.style.backgroundColor = 'rgba(255, 0, 0, 0.7)';
+                                        errorElement.style.color = 'white';
+                                        errorElement.style.zIndex = '1000';
+                                        container.appendChild(errorElement);
+                                    }
+
+                                    (errorElement as HTMLElement).textContent = `RDP错误: ${errorMessage}`;
+                                    (errorElement as HTMLElement).style.display = 'block';
+
+                                    // 5秒后隐藏错误消息
+                                    setTimeout(() => {
+                                        if (errorElement) {
+                                            (errorElement as HTMLElement).style.display = 'none';
+                                        }
+                                    }, 5000);
+                                }
+                            } else if (event.data.startsWith('RDP_CONNECTED')) {
+                                console.log(`【RDP状态】RDP连接成功`);
+
+                                // 更新连接状态
+                                activeTab.isConnected = true;
+
+                                // 可以添加一个绿色的连接成功指示
+                                const container = document.getElementById(`rdp-container-${activeTab.key}`);
+                                if (container) {
+                                    let statusElement = container.querySelector('.rdp-status-message');
+                                    if (!statusElement) {
+                                        statusElement = document.createElement('div');
+                                        statusElement.className = 'rdp-status-message';
+                                        statusElement.style.position = 'absolute';
+                                        statusElement.style.top = '10px';
+                                        statusElement.style.right = '10px';
+                                        statusElement.style.padding = '5px 10px';
+                                        statusElement.style.borderRadius = '3px';
+                                        statusElement.style.backgroundColor = 'rgba(0, 128, 0, 0.7)';
+                                        statusElement.style.color = 'white';
+                                        statusElement.style.zIndex = '1000';
+                                        container.appendChild(statusElement);
+                                    }
+
+                                    (statusElement as HTMLElement).textContent = `已连接`;
+                                    (statusElement as HTMLElement).style.display = 'block';
+
+                                    // 3秒后隐藏状态消息
+                                    setTimeout(() => {
+                                        if (statusElement) {
+                                            (statusElement as HTMLElement).style.display = 'none';
+                                        }
+                                    }, 3000);
+                                }
+                            } else if (event.data.startsWith('RDP_INFO:')) {
+                                // 处理RDP信息消息
+                                const infoMessage = event.data.substring('RDP_INFO:'.length);
+                                console.log(`【RDP信息】${infoMessage}`);
+                            }
+
+                            // 只要有RDP消息传来，就更新最后活动时间
+                            if (!activeTab.lastActivityTime) {
+                                activeTab.lastActivityTime = Date.now();
+                            } else {
+                                activeTab.lastActivityTime = Date.now();
+                            }
+
+                            return;
+                        }
+
+                        // ... 继续处理其他消息类型 ...
+
+                    } catch (error) {
+                        console.error('WebSocket消息处理错误:', error);
+                    }
+                });
+
+                return ws;
+            } catch (error) {
+                console.error(`【WebSocket】创建RDP WebSocket连接失败:`, error);
+                return null;
+            }
+        }
+
+        // 原有的WebSocket连接逻辑
+        // ... existing code ...
+
         return createSimpleConnection(activeTab, sessionId);
     }, [startHeartbeat]);
 
@@ -807,7 +1019,7 @@ export const useWebSocketManager = () => {
 
         // 添加全局重连函数
         (window as any).globalReconnect = function (tabKey?: string) {
-            console.log('【连接流程】执行全局重连函数:', {tabKey});
+            console.log('【连接流程】执行全局重连函数:', { tabKey });
 
             // 如果提供了标签Key，找到对应标签
             if (tabKey && terminalStateRef.current) {
@@ -844,7 +1056,7 @@ export const useWebSocketManager = () => {
             const needsReconnect = (window as any).needsReconnect;
             const preservedTabKey = (window as any).preservedTabKey;
 
-            console.log('【连接流程】检查是否需要恢复连接:', {needsReconnect, preservedTabKey});
+            console.log('【连接流程】检查是否需要恢复连接:', { needsReconnect, preservedTabKey });
 
             if (needsReconnect && preservedTabKey) {
                 console.log('【连接流程】尝试恢复导航后的连接:', {
@@ -960,7 +1172,7 @@ export const useWebSocketManager = () => {
                         console.error('解析保存的会话信息失败:', e);
                     }
                 } else {
-                    console.log('【连接流程】无需恢复连接或缺少必要参数', {needsReconnect, preservedTabKey});
+                    console.log('【连接流程】无需恢复连接或缺少必要参数', { needsReconnect, preservedTabKey });
                 }
             }
 

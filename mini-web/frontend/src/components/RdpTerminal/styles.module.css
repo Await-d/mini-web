@@ -1,0 +1,238 @@
+.graphicalTerminal {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background-color: #000;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  background-color: #000;
+}
+
+.canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none; /* 去除焦点时的边框 */
+}
+
+.loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  z-index: 10;
+}
+
+.loadingText {
+  margin-top: 20px;
+  font-size: 16px;
+}
+
+.error {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  z-index: 10;
+}
+
+.errorText {
+  margin-bottom: 20px;
+  font-size: 16px;
+  color: #ff4d4f;
+  max-width: 80%;
+  text-align: center;
+}
+
+.controls {
+  position: absolute;
+  bottom: 10px;  /* 改为底部显示 */
+  right: 10px;
+  z-index: 5;
+  opacity: 0.5;
+  transition: opacity 0.3s ease;
+  display: flex;
+  gap: 4px;
+  background-color: rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.controls:hover {
+  opacity: 1;
+}
+
+.statusBar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+  background-color: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 12px;
+  z-index: 5;
+}
+
+.statusConnected {
+  color: #52c41a;
+}
+
+.statusDisconnected {
+  color: #ff4d4f;
+}
+
+.rdpTerminalContainer {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background-color: #000;
+  overflow: hidden;
+}
+
+.rdpControls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 100;
+  opacity: 0.7;
+  transition: opacity 0.3s ease;
+  display: flex;
+  gap: 4px;
+  background-color: rgba(0, 0, 0, 0.6);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.rdpControls:hover {
+  opacity: 1;
+}
+
+.specialKeysPanel {
+  position: absolute;
+  top: 50px;
+  right: 10px;
+  z-index: 100;
+  background-color: rgba(0, 0, 0, 0.8);
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid #1677ff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* RDP分辨率选择器 */
+.resolutionSelector {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  z-index: 100;
+  display: flex;
+  gap: 8px;
+  background-color: rgba(0, 0, 0, 0.7);
+  padding: 8px;
+  border-radius: 4px;
+  align-items: center;
+}
+
+.resolutionSelector label {
+  color: #fff;
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+/* 显示设备指示器 */
+.displayInfo {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  z-index: 90;
+}
+
+/* 剪贴板交互控件 */
+.clipboardControls {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  z-index: 100;
+  display: flex;
+  gap: 4px;
+  background-color: rgba(0, 0, 0, 0.7);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+/* 状态指示器 */
+.statusIndicator {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(0, 0, 0, 0.6);
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #52c41a; /* 连接状态绿色 */
+}
+
+.disconnected .statusDot {
+  background-color: #ff4d4f; /* 断开状态红色 */
+}
+
+.latencyInfo {
+  color: #faad14;
+  margin-left: 4px;
+}

@@ -42,6 +42,8 @@ import './Terminal.css'; // 引入额外的终端样式
 
 // 添加import导入loadTerminalDependencies
 import loadTerminalDependencies from './utils/loadTerminalDependencies';
+import { getTabProtocol, isGraphicalProtocol } from './utils/protocolHandler';
+import { terminalStateRef } from '../../contexts/TerminalContext';
 
 // 在文件顶部添加全局类型声明
 declare global {
@@ -1042,6 +1044,298 @@ function TerminalComponent(): React.ReactNode {
       document.removeEventListener('keydown', handleEscKey, true);
     };
   }, []);
+
+  useEffect(() => {
+    // 加载页面时记录当前URL参数
+    console.log(`【终端页面】加载，connectionId=${connectionId}, sessionParam=${sessionParam}`);
+
+    // 添加全局调试函数以检查当前终端状态
+    (window as any).debugTerminalState = () => {
+      const state = terminalStateRef.current;
+      const activeTab = state?.tabs.find(tab => tab.key === state.activeTabKey);
+      const protocol = activeTab ? getTabProtocol(activeTab) : undefined;
+      const isGraphical = protocol ? isGraphicalProtocol(protocol) : false;
+
+      console.log(`【终端调试】
+        当前状态: ${JSON.stringify({
+        tabsCount: state?.tabs.length || 0,
+        activeTabKey: state?.activeTabKey,
+        protocol: protocol,
+        isGraphical: isGraphical,
+        connectionId: connectionId,
+        sessionParam: sessionParam
+      })}
+        当前活动标签: ${activeTab ? JSON.stringify({
+        key: activeTab.key,
+        title: activeTab.title,
+        protocol: getTabProtocol(activeTab),
+        isConnected: activeTab.isConnected
+      }) : '无'}
+      `);
+
+      return { state, activeTab, protocol, isGraphical };
+    };
+
+    // 打印当前终端DOM状态
+    setTimeout(() => {
+      console.log(`【终端DOM】
+        RDP容器数量: ${document.querySelectorAll('.rdp-container').length}
+        SSH容器数量: ${document.querySelectorAll('.xterm-container').length}
+        终端组件容器数量: ${document.querySelectorAll('.terminal-connected-container').length}
+      `);
+    }, 1000);
+
+    return () => {
+      // 清理全局调试函数
+      delete (window as any).debugTerminalState;
+    };
+  }, [connectionId, sessionParam]);
+
+  // 在useEffect中或作为新的useEffect添加
+  useEffect(() => {
+    // 添加全局调试函数
+    (window as any).forceRdpMode = (tabKey?: string) => {
+      const state = terminalStateRef.current;
+      if (!state) {
+        console.error('终端状态不存在');
+        return false;
+      }
+
+      // 如果没有提供tabKey，使用当前活动标签
+      const targetKey = tabKey || state.activeTabKey;
+      const tab = state.tabs.find(t => t.key === targetKey);
+
+      if (!tab) {
+        console.error(`找不到标签: ${targetKey}`);
+        return false;
+      }
+
+      // 强制设置为RDP协议
+      const updates = {
+        protocol: 'rdp',
+        isGraphical: true,
+        connection: {
+          ...tab.connection,
+          protocol: 'rdp'
+        }
+      };
+
+      console.log(`强制将标签 ${targetKey} 设置为RDP模式`);
+
+      // 更新状态引用
+      const tabIndex = state.tabs.findIndex(t => t.key === targetKey);
+      state.tabs[tabIndex] = { ...tab, ...updates };
+
+      // 触发重新渲染
+      window.dispatchEvent(new CustomEvent('force-protocol-change', {
+        detail: { tabKey: targetKey, protocol: 'rdp' }
+      }));
+
+      return true;
+    };
+
+    // 添加DOM检查函数
+    (window as any).checkTerminalDom = () => {
+      const containers = {
+        rdpContainers: document.querySelectorAll('.rdp-container'),
+        xtermContainers: document.querySelectorAll('.xterm-container'),
+        rdpDisplayAreas: document.querySelectorAll('[class*="displayArea"]'),
+        terminalContainers: document.querySelectorAll('.terminal-connected-container')
+      };
+
+      console.log(`【DOM检查】
+        RDP容器: ${containers.rdpContainers.length}
+        xterm容器: ${containers.xtermContainers.length}
+        RDP显示区域: ${containers.rdpDisplayAreas.length}
+        终端连接容器: ${containers.terminalContainers.length}
+      `);
+
+      // 深度检查RDP容器
+      if (containers.rdpContainers.length > 0) {
+        Array.from(containers.rdpContainers).forEach((container, index) => {
+          console.log(`RDP容器 #${index}:`, {
+            id: container.id,
+            className: container.className,
+            children: container.childElementCount,
+            style: container.getAttribute('style'),
+            visibility: window.getComputedStyle(container).visibility,
+            display: window.getComputedStyle(container).display,
+            height: window.getComputedStyle(container).height,
+            width: window.getComputedStyle(container).width
+          });
+        });
+      }
+
+      return containers;
+    };
+
+    return () => {
+      delete (window as any).forceRdpMode;
+      delete (window as any).checkTerminalDom;
+    };
+  }, []);
+
+  // 添加一个useEffect来强制初始化RDP模式
+  useEffect(() => {
+    if (connectionId && sessionParam) {
+      console.log(`【强制RDP模式】检测到连接参数: connectionId=${connectionId}, sessionParam=${sessionParam}`);
+
+      // 注册一个DOM变化观察器，用于检测xterm容器并替换为RDP容器
+      setTimeout(() => {
+        const observer = new MutationObserver((mutations) => {
+          mutations.forEach((mutation) => {
+            // 检查是否有xterm容器被添加
+            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+              Array.from(mutation.addedNodes).forEach((node) => {
+                if (node instanceof HTMLElement && node.className === 'xterm-container') {
+                  console.log('【DOM观察器】检测到xterm容器被添加，尝试替换为RDP容器');
+
+                  // 检查当前状态中的协议
+                  if (terminalStateRef.current) {
+                    const activeTab = terminalStateRef.current.tabs.find(t =>
+                      t.key === terminalStateRef.current.activeTabKey);
+
+                    if (activeTab && activeTab.protocol === 'rdp') {
+                      console.log('【DOM强制修正】当前标签应为RDP协议，但渲染了xterm容器');
+
+                      // 创建RDP容器并替换xterm容器
+                      const rdpContainer = document.createElement('div');
+                      rdpContainer.className = 'rdp-container forced-rdp';
+                      rdpContainer.id = `rdp-container-${activeTab.key}`;
+                      rdpContainer.style.width = '100%';
+                      rdpContainer.style.height = '100%';
+                      rdpContainer.style.position = 'relative';
+                      rdpContainer.style.zIndex = '20';
+                      rdpContainer.style.backgroundColor = '#000';
+
+                      // 将RDP容器添加到DOM中
+                      node.parentElement?.appendChild(rdpContainer);
+
+                      // 隐藏xterm容器
+                      node.style.display = 'none';
+
+                      console.log('【DOM强制修正】已添加RDP容器并隐藏xterm容器');
+
+                      // 手动渲染RDP终端组件
+                      import('../../components/RdpTerminal').then(({ default: RdpTerminal }) => {
+                        // 检查是否需要创建ReactDOM
+                        import('react-dom').then(({ createRoot }) => {
+                          if (rdpContainer) {
+                            try {
+                              const root = createRoot(rdpContainer);
+                              root.render(
+                                <RdpTerminal
+                                  webSocketRef={activeTab.webSocketRef}
+                                  onResize={(width, height) => {
+                                    console.log(`【RDP大小调整】宽度=${width}，高度=${height}`);
+                                    if (activeTab.webSocketRef.current) {
+                                      const msg = JSON.stringify({
+                                        type: 'resize',
+                                        width,
+                                        height
+                                      });
+                                      activeTab.webSocketRef.current.send(msg);
+                                    }
+                                  }}
+                                  onInput={(data) => {
+                                    if (activeTab.webSocketRef.current) {
+                                      activeTab.webSocketRef.current.send(data);
+                                    }
+                                  }}
+                                />
+                              );
+                              console.log('【DOM强制修正】RDP终端组件已手动渲染');
+                            } catch (error) {
+                              console.error('【DOM强制修正】渲染RDP终端失败:', error);
+                            }
+                          }
+                        });
+                      });
+                    }
+                  }
+                }
+              });
+            }
+          });
+        });
+
+        // 监视整个body，捕获所有DOM变化
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true
+        });
+
+        console.log('【DOM观察器】已启动监视DOM变化');
+
+        // 60秒后停止观察以避免性能问题
+        setTimeout(() => {
+          observer.disconnect();
+          console.log('【DOM观察器】已停止监视DOM变化');
+        }, 60000);
+      }, 1000);
+
+      // 添加全局调试函数
+      (window as any).forceRdpContainerCreation = () => {
+        console.log('【手动修复】尝试强制创建RDP容器...');
+
+        // 查找所有xterm容器
+        const xtermContainers = document.querySelectorAll('.xterm-container');
+
+        if (xtermContainers.length > 0) {
+          console.log(`【手动修复】找到${xtermContainers.length}个xterm容器`);
+
+          // 查找当前活动标签
+          const activeTab = terminalStateRef.current?.tabs.find(t =>
+            t.key === terminalStateRef.current.activeTabKey);
+
+          if (activeTab && activeTab.protocol === 'rdp') {
+            console.log('【手动修复】当前标签协议为RDP，开始修复');
+
+            // 隐藏所有xterm容器
+            xtermContainers.forEach((container) => {
+              (container as HTMLElement).style.display = 'none';
+            });
+
+            // 检查是否已存在RDP容器
+            let rdpContainer = document.getElementById(`rdp-container-${activeTab.key}`);
+
+            // 如果不存在，创建一个
+            if (!rdpContainer) {
+              rdpContainer = document.createElement('div');
+              rdpContainer.className = 'rdp-container manual-fix';
+              rdpContainer.id = `rdp-container-${activeTab.key}`;
+              rdpContainer.style.width = '100%';
+              rdpContainer.style.height = '100%';
+              rdpContainer.style.position = 'absolute';
+              rdpContainer.style.top = '0';
+              rdpContainer.style.left = '0';
+              rdpContainer.style.zIndex = '1000';
+              rdpContainer.style.backgroundColor = '#000';
+
+              // 找到一个合适的父容器
+              const parent = xtermContainers[0].parentElement;
+              if (parent) {
+                parent.appendChild(rdpContainer);
+                console.log('【手动修复】已创建RDP容器并添加到DOM');
+              }
+            } else {
+              console.log('【手动修复】RDP容器已存在，确保显示');
+              rdpContainer.style.display = 'block';
+              rdpContainer.style.zIndex = '1000';
+            }
+
+            return '修复完成，请查看DOM是否包含RDP容器';
+          } else {
+            return '当前标签不是RDP协议，不需要修复';
+          }
+        } else {
+          return '未找到xterm容器，无法进行修复';
+        }
+      };
+
+      console.log('【调试】已添加全局方法window.forceRdpContainerCreation()用于手动强制创建RDP容器');
+    }
+  }, [connectionId, sessionParam]);
 
   // 如果正在加载，显示加载指示器
   if (loading) {

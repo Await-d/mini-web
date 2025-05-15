@@ -177,9 +177,34 @@ export const useWebSocketConnection = () => {
 
         // 设置WebSocket事件处理
         ws.onmessage = (event) => {
-          console.log('收到WebSocket消息:', typeof event.data === 'string' ?
-            (event.data.length > 100 ? event.data.substring(0, 100) + '...' : event.data) :
-            '二进制数据');
+          // 增强日志记录，特别是RDP消息
+          if (typeof event.data === 'string') {
+            if (event.data.startsWith('RDP_')) {
+              console.log('⭐ WebSocket收到RDP消息:',
+                event.data.substring(0, Math.min(50, event.data.length)) +
+                (event.data.length > 50 ? '...' : ''),
+                '长度:', event.data.length,
+                '时间:', new Date().toISOString());
+
+              // 先发送到控制台，然后再传递给处理程序
+              if (event.data.startsWith('RDP_SCREENSHOT:')) {
+                const parts = event.data.split(':');
+                console.log('🖼️🖼️🖼️ RDP截图消息详情:',
+                  '分段数:', parts.length,
+                  '宽度:', parts[1],
+                  '高度:', parts[2],
+                  'Base64前10个字符:', parts[3] ? parts[3].substring(0, 10) : '无数据');
+              }
+            } else {
+              console.log('收到WebSocket消息:',
+                event.data.length > 100 ? event.data.substring(0, 100) + '...' : event.data);
+            }
+          } else {
+            console.log('收到WebSocket二进制消息, 大小:',
+              event.data instanceof Blob ? event.data.size + ' bytes' : '未知');
+          }
+
+          // 处理消息
           handleWebSocketMessage(event, term, activeTab.isGraphical);
         };
       };

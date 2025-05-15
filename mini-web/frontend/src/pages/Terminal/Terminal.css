@@ -415,4 +415,51 @@ button[class*="清屏"] {
   -moz-user-select: text !important;
   -ms-user-select: text !important;
   user-select: text !important;
+}
+
+/* RDP终端样式修复 */
+.rdp-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+  z-index: 100 !important;
+  display: block !important;
+  background-color: #000;
+}
+
+/* 当RDP容器存在时隐藏xterm */
+.rdp-container + .xterm-container,
+.terminal-container:has(.rdp-container) .xterm-container {
+  display: none !important;
+}
+
+/* 修复终端容器样式 */
+.terminal-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* 显示区样式 */
+.rdp-display-area {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #000;
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* 强制RDP模式样式 */
+body.force-rdp-mode .xterm-container {
+  display: none !important;
+}
+
+body.force-rdp-mode .rdp-container {
+  display: block !important;
 } 

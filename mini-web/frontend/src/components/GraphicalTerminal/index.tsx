@@ -4,8 +4,10 @@ import { FullscreenOutlined, FullscreenExitOutlined, ReloadOutlined } from '@ant
 import styles from './styles.module.css';
 
 interface GraphicalTerminalProps {
-  protocol: 'rdp' | 'vnc';
-  webSocketRef: React.RefObject<WebSocket | null>;
+  protocol: 'rdp' | 'vnc' | string;
+  webSocketRef?: React.RefObject<WebSocket | null>;
+  terminalRef?: React.RefObject<HTMLDivElement>;
+  visible?: boolean;
   onResize?: (width: number, height: number) => void;
   onInput?: (data: any) => void;
 }
@@ -13,6 +15,8 @@ interface GraphicalTerminalProps {
 const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
   protocol,
   webSocketRef,
+  terminalRef,
+  visible,
   onResize,
   onInput
 }) => {
@@ -34,7 +38,7 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
 
   // 初始化图形终端
   useEffect(() => {
-    if (!containerRef.current || !canvasRef.current || !webSocketRef.current) return;
+    if (!containerRef.current || !canvasRef.current || !webSocketRef?.current) return;
 
     setLoading(true);
     setError(null);
@@ -56,7 +60,7 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
       }
 
       // 发送尺寸调整消息到服务器
-      if (webSocketRef.current && webSocketRef.current.readyState === WebSocket.OPEN) {
+      if (webSocketRef?.current && webSocketRef.current.readyState === WebSocket.OPEN) {
         const resizeMessage = {
           type: 'resize',
           width: containerWidth,
@@ -136,6 +140,17 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
                       }
                     } else {
                       console.error('屏幕截图base64数据为空');
+
+                      // 更新屏幕信息
+                      setScreenInfo({ width, height });
+
+                      // 数据为空时，绘制测试图案
+                      drawEmptyScreenshot(width, height);
+
+                      if (loading) {
+                        console.log('收到空屏幕数据，绘制测试图案');
+                        setLoading(false);
+                      }
                     }
                   } catch (error) {
                     console.error('解析屏幕截图消息出错:', error);
@@ -270,7 +285,8 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
         return;
       }
 
-      console.log(`尝试绘制屏幕截图，图像数据长度: ${base64Image.length}`);
+      console.log(`尝试绘制屏幕截图，图像数据长度: ${base64Image.length}, 图像数据前缀: ${base64Image.substring(0, 50)}`);
+      console.log(`Canvas状态: 宽度=${canvasRef.current.width}, 高度=${canvasRef.current.height}`);
 
       const ctx = canvasRef.current.getContext('2d');
       if (!ctx) {
@@ -292,47 +308,43 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
         clearTimeout(timeoutId);
         console.log(`图像加载成功，实际尺寸: ${img.width}x${img.height}`);
 
-        // 清除画布
-        ctx.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
-
         try {
-          // 在canvas中居中显示图像
-          const canvas = canvasRef.current!;
-          const canvasRatio = canvas.width / canvas.height;
-          const imageRatio = width / height;
+          if (canvasRef.current) {
+            // 更新画布尺寸以匹配图像
+            if (canvasRef.current.width !== width || canvasRef.current.height !== height) {
+              console.log(`调整Canvas尺寸: ${canvasRef.current.width}x${canvasRef.current.height} -> ${width}x${height}`);
+              canvasRef.current.width = width;
+              canvasRef.current.height = height;
+            }
 
-          let drawWidth, drawHeight, offsetX, offsetY;
+            // 清除画布
+            ctx.clearRect(0, 0, width, height);
 
-          if (canvasRatio > imageRatio) {
-            // Canvas更宽，图像高度适应Canvas
-            drawHeight = canvas.height;
-            drawWidth = drawHeight * imageRatio;
-            offsetX = (canvas.width - drawWidth) / 2;
-            offsetY = 0;
-          } else {
-            // Canvas更高，图像宽度适应Canvas
-            drawWidth = canvas.width;
-            drawHeight = drawWidth / imageRatio;
-            offsetX = 0;
-            offsetY = (canvas.height - drawHeight) / 2;
-          }
+            console.log('开始绘制图像到Canvas');
+            ctx.drawImage(img, 0, 0, width, height);
+            console.log('图像绘制完成');
 
-          // 绘制图像
-          ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
-          console.log(`图像绘制完成，绘制尺寸: ${drawWidth}x${drawHeight}, 偏移: (${offsetX},${offsetY})`);
+            // 验证绘制结果
+            try {
+              const pixelData = ctx.getImageData(width / 2, height / 2, 1, 1).data;
+              console.log(`Canvas中心点像素值: RGBA(${pixelData[0]},${pixelData[1]},${pixelData[2]},${pixelData[3]})`);
+            } catch (pixelError) {
+              console.error('无法读取Canvas像素数据:', pixelError);
+            }
 
-          // 清除任何可能存在的错误状态
-          if (error) {
-            setError(null);
-          }
+            // 清除任何可能存在的错误状态
+            if (error) {
+              setError(null);
+            }
 
-          // 确保加载状态已更新
-          if (loading) {
-            setLoading(false);
+            // 确保加载状态已更新
+            if (loading) {
+              setLoading(false);
+            }
           }
         } catch (drawError) {
-          console.error('绘制图像时发生错误:', drawError);
-          setError('绘制远程屏幕时出错: ' + (drawError instanceof Error ? drawError.message : String(drawError)));
+          console.error('绘制图像时出错:', drawError);
+          setError('绘制远程屏幕时出错，请刷新重试');
         }
       };
 
@@ -343,7 +355,8 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
 
         // 记录更详细的错误信息以便调试
         console.error('图像加载错误详情:', {
-          imgSrc: base64Image.length > 100 ? base64Image.substring(0, 100) + '...' : base64Image,
+          imgSrcLength: base64Image.length,
+          imgSrcPrefix: base64Image.substring(0, 100) + '...',
           width,
           height,
           canvasWidth: canvasRef.current?.width,
@@ -377,8 +390,64 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
       }
     };
 
+    // 绘制空屏幕的测试图案
+    const drawEmptyScreenshot = (width: number, height: number) => {
+      if (!canvasRef.current) {
+        console.error('Canvas引用不存在，无法绘制测试图案');
+        return;
+      }
+
+      console.log(`绘制测试图案，尺寸: ${width}x${height}`);
+
+      const ctx = canvasRef.current.getContext('2d');
+      if (!ctx) {
+        console.error('无法获取Canvas 2D上下文');
+        return;
+      }
+
+      // 设置画布尺寸
+      canvasRef.current.width = width;
+      canvasRef.current.height = height;
+
+      // 清除画布
+      ctx.clearRect(0, 0, width, height);
+
+      // 绘制测试图案
+      ctx.fillStyle = '#0057a8';
+      ctx.fillRect(0, 0, width, height);
+
+      // 绘制网格
+      ctx.beginPath();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1;
+
+      // 绘制水平线
+      for (let y = 0; y < height; y += 50) {
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+      }
+
+      // 绘制垂直线
+      for (let x = 0; x < width; x += 50) {
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+      }
+      ctx.stroke();
+
+      // 绘制中心文字
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 24px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('RDP屏幕数据为空 - 测试图案', width / 2, height / 2 - 20);
+      ctx.fillText(`分辨率: ${width} x ${height}`, width / 2, height / 2 + 20);
+      ctx.fillText('请检查服务器端截图功能', width / 2, height / 2 + 60);
+
+      console.log('测试图案绘制完成');
+    };
+
     // 添加WebSocket消息监听器
-    if (webSocketRef.current) {
+    if (webSocketRef?.current) {
       webSocketRef.current.addEventListener('message', handleWebSocketMessage);
 
       // 请求初始屏幕截图
@@ -414,11 +483,11 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
     // 清理函数
     return () => {
       window.removeEventListener('resize', resizeCanvas);
-      if (webSocketRef.current) {
+      if (webSocketRef?.current) {
         webSocketRef.current.removeEventListener('message', handleWebSocketMessage);
       }
     };
-  }, [protocol, webSocketRef.current]);
+  }, [containerRef, canvasRef, webSocketRef, protocol]);
 
   // 处理鼠标事件
   const handleMouseEvent = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -505,16 +574,27 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
     webSocketRef.current.send(message);
   };
 
-  // 请求屏幕刷新
+  // 更新请求刷新函数
   const requestScreenRefresh = () => {
-    if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) return;
+    if (!webSocketRef?.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+      message.error('WebSocket连接未建立，无法请求刷新');
+      return;
+    }
 
-    // 发送屏幕刷新请求
-    const messageData = new Uint8Array(1);
-    messageData[0] = 3; // 屏幕刷新请求的类型标识
+    console.log('请求刷新屏幕');
+    try {
+      // 发送刷新请求
+      const refreshMessage = {
+        type: 'refresh',
+        time: Date.now()
+      };
 
-    webSocketRef.current.send(messageData);
-    message.success('已请求刷新远程屏幕');
+      webSocketRef.current.send(JSON.stringify(refreshMessage));
+      message.info('已发送屏幕刷新请求');
+    } catch (error) {
+      console.error('发送刷新请求失败:', error);
+      message.error('发送刷新请求失败');
+    }
   };
 
   // 切换全屏模式

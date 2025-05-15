@@ -242,7 +242,21 @@ export const connectWebSocket = async (
  * 处理WebSocket消息
  */
 export function handleWebSocketMessage(event: MessageEvent, term: XTerm, isGraphical?: boolean) {
-  console.log('🌐 收到WebSocket消息 类型:' + typeof event.data, '是否图形模式:', isGraphical);
+  console.log('🌐 收到WebSocket消息 类型:' + typeof event.data, '是否图形模式:', isGraphical, '时间:', new Date().toISOString());
+
+  // 特别处理RDP相关消息
+  if (typeof event.data === 'string' && event.data.startsWith('RDP_')) {
+    console.log('🖼️ 检测到RDP消息:', event.data.substring(0, Math.min(100, event.data.length)) +
+      (event.data.length > 100 ? '...' : ''));
+
+    // 进一步检查是否为截图消息
+    if (event.data.startsWith('RDP_SCREENSHOT:')) {
+      console.log('📷 检测到RDP截图消息:',
+        '长度:', event.data.length,
+        '分段数:', event.data.split(':').length,
+        '头部:', event.data.substring(0, 30) + '...');
+    }
+  }
 
   if (!term) {
     console.error('❌ 终端实例不存在，无法处理WebSocket消息');
@@ -358,6 +372,19 @@ function isSystemMessage(message: string): boolean {
 
   // 消息长度很短，可能是回车符等，不过滤
   if (message.length <= 2) return false;
+
+  // 重要：确保RDP_SCREENSHOT和VNC_SCREENSHOT消息不被过滤
+  if (message.startsWith('RDP_SCREENSHOT:') || message.startsWith('VNC_SCREENSHOT:')) {
+    console.log('❗ 检测到重要的屏幕截图消息，不过滤:',
+      message.substring(0, Math.min(50, message.length)) + '...');
+    console.log('❗ 截图消息详情: 总长度=' + message.length +
+      ', 分段数=' + message.split(':').length +
+      ', 分段[0]=' + message.split(':')[0] +
+      ', 分段[1]=' + message.split(':')[1] +
+      ', 分段[2]=' + message.split(':')[2] +
+      ', 分段[3+]长度=' + (message.split(':').slice(3).join(':').length));
+    return false;
+  }
 
   // 打印调试信息，查看需要过滤的消息
   console.log('🔎 检查是否为系统消息:', message.length > 50 ?

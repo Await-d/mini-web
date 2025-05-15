@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from 'xterm';
 import './TerminalContextMenu.css';
+import { message } from 'antd';
 
 // 定义全局变量和ID
 let activeMenu: HTMLElement | null = null;
@@ -16,7 +17,7 @@ interface TerminalContextMenuProps {
 }
 
 /**
- * 终端右键菜单组件 - 全新实现
+ * 终端右键菜单组件 - 实现菜单事件处理
  */
 const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     terminal,
@@ -24,12 +25,14 @@ const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     onClearScreen,
     onPaste
 }) => {
-    // 仅使用引用来跟踪组件挂载状态
+    // 使用引用跟踪组件挂载状态
     const mountedRef = useRef(false);
+    // 添加状态来跟踪菜单是否可见
+    const [isMenuVisible, setIsMenuVisible] = useState(false);
 
-    // 全局共享的关闭菜单函数
+    // 关闭菜单函数
     const removeMenuAndOverlay = () => {
-        console.log('【右键菜单】执行全局关闭菜单函数');
+        console.log('【右键菜单】执行关闭菜单');
 
         try {
             // 移除菜单元素
@@ -47,8 +50,77 @@ const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             // 重置全局引用
             activeMenu = null;
             activeOverlay = null;
+            setIsMenuVisible(false);
         } catch (error) {
             console.error('【右键菜单】移除菜单失败:', error);
+        }
+    };
+
+    // 执行复制操作
+    const handleCopy = () => {
+        console.log('【右键菜单】执行复制操作');
+        if (terminal) {
+            const selection = terminal.getSelection();
+            if (selection) {
+                navigator.clipboard.writeText(selection)
+                    .then(() => {
+                        console.log('文本已复制到剪贴板');
+                        message.success('复制成功');
+                    })
+                    .catch(err => {
+                        console.error('复制到剪贴板失败', err);
+                        message.error('复制失败');
+                    });
+            } else {
+                message.info('没有选择文本');
+            }
+        }
+    };
+
+    // 执行粘贴操作
+    const handlePaste = () => {
+        console.log('【右键菜单】执行粘贴操作');
+        navigator.clipboard.readText()
+            .then(text => {
+                if (text && onPaste) {
+                    onPaste(text);
+                    console.log('文本已粘贴到终端');
+                    message.success('粘贴成功');
+                } else {
+                    message.info('剪贴板为空或粘贴功能不可用');
+                }
+            })
+            .catch(err => {
+                console.error('读取剪贴板失败', err);
+                message.error('粘贴失败');
+            });
+    };
+
+    // 执行清屏操作
+    const handleClear = () => {
+        console.log('【右键菜单】执行清空屏幕');
+        if (onClearScreen) {
+            onClearScreen();
+            console.log('终端已清空');
+            message.success('终端已清空');
+        } else {
+            message.error('清屏功能不可用');
+        }
+    };
+
+    // 执行全选操作
+    const handleSelectAll = () => {
+        console.log('【右键菜单】执行全选操作');
+        if (terminal) {
+            try {
+                terminal.selectAll();
+                message.success('已全选');
+            } catch (error) {
+                console.error('全选失败:', error);
+                message.error('全选失败');
+            }
+        } else {
+            message.error('终端不可用');
         }
     };
 
@@ -56,11 +128,11 @@ const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     const showContextMenu = (x: number, y: number) => {
         console.log('【右键菜单】显示菜单', { x, y });
 
-        // 先移除任何现有菜单
+        // 如果菜单已显示，先移除
         removeMenuAndOverlay();
 
         try {
-            // 创建覆盖层 - 先添加覆盖层以确保它在菜单下方
+            // 创建覆盖层
             const overlay = document.createElement('div');
             overlay.id = OVERLAY_ID;
             overlay.style.position = 'fixed';
@@ -70,6 +142,7 @@ const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             overlay.style.height = '100vh';
             overlay.style.backgroundColor = 'transparent';
             overlay.style.zIndex = '999999';
+            overlay.style.cursor = 'default';
 
             // 点击覆盖层关闭菜单
             overlay.addEventListener('click', (e) => {
@@ -90,62 +163,65 @@ const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             menu.style.left = `${x}px`;
             menu.style.top = `${y}px`;
             menu.style.zIndex = '1000000';
+            menu.style.backgroundColor = '#fff';
+            menu.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+            menu.style.border = '1px solid #d9d9d9';
+            menu.style.borderRadius = '4px';
+            menu.style.overflow = 'hidden';
+            menu.style.minWidth = '180px';
 
             // 创建菜单列表
             const menuList = document.createElement('ul');
             menuList.className = 'ant-menu';
+            menuList.style.margin = '0';
+            menuList.style.padding = '4px 0';
+            menuList.style.listStyle = 'none';
 
             // 定义菜单项
             const menuItems = [
                 {
                     text: '复制',
-                    action: () => {
-                        console.log('【右键菜单】执行复制操作');
-                        if (terminal) {
-                            const selection = terminal.getSelection();
-                            if (selection) {
-                                navigator.clipboard.writeText(selection)
-                                    .then(() => console.log('文本已复制到剪贴板'))
-                                    .catch(err => console.error('复制到剪贴板失败', err));
-                            }
-                        }
-                    },
+                    action: handleCopy,
                     disabled: !terminal || !terminal.hasSelection()
                 },
                 {
                     text: '粘贴',
-                    action: () => {
-                        console.log('【右键菜单】执行粘贴操作');
-                        navigator.clipboard.readText()
-                            .then(text => {
-                                if (text && onPaste) {
-                                    onPaste(text);
-                                    console.log('文本已粘贴到终端');
-                                }
-                            })
-                            .catch(err => console.error('读取剪贴板失败', err));
-                    }
+                    action: handlePaste,
+                    disabled: false
+                },
+                {
+                    text: '全选',
+                    action: handleSelectAll,
+                    disabled: !terminal
                 },
                 {
                     text: '清空屏幕',
-                    action: () => {
-                        console.log('【右键菜单】执行清空屏幕');
-                        if (onClearScreen) {
-                            onClearScreen();
-                            console.log('终端已清空');
-                        }
-                    }
+                    action: handleClear,
+                    disabled: !onClearScreen
                 }
             ];
 
             // 创建菜单项
             menuItems.forEach((item, index) => {
+                // 添加分隔线(除了第一个项目)
+                if (index > 0) {
+                    const divider = document.createElement('li');
+                    divider.className = 'menu-divider';
+                    divider.style.height = '1px';
+                    divider.style.margin = '4px 0';
+                    divider.style.backgroundColor = '#f0f0f0';
+                    menuList.appendChild(divider);
+                }
+
                 const menuItem = document.createElement('li');
                 menuItem.className = 'ant-menu-item';
                 menuItem.textContent = item.text;
                 menuItem.style.padding = '8px 16px';
-                menuItem.style.cursor = item.disabled ? 'default' : 'pointer';
-                menuItem.style.opacity = item.disabled ? '0.5' : '1';
+                menuItem.style.cursor = item.disabled ? 'not-allowed' : 'pointer';
+                menuItem.style.color = item.disabled ? '#ccc' : '#333';
+                menuItem.style.fontSize = '14px';
+                menuItem.style.lineHeight = '22px';
+                menuItem.style.transition = 'all 0.3s';
 
                 if (!item.disabled) {
                     // 添加菜单项点击事件
@@ -155,7 +231,7 @@ const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
 
                         console.log(`【右键菜单】点击菜单项: ${item.text}`);
 
-                        // 先移除菜单，然后执行操作
+                        // 先关闭菜单
                         removeMenuAndOverlay();
 
                         // 延迟执行操作，确保菜单已关闭
@@ -164,6 +240,7 @@ const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
                                 item.action();
                             } catch (error) {
                                 console.error(`【右键菜单】执行操作失败: ${item.text}`, error);
+                                message.error(`执行${item.text}操作失败`);
                             }
                         }, 10);
                     });
@@ -178,15 +255,6 @@ const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
                     });
                 }
 
-                // 添加分隔线
-                if (index > 0) {
-                    const divider = document.createElement('div');
-                    divider.style.height = '1px';
-                    divider.style.backgroundColor = '#f0f0f0';
-                    divider.style.margin = '4px 0';
-                    menuList.appendChild(divider);
-                }
-
                 menuList.appendChild(menuItem);
             });
 
@@ -196,16 +264,26 @@ const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             // 添加到文档
             document.body.appendChild(menu);
             activeMenu = menu;
+            setIsMenuVisible(true);
 
-            console.log('【右键菜单】成功创建菜单');
+            console.log('【右键菜单】成功创建并显示菜单');
+
+            // 调整菜单位置，确保不超出视口
+            const menuRect = menu.getBoundingClientRect();
+            if (menuRect.right > window.innerWidth) {
+                menu.style.left = `${window.innerWidth - menuRect.width - 5}px`;
+            }
+            if (menuRect.bottom > window.innerHeight) {
+                menu.style.top = `${window.innerHeight - menuRect.height - 5}px`;
+            }
 
             // 设置自动关闭定时器，防止菜单永久显示
             setTimeout(() => {
                 if (activeMenu === menu) {
-                    console.log('【右键菜单】自动关闭（10秒超时）');
+                    console.log('【右键菜单】自动关闭（5秒超时）');
                     removeMenuAndOverlay();
                 }
-            }, 10000);
+            }, 5000);
 
             return true;
         } catch (error) {
@@ -214,142 +292,82 @@ const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         }
     };
 
-    // 为终端元素添加右键事件
+    // 处理右键菜单自定义事件
+    const handleContextMenuEvent = (e: CustomEvent) => {
+        console.log('【右键菜单】接收到自定义事件', e.detail);
+        if (e.detail && typeof e.detail.x === 'number' && typeof e.detail.y === 'number') {
+            showContextMenu(e.detail.x, e.detail.y);
+        }
+    };
+
+    // 初始化和清理
     useEffect(() => {
         console.log('【右键菜单】组件挂载，初始化事件监听');
         mountedRef.current = true;
 
-        // 在每次组件挂载时清理所有可能存在的菜单
+        // 清理已存在的菜单
         removeMenuAndOverlay();
 
-        // 添加ESC键关闭菜单
+        // 添加事件监听器
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && (activeMenu || activeOverlay)) {
-                console.log('【右键菜单】按下ESC键，关闭菜单');
+            if (e.key === 'Escape' && isMenuVisible) {
+                console.log('【右键菜单】检测到ESC键，关闭菜单');
                 removeMenuAndOverlay();
             }
         };
 
-        // 添加全局点击处理，确保点击其他地方时关闭菜单
-        const handleGlobalClick = (e: MouseEvent) => {
-            // 检查是否点击了菜单或菜单内的元素
-            if (activeMenu && !activeMenu.contains(e.target as Node) &&
-                activeOverlay && !activeOverlay.contains(e.target as Node)) {
-                console.log('【右键菜单】点击了菜单外部，关闭菜单');
-                removeMenuAndOverlay();
-            }
-        };
-
-        // 处理自定义右键菜单事件
-        const handleCustomContextMenu = (e: CustomEvent) => {
-            console.log('【右键菜单】接收到自定义terminal-contextmenu事件', e.detail);
-            if (e.detail && typeof e.detail.x === 'number' && typeof e.detail.y === 'number') {
-                // 显示菜单
-                showContextMenu(e.detail.x, e.detail.y);
-            }
-        };
-
-        // 为终端元素添加右键菜单事件
-        const addContextMenuEvent = () => {
-            const terminalEl = terminalRef.current;
-            if (!terminalEl) {
-                console.log('【右键菜单】终端元素不存在，无法添加右键菜单');
-                return null;
-            }
-
-            console.log('【右键菜单】为终端元素添加右键事件');
-
-            // 定义右键菜单处理函数
-            const handleContextMenu = (e: MouseEvent) => {
-                console.log('【右键菜单】捕获到右键点击', {
-                    x: e.clientX,
-                    y: e.clientY,
-                    target: e.target
-                });
-
-                // 阻止默认右键菜单
+        // 监听原生上下文菜单事件
+        const handleNativeContextMenu = (e: MouseEvent) => {
+            // 检查点击是否在当前终端区域内
+            if (terminalRef.current && terminalRef.current.contains(e.target as Node)) {
+                console.log('【右键菜单】接收到原生右键点击事件');
                 e.preventDefault();
                 e.stopPropagation();
-
-                // 显示自定义菜单
                 showContextMenu(e.clientX, e.clientY);
-                return false;
-            };
-
-            // 使用捕获阶段和冒泡阶段都添加事件监听，确保能捕获到事件
-            terminalEl.addEventListener('contextmenu', handleContextMenu, true);
-            terminalEl.addEventListener('contextmenu', handleContextMenu, false);
-
-            // 为确保能阻止右键菜单，添加mousedown事件监听
-            terminalEl.addEventListener('mousedown', (e: MouseEvent) => {
-                if (e.button === 2) { // 右键
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-            }, true);
-
-            // 返回清理函数
-            return () => {
-                terminalEl.removeEventListener('contextmenu', handleContextMenu, true);
-                terminalEl.removeEventListener('contextmenu', handleContextMenu, false);
-            };
+            }
         };
 
-        // 添加事件监听
-        const cleanup = addContextMenuEvent();
-        document.addEventListener('keydown', handleKeyDown, true);
-        document.addEventListener('click', handleGlobalClick, true);
+        // 监听自定义上下文菜单事件
+        window.addEventListener('terminal-contextmenu', handleContextMenuEvent as EventListener);
 
-        // 添加自定义事件监听
-        window.addEventListener('terminal-contextmenu', handleCustomContextMenu as EventListener);
+        // 添加全局键盘事件
+        document.addEventListener('keydown', handleKeyDown);
 
-        // 定期检查并清理可能的悬挂菜单
-        const menuCheckInterval = setInterval(() => {
-            // 检查DOM中是否存在菜单元素，但全局变量中没有引用
-            const menuInDOM = document.getElementById(MENU_ID);
-            const overlayInDOM = document.getElementById(OVERLAY_ID);
+        // 添加全局点击事件
+        document.addEventListener('click', (e) => {
+            // 如果菜单不可见，不做处理
+            if (!isMenuVisible) return;
 
-            if ((menuInDOM && !activeMenu) || (overlayInDOM && !activeOverlay)) {
-                console.log('【右键菜单】发现悬挂菜单，进行清理');
-
-                if (menuInDOM && document.body.contains(menuInDOM)) {
-                    document.body.removeChild(menuInDOM);
-                }
-
-                if (overlayInDOM && document.body.contains(overlayInDOM)) {
-                    document.body.removeChild(overlayInDOM);
-                }
-
-                // 重置全局变量
-                activeMenu = null;
-                activeOverlay = null;
+            // 检查点击是否在菜单内
+            if (activeMenu && !activeMenu.contains(e.target as Node)) {
+                console.log('【右键菜单】点击菜单外部，关闭菜单');
+                removeMenuAndOverlay();
             }
-        }, 5000);
+        });
 
         // 返回清理函数
         return () => {
-            console.log('【右键菜单】组件卸载，清理事件监听');
             mountedRef.current = false;
-
-            // 清理所有事件监听
-            if (cleanup) cleanup();
-            document.removeEventListener('keydown', handleKeyDown, true);
-            document.removeEventListener('click', handleGlobalClick, true);
-            window.removeEventListener('terminal-contextmenu', handleCustomContextMenu as EventListener);
-
-            // 清理定时器
-            clearInterval(menuCheckInterval);
+            window.removeEventListener('terminal-contextmenu', handleContextMenuEvent as EventListener);
+            document.removeEventListener('keydown', handleKeyDown);
 
             // 移除菜单
             removeMenuAndOverlay();
         };
-    }, [terminal, terminalRef, onClearScreen, onPaste]);
+    }, [isMenuVisible, terminalRef]);
 
-    // 为全局提供删除菜单的方法
-    // @ts-ignore
-    window.removeTerminalContextMenu = removeMenuAndOverlay;
+    // 将移除菜单函数绑定到全局，以便其他组件可以调用
+    useEffect(() => {
+        // @ts-ignore
+        window.removeTerminalContextMenu = removeMenuAndOverlay;
 
-    // 不返回任何JSX，因为菜单是通过DOM API直接创建的
+        return () => {
+            // @ts-ignore
+            delete window.removeTerminalContextMenu;
+        };
+    }, []);
+
+    // 不返回任何JSX，因为菜单是通过DOM API直接创建
     return null;
 };
 

@@ -9,7 +9,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, useParams } from 'react-router-dom';
 import ConnectedTerminal from './components/ConnectedTerminal';
 import TerminalNotConnected from './components/TerminalNotConnected';
-import TerminalConnectionWrapper from './components/TerminalConnectionWrapper';
+import TerminalConnector from './components/TerminalConnectionWrapper';
 import './Terminal.css';
 
 const Terminal: React.FC = () => {
@@ -103,14 +103,9 @@ const Terminal: React.FC = () => {
     // 检查是否存在连接参数
     const hasConnectionParams = connectionId || sessionId;
 
-    const connectionParams = {
-        connectionId: connectionId ? parseInt(connectionId, 10) : undefined,
-        sessionId: sessionId ? parseInt(sessionId, 10) : undefined
-    };
-
     return (
         <div className="terminal-page">
-            <TerminalConnectionWrapper connectionParams={connectionParams}>
+            <TerminalConnector>
                 {({ hasConnection, tabsCount, activeTabKey, isConnected, tabs }) => {
                     // 终端连接组件就绪
 
@@ -123,7 +118,7 @@ const Terminal: React.FC = () => {
                     // 显示未连接终端组件
                     return <TerminalNotConnected />;
                 }}
-            </TerminalConnectionWrapper>
+            </TerminalConnector>
         </div>
     );
 };

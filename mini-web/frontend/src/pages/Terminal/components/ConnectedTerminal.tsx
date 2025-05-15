@@ -11,6 +11,8 @@ import '../styles/terminal-fixes.css'; // 确保加载终端修复样式
 import { PlusOutlined, CopyOutlined, DownloadOutlined, CodeOutlined, BuildOutlined, SettingOutlined, FullscreenOutlined, CloseOutlined } from '@ant-design/icons';
 import { Tabs, message } from 'antd';
 import { Button } from 'antd';
+import RdpTerminal from '../../../components/RdpTerminal';
+import { getTabProtocol, isGraphicalProtocol, getDefaultPort } from '../utils/protocolHandler';
 
 // 终端连接状态类型
 type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -591,88 +593,112 @@ function ConnectedTerminal() {
 
     console.log(`【终端初始化】开始为标签 ${activeTabKey} 初始化终端和连接`);
 
-    // 初始化xterm终端
+    // 检查协议类型
+    const protocol = getTabProtocol(activeTab);
+    const isGraphical = isGraphicalProtocol(protocol);
+
+    // 首先更新标签协议信息
+    updateTab(activeTabKey, {
+      protocol: protocol,
+      isGraphical: isGraphical
+    });
+
+    console.log(`【终端初始化】标签协议: ${protocol}, 是否图形化: ${isGraphical}`);
+
+    // 初始化xterm终端或图形化终端
     const terminalElement = containerRef.current;
     if (!terminalElement) return;
 
-    console.log('【终端初始化】开始初始化xterm');
-    const terminalResult = initializeTerminal(
-      terminalElement,
-      (data) => {
-        if (activeTab.webSocketRef?.current) {
-          // 适配WebSocket要求的格式
-          const webSocketTab: any = {
-            key: activeTab.key,
-            title: activeTab.title,
-            connection: activeTab.connectionId ? {
-              id: activeTab.connectionId.toString(),
-              type: 'ssh', // 默认类型
-              settings: {
-                host: 'localhost',
-                port: 22
-              }
-            } : undefined,
-            status: activeTab.isConnected ? 'connected' : 'disconnected',
-            isConnected: activeTab.isConnected,
-            xtermRef: activeTab.xtermRef,
-            fitAddonRef: activeTab.fitAddonRef,
-            searchAddonRef: activeTab.searchAddonRef,
-            messageQueueRef: activeTab.messageQueueRef,
-            webSocketRef: activeTab.webSocketRef
-          };
+    console.log('【终端初始化】开始初始化终端');
 
-          sendData(webSocketTab, data);
+    // 如果是图形协议，直接创建WebSocket而不初始化xterm
+    initializeTerminal(
+      terminalElement,
+      {
+        onData: (data: string) => {
+          if (activeTab.webSocketRef?.current) {
+            // 适配WebSocket要求的格式
+            const webSocketTab: any = {
+              key: activeTab.key,
+              title: activeTab.title,
+              connection: activeTab.connectionId ? {
+                id: activeTab.connectionId.toString(),
+                type: protocol || 'ssh',
+                settings: {
+                  host: activeTab.connection?.host || 'localhost',
+                  port: activeTab.connection?.port || getDefaultPort(protocol)
+                }
+              } : undefined,
+              status: activeTab.isConnected ? 'connected' : 'disconnected',
+              isConnected: activeTab.isConnected,
+              xtermRef: activeTab.xtermRef,
+              fitAddonRef: activeTab.fitAddonRef,
+              searchAddonRef: activeTab.searchAddonRef,
+              messageQueueRef: activeTab.messageQueueRef,
+              webSocketRef: activeTab.webSocketRef,
+              protocol: protocol
+            };
+
+            sendData(webSocketTab, data);
+          }
+        },
+        protocol: protocol,
+        isGraphical: isGraphical
+      }
+    ).then(terminalResult => {
+      if (!terminalResult) {
+        console.error('【终端初始化】初始化失败');
+        return;
+      }
+
+      const { term, fitAddon, searchAddon, messageQueue } = terminalResult;
+      termRef.current = term;
+      console.log('【终端初始化】终端初始化成功');
+
+      // 设置终端引用 - 只有文本终端才需要这些引用
+      if (!isGraphical) {
+        if (term) activeTab.xtermRef.current = term;
+        if (fitAddon) activeTab.fitAddonRef.current = fitAddon;
+        if (searchAddon) activeTab.searchAddonRef.current = searchAddon;
+        if (messageQueue) activeTab.messageQueueRef.current = messageQueue;
+
+        // 更新Tab引用
+        updateTab(activeTabKey, {
+          xtermRef: activeTab.xtermRef,
+          fitAddonRef: activeTab.fitAddonRef,
+          searchAddonRef: activeTab.searchAddonRef,
+          messageQueueRef: activeTab.messageQueueRef
+        });
+
+        // 显示欢迎信息
+        if (term) {
+          term.writeln('\r\n\x1b[1;34m欢迎使用Mini Web终端\x1b[0m');
+          term.writeln('\r\n\x1b[33m正在尝试连接到服务器...\x1b[0m');
         }
       }
-    );
 
-    if (!terminalResult) {
-      console.error('【终端初始化】xterm初始化失败');
-      return;
-    }
+      // 创建WebSocket连接
+      setTimeout(() => {
+        initTerminalConnection();
+      }, 500);
 
-    const { term, fitAddon, searchAddon, messageQueue } = terminalResult;
-    termRef.current = term;
-    console.log('【终端初始化】xterm初始化成功');
+      // 每秒检查一次终端状态
+      const checkInterval = setInterval(() => {
+        // 检查终端大小，必要时调整
+        if (!isGraphical && activeTab.fitAddonRef?.current && document.contains(terminalElement)) {
+          try {
+            activeTab.fitAddonRef.current.fit();
+          } catch (error) {
+            console.warn('【DOM检查】调整终端大小失败:', error);
+          }
+        }
+      }, 2000);
 
-    // 设置终端引用
-    activeTab.xtermRef.current = term;
-    activeTab.fitAddonRef.current = fitAddon;
-    activeTab.searchAddonRef.current = searchAddon;
-    activeTab.messageQueueRef.current = messageQueue;
-
-    // 更新Tab引用
-    updateTab(activeTabKey, {
-      xtermRef: activeTab.xtermRef,
-      fitAddonRef: activeTab.fitAddonRef,
-      searchAddonRef: activeTab.searchAddonRef,
-      messageQueueRef: activeTab.messageQueueRef
+      return () => {
+        clearInterval(checkInterval);
+      };
     });
 
-    // 显示欢迎信息
-    term.writeln('\r\n\x1b[1;34m欢迎使用Mini Web终端\x1b[0m');
-    term.writeln('\r\n\x1b[33m正在尝试连接到服务器...\x1b[0m');
-
-    // 创建WebSocket连接
-    setTimeout(() => {
-      initTerminalConnection();
-    }, 500);
-
-    // 每秒检查一次终端状态
-    const checkInterval = setInterval(() => {
-      // 检查终端大小，必要时调整
-      if (activeTab.fitAddonRef?.current && document.contains(terminalElement)) {
-        try {
-          activeTab.fitAddonRef.current.fit();
-        } catch (error) {
-          console.warn('【DOM检查】调整终端大小失败:', error);
-        }
-      }
-    }, 2000);
-
-    return () => {
-      clearInterval(checkInterval);
-    };
   }, [activeTab, activeTabKey, createWebSocketConnection, sendData, updateTab]);
 
   // 判断是否显示状态层
@@ -690,6 +716,168 @@ function ConnectedTerminal() {
       return activeTab.title || '服务器';
     }
   };
+
+  // 确保在WebSocket实例上直接设置消息处理函数，以防其他组件的处理函数没有生效
+  useEffect(() => {
+    if (!activeTab?.webSocketRef?.current) return;
+
+    const ws = activeTab.webSocketRef.current;
+    const protocol = getTabProtocol(activeTab);
+    const isRdp = protocol === 'rdp';
+
+    // 创建一个额外的消息处理函数，只作为备份
+    const directMessageHandler = (event: MessageEvent) => {
+      console.log(`【直接WebSocket】收到消息类型: ${typeof event.data}, 协议: ${protocol}`);
+
+      // 特别处理RDP消息
+      if (isRdp && typeof event.data === 'string' && event.data.startsWith('RDP_')) {
+        console.log(`【直接WebSocket】RDP消息: ${event.data.substring(0, Math.min(50, event.data.length))}${event.data.length > 50 ? '...' : ''}`);
+
+        // 检查是否是截图消息
+        if (event.data.startsWith('RDP_SCREENSHOT:')) {
+          console.log(`【直接WebSocket】接收到RDP截图消息，长度: ${event.data.length}`);
+
+          // 在全局对象上添加最新的消息和手动渲染函数，以便在控制台调试
+          try {
+            const parts = event.data.split(':');
+            if (parts.length >= 4) {
+              const width = parseInt(parts[1]);
+              const height = parseInt(parts[2]);
+              const base64Data = parts.slice(3).join(':');
+
+              // 保存到全局
+              (window as any).lastScreenshotData = {
+                width,
+                height,
+                base64Data,
+                time: new Date().toISOString()
+              };
+
+              // 添加手动渲染函数
+              (window as any).renderLastScreenshot = () => {
+                // 找到RDP显示区域
+                const rdpContainers = document.querySelectorAll('.rdp-container');
+                if (rdpContainers.length > 0) {
+                  const displayElement = rdpContainers[0].querySelector('[class*="displayArea"]');
+                  if (displayElement) {
+                    (displayElement as HTMLElement).style.backgroundImage = `url(data:image/png;base64,${base64Data})`;
+                    console.log('手动设置背景图像完成');
+                    return true;
+                  }
+                }
+                console.error('未找到RDP显示元素');
+                return false;
+              };
+
+              // 尝试自动渲染图像
+              console.log('尝试自动渲染RDP截图...');
+              setTimeout(() => {
+                const rdpContainers = document.querySelectorAll('.rdp-container');
+                if (rdpContainers.length > 0) {
+                  const displayElement = rdpContainers[0].querySelector('[class*="displayArea"]');
+                  if (displayElement) {
+                    console.log('找到RDP显示元素，应用图像');
+                    (displayElement as HTMLElement).style.backgroundImage = `url(data:image/png;base64,${base64Data})`;
+                    console.log('已设置背景图像');
+                  } else {
+                    console.error('未找到RDP显示元素，无法渲染图像');
+                  }
+                } else {
+                  console.error('未找到RDP容器，无法渲染图像');
+                }
+              }, 100); // 短暂延迟以确保DOM已更新
+
+              // 创建或更新调试显示
+              let debugDiv = document.getElementById('rdp-debug-display');
+              if (!debugDiv) {
+                debugDiv = document.createElement('div');
+                debugDiv.id = 'rdp-debug-display';
+                debugDiv.style.position = 'fixed';
+                debugDiv.style.top = '10px';
+                debugDiv.style.right = '10px';
+                debugDiv.style.zIndex = '9999';
+                debugDiv.style.backgroundColor = 'rgba(0,0,0,0.7)';
+                debugDiv.style.padding = '10px';
+                debugDiv.style.color = 'white';
+                debugDiv.style.fontSize = '12px';
+                debugDiv.style.maxWidth = '400px';
+                debugDiv.style.maxHeight = '300px';
+                debugDiv.style.overflow = 'auto';
+                debugDiv.style.border = '1px solid #333';
+                document.body.appendChild(debugDiv);
+              }
+
+              debugDiv.innerHTML = `
+                <div>接收RDP截图时间: ${new Date().toISOString()}</div>
+                <div>尺寸: ${width}x${height}</div>
+                <div>数据长度: ${base64Data.length}</div>
+                <div>
+                  <button onclick="window.renderLastScreenshot()">手动渲染</button>
+                  <button onclick="this.parentNode.parentNode.style.display='none'">关闭</button>
+                </div>
+                <div>
+                  <img src="data:image/png;base64,${base64Data}" style="max-width:100%; max-height:200px; margin-top:5px; border:1px solid #666;" />
+                </div>
+              `;
+
+              console.log('已创建全局调试函数 window.renderLastScreenshot()');
+            }
+          } catch (error) {
+            console.error('处理RDP截图消息失败:', error);
+          }
+        }
+      }
+    };
+
+    // 添加消息处理函数，但不覆盖已有的
+    ws.addEventListener('message', directMessageHandler);
+
+    // 添加直接输出ws实例到控制台的方法，方便调试
+    (window as any).getActiveWs = () => ws;
+    console.log('已创建全局函数 window.getActiveWs() 获取当前WebSocket实例');
+
+    return () => {
+      ws.removeEventListener('message', directMessageHandler);
+      delete (window as any).getActiveWs;
+    };
+  }, [activeTab, getTabProtocol]);
+
+  // 在标签数据中添加更多协议信息
+  useEffect(() => {
+    // 检查当前标签的协议类型
+    if (activeTab && connectionId) {
+      const protocol = getTabProtocol(activeTab);
+
+      console.log(`【标签协议检查】标签=${activeTab.key}, 当前协议=${protocol}, isGraphical=${isGraphicalProtocol(protocol)}`);
+
+      // 强制更新协议信息
+      if (protocol) {
+        updateTab(activeTab.key, {
+          protocol: protocol,
+          isGraphical: isGraphicalProtocol(protocol),
+          connection: {
+            ...activeTab.connection,
+            protocol: protocol
+          }
+        });
+
+        console.log(`【强制更新协议】标签=${activeTab.key}, 设置协议=${protocol}, 图形=${isGraphicalProtocol(protocol)}`);
+
+        // 还更新全局引用中的信息
+        if (terminalStateRef.current) {
+          const tabIndex = terminalStateRef.current.tabs.findIndex(t => t.key === activeTab.key);
+          if (tabIndex >= 0) {
+            terminalStateRef.current.tabs[tabIndex].protocol = protocol;
+            terminalStateRef.current.tabs[tabIndex].isGraphical = isGraphicalProtocol(protocol);
+            if (terminalStateRef.current.tabs[tabIndex].connection) {
+              terminalStateRef.current.tabs[tabIndex].connection!.protocol = protocol;
+            }
+            console.log(`【全局引用更新】已更新terminalStateRef中的协议信息`);
+          }
+        }
+      }
+    }
+  }, [activeTab, connectionId, updateTab]);
 
   // 渲染标签页组件
   return (
@@ -802,99 +990,90 @@ function ConnectedTerminal() {
             backgroundColor: '#f0f2f5',
             paddingLeft: 8
           }}
-          items={tabs.map(tab => ({
-            key: tab.key,
-            label: (
-              <span>
-                {tab.title}
-              </span>
-            ),
-            children: (
-              <div className="terminal-container">
-                <div
-                  ref={node => {
-                    if (node && tab.terminalRef) {
-                      tab.terminalRef.current = node;
-                      console.log(`【DOM调试】成功绑定terminalRef到DOM元素, 标签: ${tab.key}`);
+          items={tabs.map((tab) => {
+            const isActive = tab.key === activeTabKey;
+            const protocol = getTabProtocol(tab);
+            const isGraphical = isGraphicalProtocol(protocol);
 
-                      // 禁用浏览器默认右键菜单，确保自定义右键菜单可用
-                      const disableContextMenu = (e: MouseEvent) => {
-                        console.log('【右键菜单】终端容器右键点击，阻止默认行为', {
-                          x: e.clientX,
-                          y: e.clientY,
-                          target: e.target,
-                          currentTarget: e.currentTarget,
-                          button: e.button,
-                          timestamp: Date.now()
-                        });
-                        e.preventDefault();
-                        e.stopPropagation();
+            return (
+              <div
+                key={tab.key}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  display: isActive ? 'block' : 'none'
+                }}
+              >
+                {isActive && (
+                  <>
+                    {/* 断开connection中的原始DOM渲染逻辑，改为先判断协议类型 */}
+                    {(() => {
+                      // 获取协议类型 - 确保返回明确的结果
+                      const tabProtocol = getTabProtocol(tab) || 'ssh'; // 默认为SSH
+                      const isRdp = tabProtocol === 'rdp';
+                      const isGraphical = isGraphicalProtocol(tabProtocol);
 
-                        // 注意：由TerminalContextMenu组件处理菜单显示
-                        // 仅防止默认菜单显示，不在这里创建菜单
+                      console.log(`【终端渲染】标签=${tab.key}, 协议=${tabProtocol}, 是RDP=${isRdp}, 是图形=${isGraphical}`);
 
-                        // 触发自定义事件让TerminalContextMenu处理
-                        window.dispatchEvent(new CustomEvent('terminal-contextmenu', {
-                          detail: { x: e.clientX, y: e.clientY }
-                        }));
-                      };
+                      // RDP协议处理 - 强制优先
+                      if (isRdp) {
+                        return (
+                          <div
+                            className="rdp-container"
+                            id={`rdp-container-${tab.key}`}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              position: 'relative',
+                              zIndex: 20,
+                              backgroundColor: '#000'
+                            }}
+                          >
+                            <RdpTerminal
+                              webSocketRef={tab.webSocketRef}
+                              onResize={(width, height) => {
+                                console.log(`【RDP调整大小】宽度=${width}，高度=${height}`);
+                                if (tab.webSocketRef.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
+                                  const resizeMsg = JSON.stringify({
+                                    type: 'resize',
+                                    width: width,
+                                    height: height
+                                  });
+                                  tab.webSocketRef.current.send(resizeMsg);
+                                }
+                              }}
+                              onInput={(data) => {
+                                if (tab.webSocketRef.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
+                                  tab.webSocketRef.current.send(data);
+                                }
+                              }}
+                            />
+                          </div>
+                        );
+                      }
+                      // 非图形协议处理 - SSH, Telnet等
+                      else if (!isGraphical) {
+                        return (
+                          <div
+                            ref={tab.terminalRef}
+                            className="xterm-container"
+                            style={{ width: '100%', height: '100%' }}
+                          />
+                        );
+                      }
 
-                      // 使用原生DOM方法强制阻止默认右键菜单
-                      node.oncontextmenu = disableContextMenu;
-
-                      // 同时在捕获阶段注册事件，确保事件在早期被捕获
-                      node.addEventListener('contextmenu', disableContextMenu, true);
-
-                      // 防止其他事件干扰
-                      node.addEventListener('mousedown', (e) => {
-                        if (e.button === 2) { // 右键
-                          console.log('捕获到右键mousedown事件');
-                          e.preventDefault();
-                          e.stopPropagation();
-                        }
-                      }, true);
-
-                      // 触发DOM已准备好的事件
-                      const event = new CustomEvent('terminal-ready', {
-                        detail: { tabKey: tab.key }
-                      });
-                      window.dispatchEvent(event);
-                      console.log(`【DOM初始化】触发终端准备事件，标签: ${tab.key}`);
-                    }
-                  }}
-                  className="terminal"
-                  data-tab-key={tab.key}
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    userSelect: 'text',
-                    WebkitUserSelect: 'text',
-                    MozUserSelect: 'text',
-                    msUserSelect: 'text'
-                  }}
-                ></div>
-
-                {/* 添加右键菜单组件 */}
-                <TerminalContextMenu
-                  terminal={tab.xtermRef?.current || null}
-                  terminalRef={tab.terminalRef}
-                  onClearScreen={() => {
-                    handleClear();
-                    message.success('终端屏幕已清空');
-                  }}
-                  onPaste={(text) => {
-                    console.log('尝试粘贴文本到终端:', text.substring(0, 20) + (text.length > 20 ? '...' : ''));
-                    if (tab.sendDataToServer) {
-                      tab.sendDataToServer(text);
-                      message.success('文本已粘贴到终端');
-                    } else {
-                      message.error('无法粘贴：终端数据发送接口不可用');
-                    }
-                  }}
-                />
+                      // 其他图形协议 - VNC等
+                      return (
+                        <div className="unsupported-protocol">
+                          <p>不支持的协议类型: {tabProtocol}</p>
+                        </div>
+                      );
+                    })()}
+                  </>
+                )}
               </div>
-            )
-          }))}
+            );
+          })}
         />
       </div>
 

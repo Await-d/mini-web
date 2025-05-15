@@ -32,6 +32,20 @@ export interface TerminalTab {
   networkLatency?: number | null; // 添加网络延迟属性
   terminalMode?: string; // 添加终端模式属性
   isGraphical?: boolean; // 添加是否图形化属性
+  // RDP特有属性
+  rdpWidth?: number; // RDP窗口宽度
+  rdpHeight?: number; // RDP窗口高度
+  rdpResolution?: string; // RDP分辨率设置
+  rdpSettings?: {
+    resolution?: string;
+    colorDepth?: number;
+    audioMode?: string;
+    redirectPrinters?: boolean;
+    redirectClipboard?: boolean;
+    redirectDrives?: boolean;
+    remoteApp?: string;
+    [key: string]: any;
+  };
 }
 
 // 定义上下文状态类型

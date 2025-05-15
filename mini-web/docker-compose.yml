@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mini-web-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
+      - rdp_screenshots:/tmp/rdp_screenshots
+    environment:
+      # 数据库和其他配置可以在这里设置
+      - DB_TYPE=sqlite
+      - DB_PATH=/app/data/mini-web.db
+      - LOG_LEVEL=info
+      - HEADLESS=true
+      - CONTAINER=true
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/api/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - mini-web-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mini-web-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - mini-web-network
+
+volumes:
+  rdp_screenshots:
+    driver: local
+
+networks:
+  mini-web-network:
+    driver: bridge
