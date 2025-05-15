@@ -25,23 +25,25 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
 }) => {
     // 处理标签激活事件
     useEffect(() => {
-        const handleTabActivated = (event: CustomEvent) => {
-            const { tabKey, isNewTab } = event.detail;
+        const handleTabActivated = (event: Event) => {
+            const customEvent = event as CustomEvent;
+            const { tabKey, isNewTab } = customEvent.detail;
             if (tabKey && tabKey !== activeTabKey) {
                 setActiveTab(tabKey);
             }
         };
 
-        window.addEventListener('terminal-tab-activated', handleTabActivated as EventListener);
+        window.addEventListener('terminal-tab-activated', handleTabActivated);
         return () => {
-            window.removeEventListener('terminal-tab-activated', handleTabActivated as EventListener);
+            window.removeEventListener('terminal-tab-activated', handleTabActivated);
         };
     }, [activeTabKey, setActiveTab]);
 
     // 监听终端准备就绪事件
     useEffect(() => {
-        const handleTerminalReady = (event: CustomEvent) => {
-            const { tabKey,  connectionId, sessionId } = event.detail;
+        const handleTerminalReady = (event: Event) => {
+            const customEvent = event as CustomEvent;
+            const { tabKey, connectionId, sessionId } = customEvent.detail;
             // 查找对应的标签
             const tab = tabs.find(t => t.key === tabKey);
             if (!tab) {
@@ -80,16 +82,17 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
             }
         };
 
-        window.addEventListener('terminal-ready', handleTerminalReady as EventListener);
+        window.addEventListener('terminal-ready', handleTerminalReady);
         return () => {
-            window.removeEventListener('terminal-ready', handleTerminalReady as EventListener);
+            window.removeEventListener('terminal-ready', handleTerminalReady);
         };
     }, [tabs, createWebSocketConnection, initTerminal]);
 
     // 标签关闭事件处理
     useEffect(() => {
-        const handleTabClose = (event: CustomEvent) => {
-            const { tabKey } = event.detail;
+        const handleTabClose = (event: Event) => {
+            const customEvent = event as CustomEvent;
+            const { tabKey } = customEvent.detail;
             // 这里不直接处理关闭逻辑，而是触发一个标准DOM事件
             // 这样可以让主组件决定如何处理关闭操作
             const closeEvent = new CustomEvent('terminal-tab-close-request', {
@@ -98,9 +101,9 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
             window.dispatchEvent(closeEvent);
         };
 
-        window.addEventListener('terminal-tab-close', handleTabClose as EventListener);
+        window.addEventListener('terminal-tab-close', handleTabClose);
         return () => {
-            window.removeEventListener('terminal-tab-close', handleTabClose as EventListener);
+            window.removeEventListener('terminal-tab-close', handleTabClose);
         };
     }, []);
 

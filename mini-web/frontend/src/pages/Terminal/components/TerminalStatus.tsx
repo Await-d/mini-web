@@ -1,142 +1,111 @@
 import React from 'react';
-import { Alert, Space, Typography, Button } from 'antd';
-import { ReloadOutlined, WarningOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { Spin, Alert, Typography } from 'antd';
+import { LoadingOutlined, InfoCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, WarningOutlined } from '@ant-design/icons';
 import '../Terminal.css';
 
-const { Text } = Typography;
+// 终端连接状态类型
+type ConnectStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
 interface TerminalStatusProps {
-    status: 'connected' | 'disconnected' | 'connecting' | 'error';
-    connectionName?: string;
+    status: ConnectStatus;
+    connectionName: string;
     errorMessage?: string;
-    onReconnect?: () => void;
-    latency?: number; // 毫秒
+    latency?: number | null;
 }
 
 /**
- * 终端状态组件 - 显示加载中、错误等状态
+ * 终端状态组件
+ * 显示连接状态、错误信息等
  */
 const TerminalStatus: React.FC<TerminalStatusProps> = ({
     status,
-    connectionName = '',
-    errorMessage = '',
-    onReconnect,
+    connectionName,
+    errorMessage,
     latency
 }) => {
-    // 渲染状态内容
-    const renderStatusContent = () => {
+    const { Text, Title } = Typography;
+
+    // 根据状态返回对应的图标和文字
+    const getStatusContent = () => {
         switch (status) {
+            case 'idle':
+                return {
+                    icon: <InfoCircleOutlined style={{ fontSize: 24, color: '#1890ff' }} />,
+                    title: '等待连接',
+                    description: `准备连接到 ${connectionName}`,
+                    type: 'info'
+                };
             case 'connecting':
-                return (
-                    <div className="terminal-status-content">
-                        <div className="terminal-status-spinner"></div>
-                        <div className="terminal-status-text">
-                            正在连接{connectionName ? ` ${connectionName}` : ''}...
-                        </div>
-                    </div>
-                );
+                return {
+                    icon: <LoadingOutlined style={{ fontSize: 24, color: '#1890ff' }} />,
+                    title: '正在连接',
+                    description: `正在连接到 ${connectionName}`,
+                    type: 'info'
+                };
             case 'connected':
-                return (
-                    <div className="terminal-status-content">
-                        <CheckCircleOutlined style={{ fontSize: '32px', color: '#52c41a' }} />
-                        <Text style={{ color: '#fff', marginTop: '12px' }}>
-                            已成功连接到 {connectionName}
-                        </Text>
-                    </div>
-                );
+                return {
+                    icon: <CheckCircleOutlined style={{ fontSize: 24, color: '#52c41a' }} />,
+                    title: '已连接',
+                    description: `成功连接到 ${connectionName}${latency ? ` (延迟: ${latency}ms)` : ''}`,
+                    type: 'success'
+                };
             case 'disconnected':
-                return (
-                    <div className="terminal-status-content">
-                        <Space direction="vertical" align="center">
-                            <WarningOutlined style={{ fontSize: '32px', color: '#faad14' }} />
-                            <Text style={{ color: '#fff' }}>
-                                连接已断开
-                            </Text>
-                            <Button
-                                type="primary"
-                                icon={<ReloadOutlined />}
-                                onClick={onReconnect}
-                                style={{ marginTop: '12px' }}
-                            >
-                                重新连接
-                            </Button>
-                        </Space>
-                    </div>
-                );
+                return {
+                    icon: <WarningOutlined style={{ fontSize: 24, color: '#faad14' }} />,
+                    title: '已断开连接',
+                    description: `与 ${connectionName} 的连接已断开`,
+                    type: 'warning'
+                };
             case 'error':
-                return (
-                    <div className="terminal-status-content">
-                        <Space direction="vertical" align="center">
-                            <WarningOutlined style={{ fontSize: '32px', color: '#ff4d4f' }} />
-                            <Text style={{ color: '#fff' }}>
-                                连接错误
-                            </Text>
-                            <Alert
-                                message={errorMessage || "连接过程中发生错误，请稍后重试"}
-                                type="error"
-                                style={{ maxWidth: '400px', marginTop: '12px' }}
-                            />
-                            <Button
-                                type="primary"
-                                danger
-                                icon={<ReloadOutlined />}
-                                onClick={onReconnect}
-                                style={{ marginTop: '12px' }}
-                            >
-                                重新连接
-                            </Button>
-                        </Space>
-                    </div>
-                );
+                return {
+                    icon: <CloseCircleOutlined style={{ fontSize: 24, color: '#ff4d4f' }} />,
+                    title: '连接错误',
+                    description: errorMessage || `无法连接到 ${connectionName}`,
+                    type: 'error'
+                };
             default:
-                return null;
+                return {
+                    icon: <InfoCircleOutlined style={{ fontSize: 24, color: '#1890ff' }} />,
+                    title: '未知状态',
+                    description: `连接 ${connectionName} 状态未知`,
+                    type: 'info'
+                };
         }
     };
 
-    // 根据状态获取显示文本
-    const getStatusText = (): string => {
-        switch (status) {
-            case 'connected':
-                return '已连接';
-            case 'disconnected':
-                return '未连接';
-            case 'connecting':
-                return '连接中...';
-            case 'error':
-                return '连接错误';
-            default:
-                return '状态未知';
-        }
-    };
+    const statusContent = getStatusContent();
 
-    // 根据延迟时间判断网络质量
-    const getLatencyText = (): string => {
-        if (!latency) return '';
-
-        if (latency < 100) {
-            return `${latency}ms 优`;
-        } else if (latency < 300) {
-            return `${latency}ms 良`;
-        } else {
-            return `${latency}ms 差`;
-        }
-    };
-
-    // 如果状态是连接中或错误，显示全屏覆盖层
-    if (status === 'connecting' || status === 'error') {
-        return (
-            <div className="terminal-status-overlay">
-                {renderStatusContent()}
-            </div>
-        );
-    }
-
-    // 否则显示状态指示器
     return (
-        <div className="terminal-status-indicator">
-            <span className={`status-dot ${status}`}></span>
-            <span>{connectionName ? `${connectionName} ` : ''}{getStatusText()}</span>
-            {latency && <span className="terminal-latency">{getLatencyText()}</span>}
+        <div className="terminal-status-container" style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%',
+            width: '100%',
+            backgroundColor: '#f0f2f5',
+            padding: '20px'
+        }}>
+            <Alert
+                icon={statusContent.icon}
+                message={
+                    <Title level={4} style={{ margin: 0 }}>
+                        {statusContent.title}
+                    </Title>
+                }
+                description={
+                    <Text style={{ fontSize: 16 }}>
+                        {statusContent.description}
+                    </Text>
+                }
+                type={statusContent.type as any}
+                showIcon
+                style={{
+                    width: '100%',
+                    maxWidth: '500px',
+                    padding: '20px',
+                    borderRadius: '8px'
+                }}
+            />
         </div>
     );
 };

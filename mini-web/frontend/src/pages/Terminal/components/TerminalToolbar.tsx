@@ -1,32 +1,38 @@
 import React from 'react';
-import { Button, Tooltip, Space, Dropdown } from 'antd';
+import { Button, Tooltip, Space, Dropdown, Typography } from 'antd';
 import {
     CopyOutlined,
     ClearOutlined,
     SettingOutlined,
     FullscreenOutlined,
     FontSizeOutlined,
-    BgColorsOutlined,
-    ReloadOutlined
+    BgColorsOutlined
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 
+// 终端连接状态类型
+type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
+
 interface TerminalToolbarProps {
+    title?: string;
     onCopy: () => void;
     onClear: () => void;
     onFullscreen: () => void;
-    onReconnect: () => void;
     onFontSizeChange: (size: number) => void;
     connected: boolean;
+    connectionStatus?: ConnectionStatus;
+    networkLatency?: number | null;
 }
 
 const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
+    title,
     onCopy,
     onClear,
     onFullscreen,
-    onReconnect,
     onFontSizeChange,
-    connected
+    connected,
+    connectionStatus,
+    networkLatency
 }) => {
     // 字体大小选项
     const fontSizeItems: MenuProps['items'] = [
@@ -51,6 +57,24 @@ const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
             display: 'flex',
             gap: '8px'
         }}>
+            {title && (
+                <div className="terminal-title" style={{
+                    color: '#fff',
+                    background: 'rgba(0,0,0,0.5)',
+                    padding: '0 8px',
+                    borderRadius: '4px',
+                    lineHeight: '32px',
+                    marginRight: '8px'
+                }}>
+                    {title}
+                    {networkLatency && (
+                        <span style={{ marginLeft: '8px', fontSize: '12px', opacity: 0.8 }}>
+                            {networkLatency}ms
+                        </span>
+                    )}
+                </div>
+            )}
+
             <Space>
                 <Tooltip title="复制终端内容">
                     <Button
@@ -73,19 +97,6 @@ const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                         style={{ color: '#fff', background: 'rgba(0,0,0,0.5)', border: 'none' }}
                     >
                         清屏
-                    </Button>
-                </Tooltip>
-
-                <Tooltip title="重新连接">
-                    <Button
-                        icon={<ReloadOutlined />}
-                        onClick={onReconnect}
-                        type="text"
-                        className="terminal-toolbar-btn"
-                        style={{ color: '#fff', background: 'rgba(0,0,0,0.5)', border: 'none' }}
-                        disabled={!connected}
-                    >
-                        重连
                     </Button>
                 </Tooltip>
 

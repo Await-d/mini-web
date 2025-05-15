@@ -1,23 +1,23 @@
-import React, {useState, useCallback, useEffect, useRef, useMemo, createRef} from 'react';
-import type {RefObject} from 'react';
-import {message} from 'antd';
-import {useParams, useSearchParams, useNavigate} from 'react-router-dom';
-import {connectionAPI, sessionAPI} from '../../../services/api';
-import type {Connection} from '../../../services/api';
-import {useTerminal} from '../../../contexts/TerminalContext';
-import {terminalStateRef} from '../../../contexts/TerminalContext';
-import type {TerminalTab} from '../../../contexts/TerminalContext';
-import type {WindowSize, TerminalMessage} from '../utils/terminalConfig';
-import {Terminal} from 'xterm';
-import {FitAddon} from 'xterm-addon-fit';
-import {SearchAddon} from 'xterm-addon-search';
-import {WebLinksAddon} from 'xterm-addon-web-links';
+import React, { useState, useCallback, useEffect, useRef, useMemo, createRef } from 'react';
+import type { RefObject } from 'react';
+import { message } from 'antd';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import { connectionAPI, sessionAPI } from '../../../services/api';
+import type { Connection } from '../../../services/api';
+import { useTerminal } from '../../../contexts/TerminalContext';
+import { terminalStateRef } from '../../../contexts/TerminalContext';
+import type { TerminalTab } from '../../../contexts/TerminalContext';
+import type { WindowSize, TerminalMessage } from '../utils/terminalConfig';
+import { Terminal } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
+import { SearchAddon } from 'xterm-addon-search';
+import { WebLinksAddon } from 'xterm-addon-web-links';
 
 // 导入拆分出的子Hook
-import {useTerminalInitialization} from './useTerminalInitialization';
-import {useWebSocketManager, quickReconnect} from './useWebSocketManager';
-import {useTerminalData} from './useTerminalData';
-import {useTerminalUI} from './useTerminalUI';
+import { useTerminalInitialization } from './useTerminalInitialization';
+import { useWebSocketManager, quickReconnect } from './useWebSocketManager';
+import { useTerminalData } from './useTerminalData';
+import { useTerminalUI } from './useTerminalUI';
 
 // 确保terminalStateRef.current.tabs被推断为TerminalTab[]类型
 declare module '../../../contexts/TerminalContext' {
@@ -28,7 +28,7 @@ declare module '../../../contexts/TerminalContext' {
 }
 
 // 存储重试定时器的引用
-const retryTimersRef = {current: [] as ReturnType<typeof setTimeout>[]};
+const retryTimersRef = { current: [] as ReturnType<typeof setTimeout>[] };
 
 /**
  * 清除所有终端重试定时器
@@ -72,7 +72,7 @@ const saveSessionInfo = (connectionId: number, sessionId?: number) => {
 };
 
 // 创建isLoadingRef
-const isLoadingRef = {current: false}; // 使用对象模拟ref以避免重复渲染
+const isLoadingRef = { current: false }; // 使用对象模拟ref以避免重复渲染
 
 /**
  * 格式化创建标签的数据
@@ -109,14 +109,14 @@ const formatTabData = (connection: any, sessionId?: number): TerminalTab => {
  * 终端连接的主Hook，整合各子Hook的功能
  */
 export const useTerminalConnection = () => {
-    const {connectionId} = useParams<{ connectionId: string }>();
+    const { connectionId } = useParams<{ connectionId: string }>();
     const [searchParams] = useSearchParams();
     const sessionParam = searchParams.get('session');
     const navigate = useNavigate();
 
     // 使用终端上下文
-    const {state, addTab, closeTab, setActiveTab, updateTab} = useTerminal();
-    const {tabs, activeTabKey} = state;
+    const { state, addTab, closeTab, setActiveTab, updateTab } = useTerminal();
+    const { tabs, activeTabKey } = state;
 
     // 使用拆分的终端初始化Hook
     const {
@@ -160,7 +160,7 @@ export const useTerminalConnection = () => {
     } = useTerminalUI();
 
     const [connection, setConnection] = useState<Connection | null>(null);
-    const [terminalSize, setTerminalSize] = useState<WindowSize>({cols: 80, rows: 24});
+    const [terminalSize, setTerminalSize] = useState<WindowSize>({ cols: 80, rows: 24 });
 
     // 添加一个useRef来跟踪已处理过的连接ID和会话ID组合
     const processedConnectionRef = useRef<Set<string>>(new Set());
@@ -260,7 +260,7 @@ export const useTerminalConnection = () => {
             } catch (e) {
                 console.error("【连接流程】使用history API清理URL失败:", e);
                 // 回退到使用导航（但这可能导致WebSocket连接丢失）
-                navigate(currentPath, {replace: true});
+                navigate(currentPath, { replace: true });
             }
         } else {
             console.warn("【连接流程】无法保存会话信息，活动标签不存在");
@@ -300,7 +300,7 @@ export const useTerminalConnection = () => {
                         }, '', currentPath);
                     } catch (e) {
                         console.error("【连接流程】使用history API清理URL失败:", e);
-                        navigate(currentPath, {replace: true});
+                        navigate(currentPath, { replace: true });
                     }
                 } else {
                     console.log("【连接流程】找不到任何标签，暂不清理URL参数");
@@ -369,14 +369,14 @@ export const useTerminalConnection = () => {
         [100, 250, 500, 750, 1000].forEach(delay => {
             setTimeout(() => {
                 window.dispatchEvent(new CustomEvent('terminal-ready', {
-                    detail: {tabKey: tabKey}
+                    detail: { tabKey: tabKey }
                 }));
             }, delay);
         });
 
         // 立即触发标签激活事件
         window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-            detail: {tabKey: tabKey, isNewTab: true}
+            detail: { tabKey: tabKey, isNewTab: true }
         }));
 
         // 返回标签键，用于后续操作
@@ -442,7 +442,7 @@ export const useTerminalConnection = () => {
 
             // 分发DOM就绪事件
             window.dispatchEvent(new CustomEvent('terminal-ready', {
-                detail: {tabKey}
+                detail: { tabKey }
             }));
         }
 
@@ -504,7 +504,7 @@ export const useTerminalConnection = () => {
             // 触发激活事件
             setTimeout(() => {
                 window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-                    detail: {tabKey: existingTab.key, isNewTab: false}
+                    detail: { tabKey: existingTab.key, isNewTab: false }
                 }));
             }, 100);
 
@@ -549,7 +549,7 @@ export const useTerminalConnection = () => {
                 // 延迟分发激活事件，确保DOM元素已渲染
                 setTimeout(() => {
                     window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-                        detail: {tabKey: newTab.key, isNewTab: true}
+                        detail: { tabKey: newTab.key, isNewTab: true }
                     }));
                 }, 100);
 
@@ -657,7 +657,7 @@ export const useTerminalConnection = () => {
                         }
 
                         // 清除URL中的查询参数
-                        const {protocol, host, pathname} = window.location;
+                        const { protocol, host, pathname } = window.location;
                         const newUrl = `${protocol}//${host}${pathname}`;
                         window.history.replaceState({}, document.title, newUrl);
 
@@ -708,7 +708,7 @@ export const useTerminalConnection = () => {
 
                     // 只有在尺寸变化时才更新状态和发送消息
                     if (newCols !== terminalSize.cols || newRows !== terminalSize.rows) {
-                        setTerminalSize({cols: newCols, rows: newRows});
+                        setTerminalSize({ cols: newCols, rows: newRows });
 
                         // 发送调整大小的消息到服务器
                         if (activeTab.webSocketRef?.current &&
@@ -955,7 +955,7 @@ export const useTerminalConnection = () => {
                         if (!initializedTabs.has(tabKey)) {
                             setTimeout(() => {
                                 window.dispatchEvent(new CustomEvent('terminal-ready', {
-                                    detail: {tabKey: tabKey}
+                                    detail: { tabKey: tabKey }
                                 }));
                             }, 100);
                         }
@@ -967,7 +967,7 @@ export const useTerminalConnection = () => {
                             // 添加重试
                             const timerId = setTimeout(() => {
                                 window.dispatchEvent(new CustomEvent('terminal-ready', {
-                                    detail: {tabKey: tabKey}
+                                    detail: { tabKey: tabKey }
                                 }));
                             }, 500);
 
@@ -1132,7 +1132,7 @@ export const useTerminalConnection = () => {
         terminalMode,
         sidebarCollapsed,
         cleanURL,
-        toggleFullscreen: handleToggleFullscreen,
+        toggleFullscreen,
         sendDataToServer,
         setNetworkLatency,
         setTerminalMode,
