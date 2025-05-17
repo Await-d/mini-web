@@ -2,8 +2,8 @@
  * @Author: Await
  * @Date: 2025-05-15 20:08:18
  * @LastEditors: Await
- * @LastEditTime: 2025-05-15 21:46:37
- * @Description: 请填写简介
+ * @LastEditTime: 2025-05-17 17:07:29
+ * @Description: RDP远程桌面终端组件
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Button, message, Space, Spin, Tooltip, Typography } from 'antd';
@@ -13,7 +13,6 @@ import {
     ReloadOutlined,
 } from '@ant-design/icons';
 import styles from './styles.module.css';
-import './rdp.css';
 
 const { Text } = Typography;
 
@@ -21,9 +20,10 @@ const { Text } = Typography;
 export interface RdpTerminalProps {
     webSocketRef: React.RefObject<WebSocket | null>;
     connectionId: number;
-    sessionId: string;
+    sessionId: string | number;
     onResize?: (width: number, height: number) => void;
     onInput?: (data: string) => void;
+    isConnecting?: boolean;
 }
 
 /**
@@ -35,12 +35,13 @@ const RdpTerminal: React.FC<RdpTerminalProps> = ({
     connectionId,
     sessionId,
     onResize,
-    onInput
+    onInput,
+    isConnecting: externalConnectingState
 }) => {
     // 状态管理
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [showControls, setShowControls] = useState(true);
-    const [isConnecting, setIsConnecting] = useState(true);
+    const [isConnecting, setIsConnecting] = useState(externalConnectingState !== undefined ? externalConnectingState : true);
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -48,15 +49,69 @@ const RdpTerminal: React.FC<RdpTerminalProps> = ({
     const containerRef = useRef<HTMLDivElement>(null);
     const displayRef = useRef<HTMLDivElement>(null);
 
+    // 统一处理WebSocket消息
+    const handleWebSocketMessage = useCallback((event: MessageEvent) => {
+        if (typeof event.data === 'string') {
+            // 处理RDP屏幕截图数据
+            if (event.data.startsWith('RDP_SCREENSHOT:')) {
+                try {
+                    const parts = event.data.split(':');
+                    if (parts.length >= 4) {
+                        const base64Image = parts.slice(3).join(':');
+
+                        if (base64Image && base64Image.length > 100 && displayRef.current) {
+                            const testImg = new Image();
+                            testImg.onload = () => {
+                                if (displayRef.current) {
+                                    displayRef.current.style.backgroundImage = `url(data:image/png;base64,${base64Image})`;
+                                    displayRef.current.style.backgroundSize = 'contain';
+                                    displayRef.current.style.backgroundPosition = 'center';
+                                    displayRef.current.style.backgroundRepeat = 'no-repeat';
+
+                                    setIsConnected(true);
+                                    setIsConnecting(false);
+                                    setError(null);
+                                }
+                            };
+                            testImg.src = `data:image/png;base64,${base64Image}`;
+                        }
+                    }
+                } catch (error) {
+                    // 忽略图像解析错误
+                }
+            }
+            // 处理错误消息
+            else if (event.data.startsWith('ERROR:')) {
+                setError(event.data.substring(6));
+                setIsConnecting(false);
+            }
+            // 处理状态消息
+            else if (event.data.startsWith('STATUS:')) {
+                const status = event.data.substring(7);
+                if (status === 'CONNECTED') {
+                    setIsConnected(true);
+                    setIsConnecting(false);
+                    setError(null);
+                } else if (status === 'DISCONNECTED') {
+                    setIsConnected(false);
+                    setIsConnecting(false);
+                    setError('连接已断开');
+                }
+            }
+        }
+    }, []);
+
     // 请求刷新屏幕
     const requestRefresh = useCallback(() => {
-        if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+        const ws = webSocketRef?.current;
+
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
             message.error('WebSocket连接未建立，无法请求刷新');
             return;
         }
 
         try {
-            webSocketRef.current.send(JSON.stringify({
+            ws.send(JSON.stringify({
                 type: 'refresh',
                 timestamp: Date.now()
             }));
@@ -84,117 +139,44 @@ const RdpTerminal: React.FC<RdpTerminalProps> = ({
     const handleMouseEnter = useCallback(() => setShowControls(true), []);
     const handleMouseLeave = useCallback(() => setShowControls(false), []);
 
-    // WebSocket未连接时显示错误
-    if (!webSocketRef.current) {
-        return (
-            <div className="rdp-terminal-container" style={{ width: '100%', height: '100%', position: 'relative' }}>
-                <div className="rdp-error-message" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                    <Text type="danger">无法初始化RDP终端: WebSocket引用不可用</Text>
-                </div>
-            </div>
-        );
-    }
-
-    // 处理WebSocket消息事件
+    // 更新外部传入的连接状态
     useEffect(() => {
-        if (!webSocketRef?.current) return;
+        if (externalConnectingState !== undefined) {
+            setIsConnecting(externalConnectingState);
+        }
+    }, [externalConnectingState]);
 
-        // 处理RDP屏幕截图数据
-        const handleMessage = (event: MessageEvent) => {
-            if (typeof event.data === 'string' && event.data.startsWith('RDP_SCREENSHOT:')) {
-                try {
-                    const parts = event.data.split(':');
-                    if (parts.length >= 4) {
-                        const base64Image = parts.slice(3).join(':');
-
-                        if (base64Image && base64Image.length > 100 && displayRef.current) {
-                            const testImg = new Image();
-                            testImg.onload = () => {
-                                if (displayRef.current) {
-                                    displayRef.current.style.backgroundImage = `url(data:image/png;base64,${base64Image})`;
-                                    displayRef.current.style.backgroundSize = 'contain';
-                                    displayRef.current.style.backgroundPosition = 'center';
-                                    displayRef.current.style.backgroundRepeat = 'no-repeat';
-
-                                    setIsConnected(true);
-                                    setIsConnecting(false);
-                                    setError(null);
-                                }
-                            };
-                            testImg.src = `data:image/png;base64,${base64Image}`;
-                        }
-                    }
-                } catch (error) {
-                    // 忽略图像解析错误
-                }
-            }
-        };
+    // 设置提供的WebSocket引用的消息处理
+    useEffect(() => {
+        const ws = webSocketRef?.current;
+        if (!ws) return;
 
         // 添加消息事件监听器
-        webSocketRef.current.addEventListener('message', handleMessage);
+        ws.addEventListener('message', handleWebSocketMessage);
 
-        // 清理函数
-        return () => {
-            if (webSocketRef.current) {
-                webSocketRef.current.removeEventListener('message', handleMessage);
-            }
-        };
-    }, [webSocketRef, displayRef]);
-
-    // 监听WebSocket连接状态
-    useEffect(() => {
-        if (!webSocketRef?.current) return;
-
-        const wsInstance = webSocketRef.current;
-
-        // 连接事件处理
-        const handleOpen = () => {
+        // 根据WebSocket状态设置连接状态
+        if (ws.readyState === WebSocket.OPEN) {
             setIsConnected(true);
             setIsConnecting(false);
             setError(null);
-
-            // 设置初始大小
-            if (onResize) {
-                onResize(1280, 720);
-            }
-        };
-
-        const handleClose = () => {
-            setIsConnected(false);
-            setIsConnecting(false);
-            setError('WebSocket连接已关闭');
-        };
-
-        const handleError = () => {
-            setIsConnected(false);
-            setIsConnecting(false);
-            setError('WebSocket连接出错');
-        };
-
-        // 根据当前连接状态设置
-        if (wsInstance.readyState === WebSocket.OPEN) {
-            handleOpen();
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+            setIsConnecting(true);
         } else {
-            wsInstance.addEventListener('open', handleOpen);
+            setIsConnected(false);
+            setIsConnecting(false);
+            setError('WebSocket连接未就绪');
         }
-
-        wsInstance.addEventListener('close', handleClose);
-        wsInstance.addEventListener('error', handleError);
 
         // 清理函数
         return () => {
-            if (wsInstance) {
-                wsInstance.removeEventListener('open', handleOpen);
-                wsInstance.removeEventListener('close', handleClose);
-                wsInstance.removeEventListener('error', handleError);
-            }
+            ws.removeEventListener('message', handleWebSocketMessage);
         };
-    }, [webSocketRef, onResize]);
+    }, [webSocketRef, handleWebSocketMessage]);
 
     // 渲染组件
     return (
         <div
-            className="rdp-terminal-container"
+            className={`${styles.rdpTerminal} ${isFullscreen ? styles.fullscreenContainer : ''}`}
             ref={containerRef}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
@@ -202,11 +184,11 @@ const RdpTerminal: React.FC<RdpTerminalProps> = ({
             {/* RDP显示区域 */}
             <div
                 ref={displayRef}
-                className="rdp-display-area"
+                className={styles.rdpDisplayArea}
             >
                 {/* 连接状态显示 */}
                 {isConnecting && (
-                    <div className="rdp-status-overlay">
+                    <div className={styles.rdpStatusOverlay}>
                         <Spin size="large" />
                         <Text style={{ color: '#fff', marginTop: 16 }}>正在连接到RDP服务器...</Text>
                     </div>
@@ -214,7 +196,7 @@ const RdpTerminal: React.FC<RdpTerminalProps> = ({
 
                 {/* 错误状态显示 */}
                 {error && (
-                    <div className="rdp-error-overlay">
+                    <div className={styles.rdpErrorOverlay}>
                         <Text type="danger" style={{ fontSize: 16 }}>{error}</Text>
                         <Button
                             type="primary"
@@ -230,7 +212,7 @@ const RdpTerminal: React.FC<RdpTerminalProps> = ({
 
             {/* 控制面板 */}
             {showControls && (
-                <div className="rdp-controls">
+                <div className={styles.terminalControls}>
                     <Space>
                         <Tooltip title="刷新">
                             <Button

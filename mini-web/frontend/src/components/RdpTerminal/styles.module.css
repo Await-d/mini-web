@@ -1,3 +1,122 @@
+.rdpTerminal {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background-color: #1e1e1e;
+  overflow: hidden;
+}
+
+.terminalControls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 100;
+  display: flex;
+  gap: 8px;
+  background-color: rgba(0, 0, 0, 0.5);
+  padding: 5px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: opacity 0.3s ease;
+}
+
+.rdpTerminal:not(:hover) .terminalControls {
+  opacity: 0.3;
+}
+
+.rdpTerminal:hover .terminalControls {
+  opacity: 1;
+}
+
+.infoPanel {
+  margin-bottom: 10px;
+  padding: 10px;
+  background-color: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+  color: #fff;
+}
+
+.fullscreenContainer {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 9999 !important;
+  background-color: #000 !important;
+}
+
+/* 新增RDP特定样式 */
+.rdpDisplayArea {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background-color: #000;
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.rdpStatusOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 10;
+}
+
+.rdpErrorOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 10;
+}
+
+.rdpErrorMessage {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #ff4d4f;
+  font-size: 16px;
+  text-align: center;
+  padding: 20px;
+}
+
+/* 确保当前活动的RDP容器显示 */
+.visible {
+  display: block !important;
+  visibility: visible !important;
+  z-index: 10 !important;
+  opacity: 1 !important;
+}
+
+/* 确保非活动的RDP容器隐藏 */
+.hidden {
+  display: none !important;
+  visibility: hidden !important;
+  z-index: -999 !important;
+  opacity: 0 !important;
+}
+
+/* 以下是原有其他样式 */
 .graphicalTerminal {
   width: 100%;
   height: 100%;
@@ -112,16 +231,6 @@
   color: #ff4d4f;
 }
 
-.rdpTerminalContainer {
-  width: 100%;
-  height: 100%;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  background-color: #000;
-  overflow: hidden;
-}
-
 .rdpControls {
   position: absolute;
   top: 10px;
@@ -225,14 +334,226 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background-color: #52c41a; /* 连接状态绿色 */
+  background-color: #52c41a;
+}
+
+.connecting .statusDot {
+  background-color: #faad14;
+  animation: pulse 1.5s infinite;
 }
 
 .disconnected .statusDot {
-  background-color: #ff4d4f; /* 断开状态红色 */
+  background-color: #ff4d4f;
 }
 
 .latencyInfo {
-  color: #faad14;
-  margin-left: 4px;
+  margin-left: 8px;
+  font-size: 11px;
+  color: #bfbfbf;
+}
+
+/* 响应式样式 */
+@media (max-width: 768px) {
+  .terminalControls {
+    bottom: 10px;
+    top: auto;
+    right: 10px;
+  }
+}
+
+/* 容器样式，用于TerminalContainers组件 */
+.terminalContainers {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.terminalContainer {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.rdpContainer {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.graphicalTerminalContainer {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.xtermPlaceholder {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* 终端包装器样式 */
+.terminalConnectionWrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.rdpTerminalContainer {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background-color: #000;
+}
+
+.rdpHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background-color: #1e1e1e;
+  border-bottom: 1px solid #333;
+}
+
+.rdpHeaderInfo {
+  display: flex;
+  align-items: center;
+  color: #fff;
+  gap: 8px;
+}
+
+.rdpHeaderActions {
+  display: flex;
+  gap: 8px;
+}
+
+.statusBadge {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.connected {
+  background-color: #52c41a;
+}
+
+.connecting {
+  background-color: #faad14;
+  animation: pulse 1.5s infinite;
+}
+
+.disconnected {
+  background-color: #ff4d4f;
+}
+
+.displayArea {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rdpImage {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border: none;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+.fullScreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
+  background-color: #000;
+}
+
+.loadingOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.8);
+  z-index: 100;
+  color: white;
+}
+
+.errorOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.9);
+  z-index: 100;
+  color: white;
+  padding: 20px;
+  text-align: center;
+}
+
+.errorMessage {
+  margin: 10px 0;
+  color: #ff6b6b;
+  max-width: 80%;
+}
+
+.controlButton {
+  background-color: transparent;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.3s;
+}
+
+.controlButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.controlButton:active {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.6;
+  }
 }

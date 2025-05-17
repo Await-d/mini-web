@@ -50,9 +50,50 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  background-color: rgba(30, 30, 30, 0.9);
+  background-color: rgba(0, 0, 0, 0.7);
   z-index: 100;
   color: white;
+  flex-direction: column;
+}
+
+.errorText {
+  margin-top: 12px;
+  color: white;
+  font-size: 14px;
+}
+
+.terminalConnectionWrapper {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 优化布局样式 */
+.terminalLayout {
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+}
+
+.terminalContent {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+  padding-bottom: 0; /* 移除为页脚留出的空间 */
+}
+
+.terminalContainerBox {
+  flex-grow: 1;
+  position: relative;
+  overflow: hidden;
 }
 
 .terminalError {
@@ -111,14 +152,22 @@
   opacity: 0 !important;
 }
 
+/* 终端容器样式 */
+.terminalContainers {
+  position: relative !important;
+  flex: 1 1 auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+/* 可见与隐藏的终端容器 */
 .visible {
-  display: block !important;
+  display: flex !important;
   visibility: visible !important;
   z-index: 10 !important;
-  opacity: 1 !important;
-  position: relative !important;
-  height: 100% !important;
-  width: 100% !important;
 }
 
 .hidden {
@@ -126,13 +175,84 @@
   visibility: hidden !important;
   z-index: -999 !important;
   opacity: 0 !important;
-  pointer-events: none !important;
-  position: absolute !important;
-  top: -9999px !important;
-  left: -9999px !important;
-  height: 0 !important;
-  width: 0 !important;
+}
+
+/* RDP容器样式 */
+.rdpContainer {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background-color: #000 !important;
   overflow: hidden !important;
+}
+
+/* 图形终端容器 */
+.graphicalTerminalContainer {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  background-color: #000 !important;
+  overflow: hidden !important;
+}
+
+/* xterm容器 */
+.xtermPlaceholder {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+/* 终端状态显示覆盖层 */
+.statusOverlay,
+.errorOverlay {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  background-color: rgba(0, 0, 0, 0.7) !important;
+  z-index: 20 !important;
+}
+
+/* 终端控制栏 */
+.terminalHeader {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 8px !important;
+  background-color: #f0f0f0 !important;
+  border-bottom: 1px solid #d9d9d9 !important;
+}
+
+/* RDP显示区域样式 */
+.displayArea {
+  width: 100% !important;
+  height: 100% !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  background-color: #000 !important;
+  background-size: contain !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  z-index: 15 !important;
+}
+
+/* 标签页内容样式 */
+.tabContent {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
 }
 
 .terminalContainer {
@@ -157,16 +277,6 @@
   z-index: 999;
   height: 100vh;
   background-color: #000;
-}
-
-.terminalHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1px 8px; /* 最小化内边距 */
-  background-color: #fff;
-  border-bottom: 1px solid #e8e8e8;
-  height: 28px; /* 进一步减小高度，最小化UI元素 */
 }
 
 .terminalInfo {
@@ -574,7 +684,7 @@
   flex: 1;
   overflow: hidden;
   position: relative;
-  padding-bottom: 32px; /* 为页脚留出空间 */
+  padding-bottom: 0; /* 移除为页脚留出的空间 */
 }
 
 /* 终端区域容器 */

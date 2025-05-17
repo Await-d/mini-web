@@ -2,16 +2,15 @@
  * @Author: Await
  * @Date: 2025-05-10 22:19:37
  * @LastEditors: Await
- * @LastEditTime: 2025-05-15 21:47:25
+ * @LastEditTime: 2025-05-17 14:12:40
  * @Description: 终端容器管理组件
  */
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
 import GraphicalTerminal from '../../../components/GraphicalTerminal';
 import RdpTerminal from '../../../components/RdpTerminal';
 import { getTabProtocol, isGraphicalProtocol } from '../utils/protocolHandler';
 import styles from '../styles.module.css';
-import '../Terminal.css';
 
 interface TerminalContainersProps {
     tabs: TerminalTab[];
@@ -26,12 +25,46 @@ const TerminalContainers: React.FC<TerminalContainersProps> = ({
     tabs,
     activeTabKey
 }) => {
+    // 处理RDP调整大小
+    const handleRdpResize = useCallback((tab: TerminalTab, width: number, height: number) => {
+        if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
+            try {
+                const resizeCommand = JSON.stringify({
+                    type: 'resize',
+                    width,
+                    height
+                });
+                tab.webSocketRef.current.send(resizeCommand);
+            } catch (error) {
+                console.error('发送RDP调整大小命令失败:', error);
+            }
+        }
+    }, []);
+
+    // 处理输入数据发送
+    const handleRdpInput = useCallback((tab: TerminalTab, data: string) => {
+        if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
+            try {
+                tab.webSocketRef.current.send(data);
+            } catch (error) {
+                console.error('发送RDP输入数据失败:', error);
+            }
+        }
+    }, []);
+
+    // 当激活标签变化时触发终端就绪事件
     useEffect(() => {
-        console.log('TerminalContainers重新渲染:', { tabsCount: tabs.length, activeTabKey });
-    }, [tabs, activeTabKey]);
+        if (activeTabKey) {
+            // 使用自定义事件通知终端已准备就绪
+            const event = new CustomEvent('terminal-ready', {
+                detail: { tabKey: activeTabKey }
+            });
+            window.dispatchEvent(event);
+        }
+    }, [activeTabKey]);
 
     return (
-        <div className="terminalContainers">
+        <div className={styles.terminalContainers}>
             {tabs.map(tab => {
                 // 获取标签协议
                 const protocol = getTabProtocol(tab);
@@ -39,52 +72,83 @@ const TerminalContainers: React.FC<TerminalContainersProps> = ({
                 const isRdp = protocol === 'rdp';
                 const isVisible = tab.key === activeTabKey;
 
-                // 设置可见性类名
-                const visibilityClass = isVisible ? 'visible' : 'hidden';
+                // 提取connection信息
+                const connectionId = tab.connectionId || 0;
+                const sessionId = tab.sessionId || '';
+
+                // 创建一个唯一id，用于标识DOM元素
+                const terminalDomId = `terminal-element-conn-${connectionId}-session-${sessionId}`;
+
+                // 根据可见性设置CSS类名
+                const visibilityClass = isVisible ? styles.visible : styles.hidden;
 
                 return (
                     <div
                         key={tab.key}
-                        className={`terminal-container ${visibilityClass}`}
+                        className={`${styles.terminalContainer} ${visibilityClass}`}
                         data-key={tab.key}
                         data-protocol={protocol || 'unknown'}
                         data-graphical={isGraphical ? 'true' : 'false'}
+                        data-connection-id={connectionId}
+                        data-session-id={sessionId}
                         style={{
-                            display: isVisible ? 'block' : 'none',
-                            visibility: isVisible ? 'visible' : 'hidden'
+                            visibility: isVisible ? 'visible' : 'hidden',
+                            zIndex: isVisible ? 10 : -1,
+                            height: '100%',
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            overflow: 'hidden'
                         }}
                     >
                         {isRdp ? (
                             // RDP终端
-                            <div className="rdp-container">
+                            <div
+                                id={terminalDomId}
+                                ref={node => {
+                                    if (node && tab.terminalRef) {
+                                        tab.terminalRef.current = node;
+                                    }
+                                }}
+                                className={styles.rdpContainer}
+                                style={{
+                                    height: '100%',
+                                    width: '100%',
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    overflow: 'hidden'
+                                }}
+                            >
                                 <RdpTerminal
                                     webSocketRef={tab.webSocketRef}
-                                    connectionId={tab.connectionId || 0}
-                                    sessionId={tab.sessionId ? tab.sessionId.toString() : 'default'}
-                                    onResize={(width, height) => {
-                                        if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
-                                            try {
-                                                const resizeCommand = JSON.stringify({
-                                                    type: 'resize',
-                                                    width,
-                                                    height
-                                                });
-                                                tab.webSocketRef.current.send(resizeCommand);
-                                            } catch (error) {
-                                                console.error('发送RDP大小调整命令失败:', error);
-                                            }
-                                        }
-                                    }}
-                                    onInput={(data) => {
-                                        if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
-                                            tab.webSocketRef.current.send(data);
-                                        }
-                                    }}
+                                    connectionId={connectionId}
+                                    sessionId={sessionId}
+                                    onResize={(width, height) => handleRdpResize(tab, width, height)}
+                                    onInput={(data) => handleRdpInput(tab, data)}
                                 />
                             </div>
                         ) : isGraphical ? (
                             // 其他图形终端
-                            <div className="graphical-terminal-container">
+                            <div
+                                id={terminalDomId}
+                                ref={node => {
+                                    if (node && tab.terminalRef) {
+                                        tab.terminalRef.current = node;
+                                    }
+                                }}
+                                className={styles.graphicalTerminalContainer}
+                                style={{
+                                    height: '100%',
+                                    width: '100%',
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    overflow: 'hidden'
+                                }}
+                            >
                                 <GraphicalTerminal
                                     protocol={protocol || 'unknown'}
                                     visible={isVisible}
@@ -93,7 +157,23 @@ const TerminalContainers: React.FC<TerminalContainersProps> = ({
                             </div>
                         ) : (
                             // 非图形终端(xterm)
-                            <div className="xterm-placeholder" />
+                            <div
+                                id={terminalDomId}
+                                ref={node => {
+                                    if (node && tab.terminalRef) {
+                                        tab.terminalRef.current = node;
+                                    }
+                                }}
+                                className={styles.xtermPlaceholder}
+                                style={{
+                                    height: '100%',
+                                    width: '100%',
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    overflow: 'hidden'
+                                }}
+                            />
                         )}
                     </div>
                 );

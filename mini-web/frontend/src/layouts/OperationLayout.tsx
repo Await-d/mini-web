@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Tree, Button, Spin, Space, Input, Dropdown, Avatar, Menu, message, Modal } from 'antd';
+import { Layout, Tree, Button, Spin, Space, Input, Dropdown, Avatar, Menu, message, Modal, Segmented } from 'antd';
 import {
   SearchOutlined,
   PlusOutlined,
@@ -90,128 +90,54 @@ const OperationLayout: React.FC = () => {
 
   // 处理连接
   const handleConnect = (connection: Connection) => {
-    // 清除手动关闭标记，允许创建新标签
-    localStorage.removeItem('manually_closed_tabs');
+    // 检查连接是否有效
+    if (!connection || !connection.id) {
+      message.error('连接信息无效');
+      return;
+    }
 
-    message.info(`正在连接到 ${connection.name}...`);
+    // 强制清除所有标签关闭标志
+    localStorage.removeItem('force_closing_last_tab');
+    localStorage.removeItem('all_tabs_closed');
+    localStorage.removeItem('recently_closed_tab');
+    localStorage.removeItem('closing_flags_expiry');
+    localStorage.removeItem('last_tab_close_time');
 
     // 创建会话
     sessionAPI.createSession(connection.id)
       .then(response => {
         if (response.data && response.data.code === 200) {
+          // 会话创建成功
           const sessionId = response.data.data.id;
 
-          // 创建标签键，确保在恢复时可以识别
-          const timestamp = Date.now();
-          const tabKey = `conn-${connection.id}-session-${sessionId}-${timestamp}`;
-
-          // 保存更详细的会话信息到localStorage，便于页面刷新时恢复
-          localStorage.setItem('current_terminal_session', JSON.stringify({
-            connectionId: connection.id,
-            sessionId: sessionId,
-            tabKey: tabKey,
-            connectionProtocol: connection.protocol,
-            connectionName: connection.name,
-            host: connection.host,
-            port: connection.port,
-            username: connection.username,
-            isConnected: false,
-            timestamp: timestamp
-          }));
-
-          // 导航到终端页面，包含连接ID和会话ID作为参数
-          console.log(`【连接】跳转到终端页面: /terminal/${connection.id}?session=${sessionId}`);
-          navigate(`/terminal/${connection.id}?session=${sessionId}`);
-
-          // 为防止创建多个相同的标签，先检查最近是否已经创建过同样的标签
-          const lastConnection = localStorage.getItem('last_created_connection');
-          const now = Date.now();
-          const createConnectionKey = `${connection.id}-${sessionId}`;
-
-          // 检查是否在最近1秒内创建过完全相同的连接
-          if (lastConnection) {
-            try {
-              const { key, timestamp } = JSON.parse(lastConnection);
-              if (key === createConnectionKey && (now - timestamp) < 1000) {
-                console.log(`【连接】跳过创建重复连接: ${createConnectionKey}, 距上次创建仅 ${now - timestamp}ms`);
-                // 仍然导航到终端页面，但是不触发事件创建标签
-                navigate(`/terminal/${connection.id}?session=${sessionId}`);
-                return;
-              }
-            } catch (e) {
-              console.error('解析上次连接信息失败', e);
-            }
+          // 保存会话信息到localStorage
+          try {
+            const sessionInfo = {
+              id: sessionId,
+              connectionId: connection.id,
+              connectionName: connection.name,
+              createdAt: new Date().toISOString()
+            };
+            localStorage.setItem(`session_${sessionId}`, JSON.stringify(sessionInfo));
+          } catch (error) {
+            console.warn('保存会话信息到本地存储失败:', error);
           }
 
-          // 记录这次连接创建
-          localStorage.setItem('last_created_connection', JSON.stringify({
-            key: createConnectionKey,
-            timestamp: now
-          }));
+          // 记录标签创建信息，方便调试
+          console.log(`【树节点连接】创建标签: conn-${connection.id}-session-${sessionId}-${Date.now()}, 连接ID: ${connection.id}, 会话ID: ${sessionId}`);
 
-          // 直接发布会话创建事件，通知相关组件
-          console.log(`【连接】发布会话创建事件: connectionId=${connection.id}, sessionId=${sessionId}, tabKey=${tabKey}`);
-          window.dispatchEvent(new CustomEvent('session-created', {
-            detail: {
-              connectionId: connection.id,
-              sessionId: sessionId,
-              tabKey: tabKey
-            }
-          }));
+          // 导航到终端页面
+          navigate(`/terminal/${connection.id}?session=${sessionId}&forceCreate=true`);
 
-          // 手动触发标签激活事件，确保新标签立即被保存 - 连续触发多次确保一定被处理
-          const triggerActivation = () => {
-            console.log(`【连接】手动触发标签激活事件: tabKey=${tabKey}`);
-            window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-              detail: {
-                tabKey: tabKey,
-                isNewTab: true,
-                fromOperationLayout: true
-              }
-            }));
-
-            // 直接保存到localStorage，确保持久化
-            localStorage.setItem('terminal_active_tab', tabKey);
-            console.log(`【连接】已直接保存活动标签到localStorage: ${tabKey}`);
-
-            // 检查localStorage是否已保存
-            const savedActiveTab = localStorage.getItem('terminal_active_tab');
-            if (savedActiveTab !== tabKey) {
-              console.log(`【连接】持久化异常！localStorage中活动标签为 ${savedActiveTab}，而非预期的 ${tabKey}`);
-              // 强制保存一次
-              localStorage.setItem('terminal_active_tab', tabKey);
-
-              // 获取当前所有标签
-              const tabsJson = localStorage.getItem('terminal_tabs');
-              if (tabsJson) {
-                try {
-                  const tabs = JSON.parse(tabsJson);
-                  // 检查新标签是否已在保存的标签列表中
-                  const hasTab = tabs.some((tab: any) => tab.key === tabKey);
-                  if (!hasTab) {
-                    console.log(`【连接】标签${tabKey}未在已保存标签列表中，将尝试重新保存`);
-                    // 标签激活时，持久化组件会保存完整标签列表
-                  }
-                } catch (e) {
-                  console.error('解析已保存标签失败:', e);
-                }
-              }
-            }
-          };
-
-          // 立即触发一次
-          triggerActivation();
-
-          // 再延迟触发几次，保证一定会生效
-          setTimeout(triggerActivation, 500);
-          setTimeout(triggerActivation, 1000);
-          setTimeout(triggerActivation, 2000);
-          setTimeout(triggerActivation, 3000);
+          // 阻止事件冒泡
+          eventSource?.stopPropagation();
+        } else {
+          message.error('创建会话失败');
         }
       })
       .catch(error => {
         console.error('创建会话失败:', error);
-        message.error('创建会话失败，请稍后再试');
+        message.error('创建会话失败');
       });
   };
 
@@ -362,7 +288,7 @@ const OperationLayout: React.FC = () => {
   const handleSelect = (selectedKeys: React.Key[], info: any) => {
     const node = info.node as TreeNode;
     if (node.isLeaf && node.connection) {
-      console.log("【树节点】用户选择了节点:", node.title, "，连接ID:", node.connection.id);
+      // console.log("【树节点】用户选择了节点:", node.title, "，连接ID:", node.connection.id);
       handleConnect(node.connection);
     }
   };
@@ -510,7 +436,7 @@ const OperationLayout: React.FC = () => {
         collapsedWidth={0}
         trigger={null}
         style={{
-          boxShadow: collapsed ? 'none' : '0 1px 4px rgba(0,0,0,0.1)',
+          boxShadow: collapsed ? 'none' : '0 2px 8px rgba(0,0,0,0.08)',
           overflow: 'auto',
           height: '100vh',
           borderRight: collapsed ? 'none' : '1px solid #f0f0f0',
@@ -518,63 +444,51 @@ const OperationLayout: React.FC = () => {
         }}
       >
         <div style={{
-          padding: 16,
+          padding: '12px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 8
+          gap: '12px'
         }}>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={handleAddConnection}
+            block
+          >
+            新建连接
+          </Button>
           <Search
             placeholder="搜索连接..."
             allowClear
-            enterButton
             onSearch={handleSearch}
           />
-
-          <Space style={{ marginBottom: 8 }}>
-            <Button
-              type="primary"
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={handleAddConnection}
-            >
-              新建连接
-            </Button>
+          <Space size="small">
             <Button
               size="small"
               icon={<ReloadOutlined />}
               onClick={fetchConnections}
               loading={loading}
+              title="刷新连接列表"
             />
             <Button
               size="small"
               icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
               onClick={toggleFullscreen}
+              title={fullscreen ? "退出全屏" : "进入全屏"}
             />
           </Space>
 
-          <Space style={{ marginBottom: 8 }}>
-            <Button
-              type={groupBy === 'protocol' ? 'primary' : 'default'}
-              size="small"
-              onClick={() => setGroupBy('protocol')}
-            >
-              按协议
-            </Button>
-            <Button
-              type={groupBy === 'group' ? 'primary' : 'default'}
-              size="small"
-              onClick={() => setGroupBy('group')}
-            >
-              按分组
-            </Button>
-            <Button
-              type={groupBy === 'all' ? 'primary' : 'default'}
-              size="small"
-              onClick={() => setGroupBy('all')}
-            >
-              全部
-            </Button>
-          </Space>
+          <Segmented
+            options={[
+              { label: '按协议', value: 'protocol' },
+              { label: '按分组', value: 'group' },
+              { label: '全部', value: 'all' },
+            ]}
+            value={groupBy}
+            onChange={(value) => setGroupBy(value as 'protocol' | 'group' | 'all')}
+            block
+            style={{ marginTop: '4px' }}
+          />
         </div>
 
         <div style={{ padding: '0 8px' }}>
@@ -606,13 +520,13 @@ const OperationLayout: React.FC = () => {
                 left: contextMenuPosition.x,
                 top: contextMenuPosition.y,
                 backgroundColor: 'white',
-                boxShadow: '0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08)',
-                borderRadius: '2px',
-                padding: '4px 0'
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                borderRadius: '6px',
+                padding: '8px 0'
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              <Menu>
+              <Menu mode="vertical" style={{ borderRight: 'none' }}>
                 <Menu.Item key="connect" icon={<PlayCircleOutlined />} onClick={() => {
                   closeContextMenu();
                   if (selectedNode.connection) {
@@ -642,7 +556,7 @@ const OperationLayout: React.FC = () => {
           alignItems: 'center',
           justifyContent: 'space-between',
           borderBottom: '1px solid #f0f0f0',
-          height: 36 /* 更紧凑的高度 */
+          height: 36
         }}>
           <Button
             type="text"
@@ -695,7 +609,7 @@ const OperationLayout: React.FC = () => {
         </Header>
 
         <Content style={{
-          height: 'calc(100vh - 36px)', /* 匹配新的头部高度 */
+          height: 'calc(100vh - 36px)',
           overflow: 'auto',
           background: '#f0f2f5',
           position: 'relative',

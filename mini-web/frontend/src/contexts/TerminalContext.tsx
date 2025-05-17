@@ -7,6 +7,90 @@ import { FitAddon } from 'xterm-addon-fit';
 import { SearchAddon } from 'xterm-addon-search';
 import { type Connection, sessionAPI } from '../services/api';
 
+// 跟踪已关闭或正在关闭的会话，避免重复关闭请求
+const closingSessionsSet = new Set<number>();
+
+// 安全关闭会话，避免重复请求
+const closeSessionSafely = async (sessionId?: number) => {
+  if (!sessionId) return;
+
+  // 如果会话已在关闭列表中，跳过
+  if (closingSessionsSet.has(sessionId)) {
+    console.log(`【会话关闭】会话 ${sessionId} 已在关闭列表中，不重复关闭`);
+    return;
+  }
+
+  // 添加到关闭列表
+  closingSessionsSet.add(sessionId);
+
+  try {
+    await sessionAPI.closeSession(sessionId);
+    console.log(`【会话关闭】成功关闭会话 ${sessionId}`);
+  } catch (err) {
+    console.error(`【会话关闭】关闭会话 ${sessionId} 失败:`, err);
+    // 即使失败也假定会话已关闭或将被关闭，以防止重复请求
+  } finally {
+    // 设置一个定时器来清理记录，以允许未来可能的重用
+    setTimeout(() => {
+      closingSessionsSet.delete(sessionId);
+    }, 10000); // 10秒后移除记录
+  }
+};
+
+// 安全关闭WebSocket的辅助函数
+const safelyCloseWebSocket = (ws: WebSocket, sessionId?: number) => {
+  try {
+    // 检查WebSocket是否有效
+    if (!ws) return;
+
+    // 检查WebSocket状态并适当处理
+    switch (ws.readyState) {
+      case WebSocket.CONNECTING: // 0 - 连接尚未建立
+        console.log(`WebSocket处于CONNECTING状态，直接关闭而不发送消息`);
+        try {
+          // 对于CONNECTING状态，不要调用close()方法，避免触发错误
+          // 而是简单地让它静默失败，后端会自动清理过期连接
+          // ws.close() 可能会引发"WebSocket is closed before the connection is established"错误
+        } catch (err) {
+          console.warn(`关闭CONNECTING状态的WebSocket失败:`, err);
+        }
+        break;
+
+      case WebSocket.OPEN: // 1 - 连接已建立，可以通信
+        console.log(`WebSocket处于OPEN状态，发送终止消息并关闭`);
+        if (sessionId) {
+          try {
+            ws.send(JSON.stringify({ type: 'terminate', sessionId }));
+          } catch (err) {
+            console.warn(`发送终止消息失败:`, err);
+          }
+        }
+        try {
+          ws.close();
+        } catch (err) {
+          console.warn(`关闭OPEN状态的WebSocket失败:`, err);
+        }
+        break;
+
+      case WebSocket.CLOSING: // 2 - 连接正在关闭
+      case WebSocket.CLOSED:  // 3 - 连接已关闭或无法打开
+        console.log(`WebSocket处于${ws.readyState === WebSocket.CLOSING ? 'CLOSING' : 'CLOSED'}状态，不执行任何操作`);
+        // 不需要任何操作，连接已经在关闭或已关闭
+        break;
+
+      default:
+        console.log(`WebSocket处于未知状态(${ws.readyState})，尝试关闭`);
+        try {
+          ws.close();
+        } catch (err) {
+          console.warn(`关闭未知状态WebSocket失败:`, err);
+        }
+    }
+  } catch (err) {
+    console.error(`关闭WebSocket时发生错误:`, err);
+  }
+};
+
 // 定义终端标签类型
 export interface TerminalTab {
   key: string;
@@ -32,6 +116,7 @@ export interface TerminalTab {
   networkLatency?: number | null; // 添加网络延迟属性
   terminalMode?: string; // 添加终端模式属性
   isGraphical?: boolean; // 添加是否图形化属性
+  forceCreate?: boolean; // 添加强制创建标志
   // RDP特有属性
   rdpWidth?: number; // RDP窗口宽度
   rdpHeight?: number; // RDP窗口高度
@@ -92,14 +177,22 @@ const updateTabsInLocalStorage = (tabs: TerminalTab[], activeKey: string) => {
 
     // 创建可序列化的标签数组，保存所有标签
     const serializableTabs = tabs.map(tab => {
+      // 确保使用统一的标签键格式
+      let tabKey = tab.key;
+      if (tabKey.startsWith('tab-') && tab.connectionId && tab.sessionId) {
+        const timestamp = tabKey.split('-').pop() || Date.now().toString();
+        tabKey = `conn-${tab.connectionId}-session-${tab.sessionId}-${timestamp}`;
+        console.log(`【存储】转换旧格式标签键: ${tab.key} -> ${tabKey}`);
+      }
+
       // 针对每个标签提取必要信息
       return {
-        key: tab.key,
+        key: tabKey, // 使用统一格式的键
         title: tab.title,
         connectionId: tab.connectionId,
         sessionId: tab.sessionId,
         isConnected: tab.isConnected,
-        timestamp: parseInt(tab.key.split('-').pop() || '0', 10),
+        timestamp: parseInt(tabKey.split('-').pop() || '0', 10),
         protocol: tab.protocol,
         hostname: tab.hostname,
         port: tab.port,
@@ -124,6 +217,77 @@ const updateTabsInLocalStorage = (tabs: TerminalTab[], activeKey: string) => {
   }
 };
 
+// 清理函数，用于清除localStorage中的旧格式标签页
+const cleanupOldFormatTabs = () => {
+  try {
+    // 首先检查是否有关闭标志，如果有，应该跳过处理并清理标签数据
+    const forceClosingLastTab = localStorage.getItem('force_closing_last_tab') === 'true';
+    const allTabsClosed = localStorage.getItem('all_tabs_closed') === 'true';
+
+    if (forceClosingLastTab || allTabsClosed) {
+      console.log('【清理】检测到标签关闭标志，跳过旧格式转换并清理标签数据');
+      localStorage.removeItem('terminal_tabs');
+      return;
+    }
+
+    const savedTabsRaw = localStorage.getItem('terminal_tabs');
+    if (savedTabsRaw) {
+      const savedTabs = JSON.parse(savedTabsRaw);
+      if (Array.isArray(savedTabs) && savedTabs.length > 0) {
+        let hasOldFormat = false;
+
+        // 检查是否有旧格式标签
+        const cleanedTabs = savedTabs.map(tab => {
+          if (tab.key.startsWith('tab-') && tab.connectionId && tab.sessionId) {
+            hasOldFormat = true;
+            const timestamp = tab.key.split('-').pop() || Date.now().toString();
+            return {
+              ...tab,
+              key: `conn-${tab.connectionId}-session-${tab.sessionId}-${timestamp}`
+            };
+          }
+          return tab;
+        });
+
+        // 如果有旧格式标签，更新localStorage
+        if (hasOldFormat) {
+          console.log('【清理】将旧格式标签转换为新格式');
+          localStorage.setItem('terminal_tabs', JSON.stringify(cleanedTabs));
+        }
+      }
+    }
+  } catch (error) {
+    console.error('清理旧格式标签失败:', error);
+  }
+};
+
+// 添加清除所有标签关闭标志的函数
+const clearAllTabClosingFlags = () => {
+  localStorage.removeItem('force_closing_last_tab');
+  localStorage.removeItem('all_tabs_closed');
+  localStorage.removeItem('recently_closed_tab');
+  console.log('【标签标志】强制清除所有标签关闭标志');
+};
+
+// 在合适的位置添加检查标签关闭状态的辅助函数
+const isTabClosingActive = (): boolean => {
+  const forceClosingLastTab = localStorage.getItem('force_closing_last_tab') === 'true';
+  const allTabsClosed = localStorage.getItem('all_tabs_closed') === 'true';
+  const recentlyClosedTab = localStorage.getItem('recently_closed_tab');
+
+  // 判断是否设置了过期时间
+  const flagExpiry = parseInt(localStorage.getItem('closing_flags_expiry') || '0', 10);
+  const now = Date.now();
+
+  // 如果过期时间已到，自动清除标志
+  if (flagExpiry > 0 && now > flagExpiry) {
+    clearAllTabClosingFlags();
+    return false;
+  }
+
+  return forceClosingLastTab || allTabsClosed || !!recentlyClosedTab;
+};
+
 // 创建Provider组件
 export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // 定义reducer函数
@@ -132,17 +296,62 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     switch (action.type) {
       case 'ADD_TAB': {
-        // 检查是否已存在相同key的标签
+        // 检查是否有强制创建标志
+        const forceCreate = action.payload.forceCreate === true;
+
+        // 如果是强制创建，清除所有关闭标志
+        if (forceCreate) {
+          console.log(`【标签添加】检测到强制创建标志，清除所有关闭标志`);
+          // 清除所有关闭标志
+          localStorage.removeItem('force_closing_last_tab');
+          localStorage.removeItem('all_tabs_closed');
+          localStorage.removeItem('recently_closed_tab');
+          localStorage.removeItem('closing_flags_expiry');
+          localStorage.removeItem('last_tab_close_time');
+        }
+        // 如果不是强制创建，才检查关闭标志
+        else {
+          // 检查是否处于标签关闭状态
+          const forceClosingLastTab = localStorage.getItem('force_closing_last_tab') === 'true';
+          const allTabsClosed = localStorage.getItem('all_tabs_closed') === 'true';
+          const recentlyClosedTab = localStorage.getItem('recently_closed_tab');
+
+          if (forceClosingLastTab || allTabsClosed || recentlyClosedTab) {
+            console.log(`【标签添加】检测到标签关闭标志，跳过添加标签`);
+            return state;
+          }
+        }
+
+        // 首先检查是否已有相同connectionId和sessionId的标签
+        const existingTabWithSameConnection = state.tabs.find(
+          t => t.connectionId === action.payload.connectionId &&
+            t.sessionId === action.payload.sessionId
+        );
+
+        if (existingTabWithSameConnection) {
+          // 如果已存在相同连接和会话的标签，激活它而不是创建新标签
+          console.log(`【标签去重】发现已存在的标签（相同连接ID和会话ID）: ${existingTabWithSameConnection.key}`);
+          newState = {
+            ...state,
+            activeTabKey: existingTabWithSameConnection.key,
+          };
+          terminalStateRef.current = newState;
+          return newState;
+        }
+
+        // 以下是原有的逻辑
         const existingTabIndex = state.tabs.findIndex(tab => tab.key === action.payload.key);
         let newTabs = [...state.tabs];
         let isNewTab = false;
 
         if (existingTabIndex >= 0) {
-          // 如果标签已存在，更新它而不是添加新标签
+          // 如果标签已存在，激活它，但通常不应通过ADD_TAB来激活，而是通过SET_ACTIVE_TAB
+          // 这里我们假设如果key相同，则可能是更新或重新打开的意图，所以先更新信息
           const updatedTab = {
             ...state.tabs[existingTabIndex],
-            ...action.payload,
-            // 保留原有引用，除非新标签提供了新的引用
+            ...action.payload, // 使用新的payload覆盖，除了ref相关的可以保留旧的
+            title: action.payload.title || state.tabs[existingTabIndex].title, // 确保标题更新
+            isConnected: action.payload.isConnected !== undefined ? action.payload.isConnected : state.tabs[existingTabIndex].isConnected,
             terminalRef: action.payload.terminalRef || state.tabs[existingTabIndex].terminalRef,
             xtermRef: action.payload.xtermRef || state.tabs[existingTabIndex].xtermRef,
             webSocketRef: action.payload.webSocketRef || state.tabs[existingTabIndex].webSocketRef,
@@ -150,230 +359,274 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
             searchAddonRef: action.payload.searchAddonRef || state.tabs[existingTabIndex].searchAddonRef,
             messageQueueRef: action.payload.messageQueueRef || state.tabs[existingTabIndex].messageQueueRef,
           };
-
           newTabs[existingTabIndex] = updatedTab;
+          newState = {
+            ...state,
+            tabs: newTabs,
+            activeTabKey: action.payload.key, // 激活这个被"重新添加/更新"的标签
+          };
         } else {
-          // 确保在添加前深度验证标签数据
-          const newTab = {
+          const newTabPayload = {
             ...action.payload,
-            // 确保所有必要的引用存在
             terminalRef: action.payload.terminalRef || createRef<HTMLDivElement>(),
             xtermRef: action.payload.xtermRef || createRef<Terminal>(),
-            webSocketRef: action.payload.webSocketRef || createRef<WebSocket>(),
+            webSocketRef: action.payload.webSocketRef || createRef<WebSocket | null>(),
             fitAddonRef: action.payload.fitAddonRef || createRef<FitAddon>(),
             searchAddonRef: action.payload.searchAddonRef || createRef<SearchAddon>(),
-            messageQueueRef: action.payload.messageQueueRef || createRef<string[]>(),
-            isConnected: action.payload.isConnected || false,
+            messageQueueRef: action.payload.messageQueueRef || createRef<string[] | null>(),
+            isConnected: action.payload.isConnected !== undefined ? action.payload.isConnected : false, // 初始连接状态为false
+            // 确保其他从payload传递的属性被正确设置
+            connectionId: action.payload.connectionId,
+            sessionId: action.payload.sessionId,
+            connection: action.payload.connection,
+            protocol: action.payload.protocol,
+            hostname: action.payload.hostname,
+            port: action.payload.port,
+            username: action.payload.username,
+            isGraphical: action.payload.isGraphical,
+            rdpSettings: action.payload.rdpSettings,
           };
-
-          // 在新的标签数组中添加新标签
-          newTabs.push(newTab);
+          newTabs.push(newTabPayload);
           isNewTab = true;
+          newState = {
+            ...state,
+            tabs: newTabs,
+            activeTabKey: action.payload.key,
+          };
         }
-
-        newState = {
-          ...state,
-          tabs: newTabs,
-          activeTabKey: action.payload.key, // 设置为活动标签
-        };
 
         terminalStateRef.current = newState;
-
-        // 保存新创建的标签ID到localStorage
-        localStorage.setItem('terminal_last_created_tab', action.payload.key);
-
-        // 保存活动标签
-        localStorage.setItem('terminal_active_tab', action.payload.key);
-
-        // 更新localStorage
         updateTabsInLocalStorage(newState.tabs, newState.activeTabKey);
-
-        // 触发标签激活事件
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-            detail: {
-              tabKey: action.payload.key,
-              isNewTab: true,
-              fromReducer: true
-            }
+            detail: { tabKey: action.payload.key, isNewTab, fromReducer: true }
           }));
+          if (isNewTab) {
+            window.dispatchEvent(new CustomEvent('terminal-tab-added', {
+              detail: { tab: action.payload, activeTabKey: action.payload.key, totalTabs: newTabs.length }
+            }));
+          }
         }
-
-        // 触发标签添加事件
-        if (isNewTab && typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('terminal-tab-added', {
-            detail: {
-              tab: action.payload,
-              activeTabKey: action.payload.key,
-              totalTabs: newTabs.length
-            }
-          }));
-        }
-
         return newState;
       }
 
       case 'UPDATE_TAB': {
         const { key, updates } = action.payload;
         const existingTabIndex = state.tabs.findIndex(tab => tab.key === key);
-
-        if (existingTabIndex === -1) {
-          console.warn(`无法更新标签 ${key}：找不到该标签`);
-          return state;
-        }
-
-        const updatedTab = {
-          ...state.tabs[existingTabIndex],
-          ...updates,
-        };
-
+        if (existingTabIndex === -1) return state;
         const updatedTabs = [...state.tabs];
-        updatedTabs[existingTabIndex] = updatedTab;
-
-        newState = {
-          ...state,
-          tabs: updatedTabs,
-        };
-
+        updatedTabs[existingTabIndex] = { ...updatedTabs[existingTabIndex], ...updates };
+        newState = { ...state, tabs: updatedTabs };
         terminalStateRef.current = newState;
-
-        // 更新localStorage
         updateTabsInLocalStorage(newState.tabs, newState.activeTabKey);
-
         return newState;
       }
 
       case 'CLOSE_TAB': {
-        // 找到要关闭的标签
         const tabIndex = state.tabs.findIndex(tab => tab.key === action.payload);
-        if (tabIndex === -1) {
-          // 标签不存在，返回原状态
-          return state;
-        }
-
-        // 保存关闭前的标签信息，用于触发事件
+        if (tabIndex === -1) return state;
         const closedTab = state.tabs[tabIndex];
 
-        // 创建新的标签数组，排除要关闭的标签
-        const updatedTabs = state.tabs.filter(tab => tab.key !== action.payload);
+        // 检查是否是最后一个标签
+        const isLastTab = state.tabs.length === 1;
+        if (isLastTab) {
+          console.log(`【标签关闭】检测到关闭最后一个标签: ${action.payload}`);
+          // 设置标志以防止URL变化触发标签创建
+          localStorage.setItem('force_closing_last_tab', 'true');
+          localStorage.setItem('all_tabs_closed', 'true');
+          // 记录关闭时间，用于自动超时
+          localStorage.setItem('last_tab_close_time', Date.now().toString());
+          // 设置标志过期时间 - 10秒后自动失效
+          localStorage.setItem('closing_flags_expiry', (Date.now() + 10000).toString());
 
-        // 如果关闭的是当前活动标签，需要更新活动标签
+          // 立即清除标签数据，防止重新创建
+          localStorage.removeItem('terminal_tabs');
+          localStorage.removeItem('terminal_active_tab');
+        }
+
+        // 记录正在关闭的标签信息
+        localStorage.setItem('recently_closed_tab', action.payload);
+
+        // 清理 WebSocket, xterm 等资源
+        try {
+          if (closedTab.webSocketRef?.current) {
+            safelyCloseWebSocket(closedTab.webSocketRef.current, closedTab.sessionId);
+          }
+
+          if (closedTab.xtermRef?.current) {
+            closedTab.fitAddonRef?.current?.dispose();
+            closedTab.searchAddonRef?.current?.dispose();
+            closedTab.xtermRef.current.dispose();
+          }
+
+          // 清理会话相关的localStorage存储
+          if (closedTab.sessionId) {
+            // 使用安全的会话关闭函数
+            closeSessionSafely(closedTab.sessionId);
+
+            // 清理该会话的localStorage存储
+            localStorage.removeItem(`session_${closedTab.sessionId}`);
+          }
+
+          // 记录关闭的标签信息，用于防止自动重新创建
+          console.log(`【标签清理】关闭标签 ${action.payload} 并清理相关资源`);
+        } catch (e) {
+          console.error(`关闭标签资源时出错 ${action.payload}:`, e);
+        }
+
+        const updatedTabs = state.tabs.filter(tab => tab.key !== action.payload);
         let newActiveTabKey = state.activeTabKey;
         if (state.activeTabKey === action.payload) {
-          // 选择最后一个标签作为新的活动标签
-          newActiveTabKey = updatedTabs.length > 0
-            ? updatedTabs[updatedTabs.length - 1].key
-            : 'no-tabs';
+          newActiveTabKey = updatedTabs.length > 0 ? updatedTabs[updatedTabs.length - 1].key : 'no-tabs';
         }
 
-        newState = {
-          ...state,
-          tabs: updatedTabs,
-          activeTabKey: newActiveTabKey,
-        };
+        // 如果这是最后一个被关闭的标签，执行更彻底的清理
+        if (updatedTabs.length === 0) {
+          console.log('【标签清理】关闭最后一个标签，执行彻底清理');
 
+          // 清理所有标签相关的localStorage
+          localStorage.removeItem('terminal_tabs');
+          localStorage.removeItem('terminal_active_tab');
+
+          // 保留recently_closed_tab标志，防止立即重新创建
+          // 但设置定时器在5秒后清除
+          setTimeout(() => {
+            localStorage.removeItem('recently_closed_tab');
+          }, 5000);
+
+          // 设置防止自动恢复的标志
+          localStorage.setItem('all_tabs_closed', 'true');
+          localStorage.setItem('force_closing_last_tab', 'true');
+
+          // 查找并清理所有会话和终端相关的存储
+          const keysToRemove = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (
+              key.startsWith('session_') ||
+              key.startsWith('terminal_') ||
+              key.includes('tab-') ||
+              key.includes('conn-')
+            )) {
+              keysToRemove.push(key);
+            }
+          }
+
+          // 删除找到的所有相关键
+          keysToRemove.forEach(key => {
+            if (key !== 'all_tabs_closed' && key !== 'force_closing_last_tab' && key !== 'recently_closed_tab') {
+              localStorage.removeItem(key);
+            }
+          });
+
+          // 延迟检查并移除force_closing_last_tab标志，但保留all_tabs_closed标志
+          setTimeout(() => {
+            // 再次检查当前是否确实没有标签了
+            if (terminalStateRef.current && terminalStateRef.current.tabs.length === 0) {
+              console.log('【标签清理】确认所有标签已完全关闭，安全移除force_closing_last_tab标志');
+              // 标签确实已关闭，可以安全移除标志
+              localStorage.removeItem('force_closing_last_tab');
+            } else {
+              console.log('【标签清理】检测到仍有标签存在，继续保持关闭标志');
+              // 如果依然有标签，说明可能有新的恢复或创建逻辑执行，保持标志不变
+            }
+          }, 1000);
+        } else {
+          // 还有其他标签，只更新标签状态
+          updateTabsInLocalStorage(updatedTabs, newActiveTabKey);
+        }
+
+        newState = { ...state, tabs: updatedTabs, activeTabKey: newActiveTabKey };
         terminalStateRef.current = newState;
 
-        // 更新localStorage
-        updateTabsInLocalStorage(newState.tabs, newState.activeTabKey);
-
-        // 触发标签关闭事件
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('terminal-tab-removed', {
-            detail: {
-              tabKey: action.payload,
-              tabData: {
-                key: closedTab.key,
-                connectionId: closedTab.connectionId,
-                sessionId: closedTab.sessionId,
-                timestamp: Date.now()
-              },
-              newActiveTabKey,
-              remainingTabs: updatedTabs.length
-            }
+            detail: { tabKey: action.payload, tabData: { key: closedTab.key, connectionId: closedTab.connectionId, sessionId: closedTab.sessionId, timestamp: Date.now() }, newActiveTabKey, remainingTabs: updatedTabs.length }
           }));
         }
-
         return newState;
       }
 
       case 'SET_ACTIVE_TAB': {
-        // 如果新的活动标签与当前活动标签相同，则不需要更新
-        if (state.activeTabKey === action.payload) {
-          return state;
-        }
-
-        // 设置活动标签
-        newState = {
-          ...state,
-          activeTabKey: action.payload,
-        };
-
+        if (state.activeTabKey === action.payload) return state;
+        newState = { ...state, activeTabKey: action.payload };
         terminalStateRef.current = newState;
-
-        // 更新活动标签到localStorage
         localStorage.setItem('terminal_active_tab', action.payload);
-
-        // 更新整体标签状态
-        updateTabsInLocalStorage(state.tabs, action.payload);
-
-        // 触发标签切换事件
+        updateTabsInLocalStorage(state.tabs, action.payload); // 这里用 state.tabs 因为只改变 activeKey
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-            detail: {
-              tabKey: action.payload,
-              previousTabKey: state.activeTabKey,
-              totalTabs: state.tabs.length
-            }
+            detail: { tabKey: action.payload, previousTabKey: state.activeTabKey, totalTabs: state.tabs.length }
           }));
         }
-
         return newState;
       }
 
       case 'CLEAR_TABS': {
-        // 尝试关闭所有WebSocket连接
         state.tabs.forEach(tab => {
+          if (tab.sessionId) {
+            closeSessionSafely(tab.sessionId);
+
+            // 清理该会话的localStorage存储
+            localStorage.removeItem(`session_${tab.sessionId}`);
+          }
           try {
-            if (tab.webSocketRef?.current &&
-              tab.webSocketRef.current.readyState !== WebSocket.CLOSED &&
-              tab.webSocketRef.current.readyState !== WebSocket.CLOSING) {
-              tab.webSocketRef.current.close();
+            if (tab.webSocketRef?.current) {
+              safelyCloseWebSocket(tab.webSocketRef.current, tab.sessionId);
             }
 
             if (tab.xtermRef?.current) {
-              // 先移除插件
-              if (tab.fitAddonRef?.current) {
-                tab.fitAddonRef.current.dispose();
-              }
-
-              if (tab.searchAddonRef?.current) {
-                tab.searchAddonRef.current.dispose();
-              }
-
-              // 销毁终端实例
+              tab.fitAddonRef?.current?.dispose();
+              tab.searchAddonRef?.current?.dispose();
               tab.xtermRef.current.dispose();
             }
           } catch (e) {
-            console.error(`清理标签资源失败:`, e);
+            console.error(`清理所有标签资源时出错:`, e);
           }
         });
 
-        // 创建空状态
-        newState = {
-          ...state,
-          tabs: [],
-          activeTabKey: '',
-        };
-
-        // 更新terminalStateRef
-        terminalStateRef.current = newState;
-
-        // 清除localStorage中的标签相关数据
+        // 清理所有标签和会话相关的localStorage存储
         localStorage.removeItem('terminal_tabs');
         localStorage.removeItem('terminal_active_tab');
-        localStorage.removeItem('terminal_last_created_tab');
+        localStorage.removeItem('recently_closed_tab');
+
+        // 设置标志，防止页面刷新时重新创建标签
         localStorage.setItem('all_tabs_closed', 'true');
+        localStorage.setItem('force_closing_last_tab', 'true');
+
+        // 查找并清理所有会话和终端相关的存储
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (
+            key.startsWith('session_') ||
+            key.startsWith('terminal_') ||
+            key.includes('tab-') ||
+            key.includes('conn-')
+          )) {
+            keysToRemove.push(key);
+          }
+        }
+
+        // 移除找到的相关键
+        keysToRemove.forEach(key => {
+          if (key !== 'all_tabs_closed' && key !== 'force_closing_last_tab') {
+            localStorage.removeItem(key);
+          }
+        });
+
+        // 延迟移除force_closing_last_tab标志，但保留all_tabs_closed标志
+        setTimeout(() => {
+          localStorage.removeItem('force_closing_last_tab');
+        }, 1000);
+
+        newState = { ...state, tabs: [], activeTabKey: 'no-tabs' };
+        terminalStateRef.current = newState;
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('terminal-tabs-cleared', {
+            detail: { timestamp: Date.now() }
+          }));
+        }
 
         return newState;
       }
@@ -383,244 +636,427 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
 
-  // 初始化状态
   const initialState: TerminalContextState = {
     tabs: [],
     activeTabKey: 'no-tabs',
   };
-
-  // 使用useReducer管理状态
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  // 更新全局状态引用
   useEffect(() => {
     terminalStateRef.current = state;
   }, [state]);
 
-  // 添加标签
-  const addTab = useCallback((tab: TerminalTab) => {
-    // 确保标签有一个唯一的key
-    if (!tab.key) {
-      tab.key = `tab-${Date.now()}`;
-    }
-
-    // 检查标签是否已存在，如果存在则不添加
-    const exists = state.tabs.some(t => t.key === tab.key);
-    if (exists) {
+  // 修改openOrActivateTab函数
+  const openOrActivateTab = useCallback((tabData: any) => {
+    // 首先检查是否处于标签关闭状态，如果是则跳过创建
+    if (isTabClosingActive()) {
+      console.log(`【标签创建】检测到标签关闭标志，跳过标签创建`);
       return;
     }
 
-    // 发送添加标签事件
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('terminal-tab-added', {
-        detail: { tab }
-      }));
+    // 检查标签键格式，如果没有或是旧格式，重新生成
+    let standardTabKey = tabData.tabKey;
+    if (!standardTabKey || standardTabKey.startsWith('tab-')) {
+      // 使用统一的格式重新生成标签键
+      const timestamp = tabData.timestamp || Date.now();
+      standardTabKey = `conn-${tabData.connectionId}-session-${tabData.sessionId}-${timestamp}`;
+      console.log(`【标签格式】标准化标签键: ${tabData.tabKey || 'undefined'} -> ${standardTabKey}`);
     }
 
-    // 修改localStorage以表示有活动的标签页
+    // 首先检查是否已存在具有相同connectionId和sessionId的标签，无论键是什么
+    const existingTabBySameConnection = state.tabs.find(t =>
+      t.connectionId === tabData.connectionId &&
+      t.sessionId === tabData.sessionId
+    );
+
+    if (existingTabBySameConnection) {
+      console.log(`【标签激活】找到相同连接和会话的标签: ${existingTabBySameConnection.key}`);
+      // 如果标签已存在，并且当前不是活动标签，则激活它
+      if (state.activeTabKey !== existingTabBySameConnection.key) {
+        dispatch({ type: 'SET_ACTIVE_TAB', payload: existingTabBySameConnection.key });
+      }
+      return;
+    }
+
+    // 然后按键检查标签是否存在
+    const existingTab = state.tabs.find(t => t.key === standardTabKey);
+    if (existingTab) {
+      console.log(`【标签激活】找到相同键的标签: ${existingTab.key}`);
+      // 如果标签已存在，并且当前不是活动标签，则激活它
+      if (state.activeTabKey !== standardTabKey) {
+        dispatch({ type: 'SET_ACTIVE_TAB', payload: standardTabKey });
+      }
+    } else {
+      // 再次检查标签关闭状态，确保安全
+      if (isTabClosingActive()) {
+        console.log(`【标签创建】二次检查发现关闭标志，跳过创建`);
+        return;
+      }
+
+      // 标签不存在，创建新标签
+      console.log(`【标签创建】创建新标签: ${standardTabKey}`);
+      const newTab: TerminalTab = {
+        key: standardTabKey,
+        title: tabData.connectionName || '新终端',
+        connectionId: tabData.connectionId,
+        sessionId: tabData.sessionId,
+        isConnected: false, // 初始设为未连接，连接成功后更新
+        terminalRef: createRef<HTMLDivElement | null>(),
+        xtermRef: createRef<Terminal | null>(),
+        webSocketRef: createRef<WebSocket | null>(), // WebSocket连接将在此之后建立
+        fitAddonRef: createRef<FitAddon | null>(),
+        searchAddonRef: createRef<SearchAddon | null>(),
+        messageQueueRef: createRef<string[] | null>(),
+        protocol: tabData.connectionProtocol,
+        hostname: tabData.host,
+        port: tabData.port,
+        username: tabData.username,
+        isGraphical: tabData.connectionProtocol === 'rdp' || tabData.connectionProtocol === 'vnc',
+      };
+
+      // 先清除关闭标志，然后再添加标签
+      localStorage.removeItem('all_tabs_closed');
+      localStorage.removeItem('force_closing_last_tab');
+      localStorage.removeItem('recently_closed_tab');
+
+      dispatch({ type: 'ADD_TAB', payload: newTab });
+    }
+  }, [state.tabs, state.activeTabKey, dispatch]);
+
+  // 监听来自OperationLayout的打开标签请求
+  useEffect(() => {
+    const handleOpenTerminalTab = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      // 检查是否是强制创建模式
+      const forceCreate = customEvent.detail?.forceCreate === true;
+
+      // 如果是强制创建模式，清除所有关闭标志
+      if (forceCreate) {
+        clearAllTabClosingFlags();
+        console.log('【标签事件】强制创建模式，清除所有关闭标志');
+      } else {
+        // 先检查是否处于标签关闭状态
+        if (isTabClosingActive()) {
+          // 检查上次设置标志的时间是否超过5秒
+          const lastCloseTime = parseInt(localStorage.getItem('last_tab_close_time') || '0', 10);
+          const now = Date.now();
+
+          if (now - lastCloseTime > 5000) {
+            // 超过5秒，自动清除标志
+            clearAllTabClosingFlags();
+            console.log('【标签事件】关闭标志已超时，自动清除');
+          } else {
+            console.log(`【标签事件】检测到标签关闭标志，跳过处理open-terminal-tab事件`);
+            return;
+          }
+        }
+      }
+
+      if (customEvent.detail) {
+        openOrActivateTab(customEvent.detail);
+      }
+    };
+    window.addEventListener('open-terminal-tab', handleOpenTerminalTab);
+    return () => {
+      window.removeEventListener('open-terminal-tab', handleOpenTerminalTab);
+    };
+  }, [openOrActivateTab]);
+
+  // 页面加载时从localStorage恢复状态 (基础版，未包含WebSocket重连)
+  useEffect(() => {
+    // 首先清理localStorage中的旧格式标签页
+    cleanupOldFormatTabs();
+
+    // 检查是否有任何标签关闭的标志
+    const forceClosingLastTab = localStorage.getItem('force_closing_last_tab') === 'true';
+    const allTabsClosed = localStorage.getItem('all_tabs_closed') === 'true';
+
+    if (forceClosingLastTab || allTabsClosed) {
+      console.log(`【标签恢复】检测到标签关闭标志(force_closing_last_tab: ${forceClosingLastTab}, all_tabs_closed: ${allTabsClosed})，不恢复标签`);
+      // 清除所有可能导致重新创建标签的存储
+      localStorage.removeItem('terminal_tabs');
+      localStorage.removeItem('terminal_active_tab');
+      // 不清除关闭标志，保持该标志直到明确创建新标签
+      return;
+    }
+
+    const savedTabsRaw = localStorage.getItem('terminal_tabs');
+    const savedActiveTabKey = localStorage.getItem('terminal_active_tab');
+    let shouldInitialize = true;
+
+    if (state.tabs.length > 0) { // 如果Context中已有标签（例如HMR），则不从localStorage恢复
+      shouldInitialize = false;
+    }
+
+    if (shouldInitialize && savedTabsRaw) {
+      try {
+        // 再次检查，确保在处理过程中没有设置关闭标志
+        if (localStorage.getItem('force_closing_last_tab') === 'true' ||
+          localStorage.getItem('all_tabs_closed') === 'true') {
+          console.log('【标签恢复】在处理过程中检测到关闭标志，中止恢复');
+          localStorage.removeItem('terminal_tabs');
+          localStorage.removeItem('terminal_active_tab');
+          return;
+        }
+
+        const savedTabs: any[] = JSON.parse(savedTabsRaw);
+        if (Array.isArray(savedTabs) && savedTabs.length > 0) {
+          const restoredTabs: TerminalTab[] = savedTabs.map(tabInfo => {
+            // 检查并确保使用统一的标签格式
+            let tabKey = tabInfo.key;
+            // 如果是旧格式（以tab-开头），转换为新格式（conn-前缀）
+            if (tabKey.startsWith('tab-') && tabInfo.connectionId && tabInfo.sessionId) {
+              const timestamp = tabKey.split('-').pop() || Date.now().toString();
+              tabKey = `conn-${tabInfo.connectionId}-session-${tabInfo.sessionId}-${timestamp}`;
+              console.log(`【标签恢复】转换旧格式标签: ${tabInfo.key} -> ${tabKey}`);
+            }
+
+            return {
+              key: tabKey,
+              title: tabInfo.title || '恢复的终端',
+              connectionId: tabInfo.connectionId,
+              sessionId: tabInfo.sessionId,
+              isConnected: false, // 恢复时总是先设为未连接
+              terminalRef: createRef<HTMLDivElement | null>(),
+              xtermRef: createRef<Terminal | null>(),
+              webSocketRef: createRef<WebSocket | null>(),
+              fitAddonRef: createRef<FitAddon | null>(),
+              searchAddonRef: createRef<SearchAddon | null>(),
+              messageQueueRef: createRef<string[] | null>(),
+              protocol: tabInfo.protocol,
+              hostname: tabInfo.hostname,
+              port: tabInfo.port,
+              username: tabInfo.username,
+              connection: tabInfo.connection, // 恢复完整的connection对象
+              isGraphical: tabInfo.protocol === 'rdp' || tabInfo.protocol === 'vnc',
+            };
+          });
+
+          // 最终检查，确保没有设置任何关闭标志
+          if (localStorage.getItem('force_closing_last_tab') === 'true' ||
+            localStorage.getItem('all_tabs_closed') === 'true') {
+            console.log('【标签恢复】在恢复前最终检查检测到关闭标志，中止恢复');
+            localStorage.removeItem('terminal_tabs');
+            localStorage.removeItem('terminal_active_tab');
+            return;
+          }
+
+          // 批量添加恢复的标签，但不立即激活，等待activeKey设置
+          restoredTabs.forEach(tab => {
+            // 直接修改initialState的副本或通过一个特殊的init action
+            // 这里简单地dispatch ADD_TAB，但注意这会触发一些副作用
+            // 一个更好的方法是有一个 'INITIALIZE_TABS' action
+            dispatch({ type: 'ADD_TAB', payload: tab });
+          });
+
+          if (savedActiveTabKey && restoredTabs.some(tab => tab.key === savedActiveTabKey)) {
+            dispatch({ type: 'SET_ACTIVE_TAB', payload: savedActiveTabKey });
+          } else if (restoredTabs.length > 0) {
+            dispatch({ type: 'SET_ACTIVE_TAB', payload: restoredTabs[0].key });
+          }
+
+          // 标签成功恢复后，清除all_tabs_closed标志
+          localStorage.removeItem('all_tabs_closed');
+        }
+      } catch (error) {
+        console.error("恢复标签状态失败:", error);
+        localStorage.removeItem('terminal_tabs');
+        localStorage.removeItem('terminal_active_tab');
+      }
+    }
+    // WebSocket的重连逻辑需要在此之后，例如在Terminal.tsx中检测到tab.webSocketRef为空且应连接时进行
+  }, [dispatch]); // 依赖dispatch，确保只在初始化时运行一次，或者在dispatch变化时（理论上不变）
+
+  // 修改addTab函数
+  const addTab = useCallback((tab: TerminalTab) => {
+    // 检查是否强制创建
+    const forceCreate = tab.forceCreate === true;
+
+    // 如果是强制创建，清除所有关闭标志
+    if (forceCreate) {
+      console.log(`【标签添加】强制创建标签，清除所有关闭标志`);
+      clearAllTabClosingFlags();
+    }
+    // 如果不是强制创建，才检查关闭标志
+    else if (isTabClosingActive()) {
+      console.log(`【标签添加】检测到标签关闭标志，跳过添加标签`);
+      return;
+    }
+
+    // 确保使用统一的标签页键格式
+    if (!tab.key) {
+      const timestamp = Date.now();
+      tab.key = `conn-${tab.connectionId}-session-${tab.sessionId}-${timestamp}`;
+    } else if (tab.key.startsWith('tab-')) {
+      // 将旧格式转换为新格式
+      console.log(`【标签格式】转换旧格式标签键: ${tab.key} 到标准格式`);
+      tab.key = tab.key.replace('tab-', 'conn-');
+    }
+
+    // 清除全部标签关闭的标志
+    console.log(`【标签添加】添加新标签 ${tab.key}，清除关闭标志`);
     localStorage.removeItem('all_tabs_closed');
+    localStorage.removeItem('recently_closed_tab');
+    localStorage.removeItem('force_closing_last_tab');
+    localStorage.removeItem('closing_flags_expiry');
+    localStorage.removeItem('last_tab_close_time');
 
-    // 更新状态
-    dispatch({
-      type: 'ADD_TAB',
-      payload: tab
+    // 直接调用 openOrActivateTab 来处理添加或激活逻辑
+    openOrActivateTab({
+      tabKey: tab.key,
+      connectionName: tab.title,
+      connectionId: tab.connectionId,
+      sessionId: tab.sessionId,
+      connectionProtocol: tab.protocol,
+      host: tab.hostname,
+      port: tab.port,
+      username: tab.username,
+      connection: tab.connection,
+      isGraphical: tab.isGraphical,
+      forceCreate: forceCreate, // 传递强制创建标志
     });
-  }, [state.tabs, dispatch]);
+  }, [openOrActivateTab]);
 
-  // 更新标签
   const updateTab = (key: string, updates: Partial<TerminalTab>) => {
     dispatch({ type: 'UPDATE_TAB', payload: { key, updates } });
   };
 
-  // 关闭标签
   const closeTab = (key: string) => {
-    // 找到要关闭的标签
     const tabToClose = state.tabs.find(tab => tab.key === key);
-    if (!tabToClose) {
-      console.warn(`无法关闭标签 ${key}：找不到该标签`);
-      return;
+    if (!tabToClose) return;
+
+    // 检查是否是最后一个标签
+    const isLastTab = state.tabs.length === 1;
+    if (isLastTab) {
+      console.log(`【标签关闭】检测到关闭最后一个标签: ${key}`);
+      // 设置标志以防止URL变化触发标签创建
+      localStorage.setItem('force_closing_last_tab', 'true');
+      localStorage.setItem('all_tabs_closed', 'true');
+      // 记录关闭时间，用于自动超时
+      localStorage.setItem('last_tab_close_time', Date.now().toString());
+      // 设置标志过期时间 - 10秒后自动失效
+      localStorage.setItem('closing_flags_expiry', (Date.now() + 10000).toString());
+
+      // 立即清除标签数据，防止重新创建
+      localStorage.removeItem('terminal_tabs');
+      localStorage.removeItem('terminal_active_tab');
     }
 
-    // 设置手动关闭标记，防止WebSocket重连
-    localStorage.setItem('manually_closed_tabs', 'true');
+    // 记录正在关闭的标签信息
+    localStorage.setItem('recently_closed_tab', key);
 
-    // 如果存在全局标记函数，调用它
-    if (typeof window !== 'undefined' && (window as any).markTabsAsClosed) {
-      (window as any).markTabsAsClosed();
-    }
-
-    // 尝试关闭WebSocket连接
+    // 清理 WebSocket, xterm 等资源
     try {
-      if (tabToClose.webSocketRef?.current &&
-        tabToClose.webSocketRef.current.readyState !== WebSocket.CLOSED &&
-        tabToClose.webSocketRef.current.readyState !== WebSocket.CLOSING) {
-        tabToClose.webSocketRef.current.close();
+      if (tabToClose.webSocketRef?.current) {
+        safelyCloseWebSocket(tabToClose.webSocketRef.current, tabToClose.sessionId);
       }
-    } catch (e) {
-      console.error(`关闭WebSocket失败:`, e);
-    }
 
-    // 尝试销毁xterm实例
-    try {
       if (tabToClose.xtermRef?.current) {
-        // 先移除插件
-        if (tabToClose.fitAddonRef?.current) {
-          tabToClose.fitAddonRef.current.dispose();
-        }
-
-        if (tabToClose.searchAddonRef?.current) {
-          tabToClose.searchAddonRef.current.dispose();
-        }
-
-        // 销毁终端实例
+        tabToClose.fitAddonRef?.current?.dispose();
+        tabToClose.searchAddonRef?.current?.dispose();
         tabToClose.xtermRef.current.dispose();
       }
+
+      // 清理会话相关的localStorage存储
+      if (tabToClose.sessionId) {
+        // 使用安全的会话关闭函数
+        closeSessionSafely(tabToClose.sessionId);
+
+        // 清理该会话的localStorage存储
+        localStorage.removeItem(`session_${tabToClose.sessionId}`);
+      }
+
+      // 记录关闭的标签信息，用于防止自动重新创建
+      console.log(`【标签清理】关闭标签 ${key} 并清理相关资源`);
     } catch (e) {
-      console.error(`销毁xterm实例失败:`, e);
+      console.error(`关闭标签资源时出错 ${key}:`, e);
     }
 
-    // 保存关闭的标签信息到localStorage，防止刷新后重新出现
-    try {
-      // 读取现有的关闭标签列表
-      const closedTabsStr = localStorage.getItem('terminal_closed_tabs') || '[]';
-      let closedTabs = [];
-
-      try {
-        closedTabs = JSON.parse(closedTabsStr);
-      } catch (e) {
-        console.error('解析关闭标签数据失败:', e);
-        closedTabs = [];
-      }
-
-      // 添加当前关闭的标签
-      closedTabs.push({
-        key: tabToClose.key,
-        connectionId: tabToClose.connectionId,
-        sessionId: tabToClose.sessionId,
-        timestamp: Date.now()
-      });
-
-      // 保存回localStorage
-      localStorage.setItem('terminal_closed_tabs', JSON.stringify(closedTabs));
-
-      // 检查最后创建的标签是否为当前关闭的标签
-      const lastCreatedTab = localStorage.getItem('terminal_last_created_tab');
-      if (lastCreatedTab === key) {
-        // 如果是，移除此记录
-        localStorage.removeItem('terminal_last_created_tab');
-      }
-
-      // 获取剩余标签的数量
-      const remainingTabs = state.tabs.filter(tab => tab.key !== key);
-
-      // 如果关闭后没有标签了，或者是最后一个标签
-      if (remainingTabs.length === 0 || state.tabs.length === 1) {
-        localStorage.removeItem('terminal_tabs');
-        localStorage.removeItem('terminal_active_tab');
-
-        // 设置标记，表示所有标签都已关闭
-        localStorage.setItem('all_tabs_closed', 'true');
-
-        // 添加手动关闭标记，区分手动关闭和自动关闭
-        localStorage.setItem('manually_closed_tabs', 'true');
-
-        // 清除可能导致自动恢复的会话信息
-        localStorage.removeItem('terminal_last_session');
-        localStorage.removeItem('current_terminal_session');
-
-        // 记录关闭时间，可用于判断是否需要恢复
-        localStorage.setItem('tabs_closed_time', Date.now().toString());
-      } else {
-        // 更新标签状态到localStorage
-        updateTabsInLocalStorage(remainingTabs, remainingTabs[0].key);
-      }
-    } catch (e) {
-      console.error('保存关闭标签信息失败:', e);
-    }
-
-    // 分发标签关闭事件
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('terminal-tab-closed', {
-        detail: {
-          tabKey: key,
-          tabData: {
-            key: tabToClose.key,
-            connectionId: tabToClose.connectionId,
-            sessionId: tabToClose.sessionId,
-            timestamp: Date.now()
-          }
-        }
-      }));
-    }
-
-    // 正常情况下通知上下文关闭标签
     dispatch({ type: 'CLOSE_TAB', payload: key });
-
-    // 特殊情况：如果是最后一个标签，手动清理状态
-    if (state.tabs.length === 1) {
-      dispatch({ type: 'CLEAR_TABS' });
-    }
   };
 
-  // 设置活动标签
   const setActiveTab = useCallback((key: string) => {
-    // 不需要重复设置相同的活动标签
-    if (state.activeTabKey === key) {
-      return;
-    }
-
-    // 检查标签是否存在
+    if (state.activeTabKey === key && state.tabs.some(t => t.key === key)) return;
     const tabExists = state.tabs.some(tab => tab.key === key);
-    if (!tabExists) {
-      // 如果找不到指定标签，使用第一个标签
-      if (state.tabs.length > 0) {
-        const firstTabKey = state.tabs[0].key;
-        localStorage.setItem('terminal_active_tab', firstTabKey);
-        dispatch({
-          type: 'SET_ACTIVE_TAB',
-          payload: firstTabKey
-        });
-      }
+    if (!tabExists && state.tabs.length > 0) {
+      dispatch({ type: 'SET_ACTIVE_TAB', payload: state.tabs[0].key });
       return;
     }
-
-    // 保存活动标签到localStorage
-    localStorage.setItem('terminal_active_tab', key);
-
-    // 更新状态
-    dispatch({
-      type: 'SET_ACTIVE_TAB',
-      payload: key
-    });
+    if (tabExists) {
+      dispatch({ type: 'SET_ACTIVE_TAB', payload: key });
+    }
   }, [state.activeTabKey, state.tabs, dispatch]);
 
-  // 清空所有标签
   const clearTabs = () => {
-    // 关闭所有连接的会话
+    // 清理每个标签的资源和会话
     state.tabs.forEach(tab => {
-      if (tab.isConnected && tab.sessionId) {
-        try {
-          sessionAPI.closeSession(tab.sessionId).catch(err => {
-            console.error(`关闭会话 ${tab.sessionId} 时出错:`, err);
-          });
-        } catch (error) {
-          console.error(`关闭会话异常:`, error);
+      if (tab.sessionId) {
+        closeSessionSafely(tab.sessionId);
+
+        // 清理该会话的localStorage存储
+        localStorage.removeItem(`session_${tab.sessionId}`);
+      }
+      try {
+        if (tab.webSocketRef?.current) {
+          safelyCloseWebSocket(tab.webSocketRef.current, tab.sessionId);
         }
+
+        if (tab.xtermRef?.current) {
+          tab.fitAddonRef?.current?.dispose();
+          tab.searchAddonRef?.current?.dispose();
+          tab.xtermRef.current.dispose();
+        }
+      } catch (e) {
+        console.error(`清理所有标签资源时出错:`, e);
       }
     });
 
-    // 清空标签列表
+    // 清理所有标签和会话相关的localStorage存储
+    localStorage.removeItem('terminal_tabs');
+    localStorage.removeItem('terminal_active_tab');
+    localStorage.removeItem('recently_closed_tab');
+
+    // 设置标志，防止页面刷新时重新创建标签
+    localStorage.setItem('all_tabs_closed', 'true');
+    localStorage.setItem('force_closing_last_tab', 'true');
+
+    // 查找并清理所有会话和终端相关的存储
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (
+        key.startsWith('session_') ||
+        key.startsWith('terminal_') ||
+        key.includes('tab-') ||
+        key.includes('conn-')
+      )) {
+        keysToRemove.push(key);
+      }
+    }
+
+    // 移除找到的相关键
+    keysToRemove.forEach(key => {
+      if (key !== 'all_tabs_closed' && key !== 'force_closing_last_tab') {
+        localStorage.removeItem(key);
+      }
+    });
+
+    // 延迟移除force_closing_last_tab标志，但保留all_tabs_closed标志
+    setTimeout(() => {
+      localStorage.removeItem('force_closing_last_tab');
+    }, 1000);
+
     dispatch({ type: 'CLEAR_TABS' });
   };
 
-  // 提供上下文值
   const contextValue = {
     state,
-    addTab,
+    addTab, // 保持addTab接口，但内部调用新的处理函数
     updateTab,
     closeTab,
     setActiveTab,
     clearTabs,
+    // 可以考虑暴露 openOrActivateTab 如果外部也需要这种精细控制
   };
 
   return (
