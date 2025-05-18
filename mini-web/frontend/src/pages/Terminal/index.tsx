@@ -11,12 +11,14 @@ import { useTerminal } from '../../contexts/TerminalContext';
 import TerminalTabs from './components/TerminalTabs';
 import TerminalContainers from './components/TerminalContainers';
 import TerminalConnectionWrapper from './components/TerminalConnectionWrapper';
+import TerminalEventManager from './components/TerminalEventManager';
 import EmptyTerminalGuide from './components/EmptyTerminalGuide';
 import type { ConnectionChildProps } from './components/TerminalConnectionWrapper';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { terminalStateRef } from '../../contexts/TerminalContext';
 import { connectionAPI, sessionAPI } from '../../services/api';
 import useTabFromUrl from './hooks/useTabFromUrl';
+import { useTerminalInitialization } from './hooks/useTerminalInitialization';
 import styles from './styles.module.css';
 
 const { Content } = Layout;
@@ -41,6 +43,9 @@ const Terminal: React.FC = () => {
   // 使用终端上下文
   const { state, setActiveTab, closeTab } = useTerminal();
   const { tabs, activeTabKey } = state;
+
+  // 获取终端初始化函数
+  const { initializeTerminal } = useTerminalInitialization();
 
   // 使用标签页URL参数处理
   // 这个hook会根据URL参数创建或激活标签页
@@ -221,32 +226,41 @@ const Terminal: React.FC = () => {
         <TerminalConnectionWrapper>
           {(props: ConnectionChildProps) => (
             <>
-              {props.tabs && props.tabs.length > 0 ? (
-                <>
-                  {/* 标签页 */}
-                  <TerminalTabs
-                    tabs={props.tabs}
-                    activeKey={props.activeTabKey}
-                    onTabChange={handleTabChange}
-                    onTabEdit={handleTabEdit}
-                    onTabClose={handleTabClose}
-                    onRefreshTab={handleRefreshTab}
-                    onDuplicateTab={handleDuplicateTab}
-                    networkLatency={props.networkLatency}
-                  />
-
-                  {/* 终端容器 */}
-                  <div className={styles.terminalContainerBox}>
-                    <TerminalContainers
+              {/* 终端事件管理器 - 处理所有终端相关事件 */}
+              <TerminalEventManager
+                tabs={props.tabs}
+                activeTabKey={props.activeTabKey}
+                setActiveTab={setActiveTab}
+                createWebSocketConnection={props.createWebSocketConnection}
+                initTerminal={initializeTerminal}
+              >
+                {props.tabs && props.tabs.length > 0 ? (
+                  <>
+                    {/* 标签页 */}
+                    <TerminalTabs
                       tabs={props.tabs}
-                      activeTabKey={props.activeTabKey}
+                      activeKey={props.activeTabKey}
+                      onTabChange={handleTabChange}
+                      onTabEdit={handleTabEdit}
+                      onTabClose={handleTabClose}
+                      onRefreshTab={handleRefreshTab}
+                      onDuplicateTab={handleDuplicateTab}
+                      networkLatency={props.networkLatency}
                     />
-                  </div>
-                </>
-              ) : (
-                /* 空状态指南组件 */
-                <EmptyTerminalGuide />
-              )}
+
+                    {/* 终端容器 */}
+                    <div className={styles.terminalContainerBox}>
+                      <TerminalContainers
+                        tabs={props.tabs}
+                        activeTabKey={props.activeTabKey}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  /* 空状态指南组件 */
+                  <EmptyTerminalGuide />
+                )}
+              </TerminalEventManager>
             </>
           )}
         </TerminalConnectionWrapper>

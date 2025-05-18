@@ -138,7 +138,9 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
     useEffect(() => {
         const handleTerminalReady = (event: Event) => {
             const customEvent = event as CustomEvent;
-            const { tabKey, connectionId, sessionId } = customEvent.detail;
+            const { tabKey, connectionId, sessionId, protocol } = customEvent.detail;
+            console.log(`终端准备就绪事件触发: tabKey=${tabKey}, connectionId=${connectionId}, sessionId=${sessionId}, protocol=${protocol}`);
+
             // 查找对应的标签
             const tab = tabs.find(t => t.key === tabKey);
             if (!tab) {
@@ -146,7 +148,16 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
                 return;
             }
 
-            console.log(`终端准备就绪事件触发: tabKey=${tabKey}, connectionId=${connectionId}, sessionId=${sessionId}`);
+            // 确保tab对象有必要的属性
+            if (!tab.connectionId && connectionId) {
+                tab.connectionId = typeof connectionId === 'string' ? parseInt(connectionId, 10) : connectionId;
+            }
+            if (!tab.sessionId && sessionId) {
+                tab.sessionId = typeof sessionId === 'string' ? parseInt(sessionId, 10) : sessionId;
+            }
+            if (!tab.protocol && protocol) {
+                tab.protocol = protocol;
+            }
 
             // 检查是否已有活跃的WebSocket连接
             if (tab.webSocketRef?.current &&
@@ -187,63 +198,65 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
             }
 
             // 首先创建WebSocket连接，确保连接成功后再初始化终端
-            if (tab.connection && typeof createWebSocketConnection === 'function') {
-                // 使用tab中的信息构建参数
-                const connId = tab.connectionId || tab.connection.id || (connectionId ? Number(connectionId) : 0);
-                const sessId = tab.sessionId ? Number(tab.sessionId) : (sessionId ? Number(sessionId) : 0);
+            const connId = tab.connectionId || (connectionId ? (typeof connectionId === 'string' ? parseInt(connectionId, 10) : connectionId) : 0);
+            const sessId = tab.sessionId || (sessionId ? (typeof sessionId === 'string' ? parseInt(sessionId, 10) : sessionId) : 0);
 
-                if (connId && sessId) {
-                    console.log(`开始创建WebSocket连接: connId=${connId}, sessId=${sessId}`);
+            if (connId && sessId && typeof createWebSocketConnection === 'function') {
+                console.log(`开始创建WebSocket连接: connId=${connId}, sessId=${sessId}, tabKey=${tabKey}`);
 
-                    createWebSocketConnection(connId, sessId, tabKey);
+                createWebSocketConnection(connId, sessId, tabKey);
 
-                    // 检查WebSocket连接状态
-                    setTimeout(() => {
-                        // 确认WebSocket连接建立后再初始化终端
-                        if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
-                            console.log(`WebSocket连接已建立, 现在初始化终端实例: ${tabKey}`);
+                // 检查WebSocket连接状态
+                setTimeout(() => {
+                    // 确认WebSocket连接建立后再初始化终端
+                    if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
+                        console.log(`WebSocket连接已建立, 现在初始化终端实例: ${tabKey}`);
 
-                            // 创建数据处理器函数
-                            const dataHandler = (data: string) => {
-                                if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
-                                    try {
-                                        console.log(`正在发送数据到WebSocket: ${data.length > 20 ? data.substring(0, 20) + '...' : data}`);
-                                        tab.webSocketRef.current.send(data);
-                                        return true;
-                                    } catch (error) {
-                                        console.error('发送数据到WebSocket失败:', error);
-                                        return false;
-                                    }
-                                } else {
-                                    console.warn('WebSocket未连接，无法发送数据');
+                        // 创建数据处理器函数
+                        const dataHandler = (data: string) => {
+                            if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
+                                try {
+                                    console.log(`正在发送数据到WebSocket: ${data.length > 20 ? data.substring(0, 20) + '...' : data}`);
+                                    tab.webSocketRef.current.send(data);
+                                    return true;
+                                } catch (error) {
+                                    console.error('发送数据到WebSocket失败:', error);
                                     return false;
                                 }
-                            };
-
-                            // 初始化终端
-                            if (initTerminal) {
-                                const terminalInitialized = initTerminal(tab, dataHandler);
-                                console.log(`终端初始化完成: ${terminalInitialized}`);
-
-                                if (tab.xtermRef?.current) {
-                                    // 添加欢迎消息
-                                    tab.xtermRef.current.writeln('\r\n\x1b[32mSSH连接已建立成功!\x1b[0m');
-                                    tab.xtermRef.current.writeln('\r\n输入命令开始操作...\r\n');
-                                }
                             } else {
-                                console.error('初始化终端函数不存在');
+                                console.warn('WebSocket未连接，无法发送数据');
+                                return false;
+                            }
+                        };
+
+                        // 初始化终端
+                        if (initTerminal) {
+                            const terminalInitialized = initTerminal(tab, dataHandler);
+                            console.log(`终端初始化完成: ${terminalInitialized}`);
+
+                            if (tab.xtermRef?.current) {
+                                // 添加欢迎消息
+                                tab.xtermRef.current.writeln('\r\n\x1b[32mSSH连接已建立成功!\x1b[0m');
+                                tab.xtermRef.current.writeln('\r\n输入命令开始操作...\r\n');
                             }
                         } else {
-                            console.error(`WebSocket连接未建立: ${tab.webSocketRef?.current?.readyState}`);
-                            // 尝试重新连接
-                            createWebSocketConnection(connId, sessId, tabKey);
+                            console.error('初始化终端函数不存在');
                         }
-                    }, 1000); // 给WebSocket足够的时间建立连接
-                } else {
-                    console.error('连接ID或会话ID无效:', { connId, sessId });
-                }
+                    } else {
+                        console.error(`WebSocket连接未建立: ${tab.webSocketRef?.current?.readyState}`);
+                        // 尝试重新连接
+                        createWebSocketConnection(connId, sessId, tabKey);
+
+                        // 延迟重试终端初始化
+                        setTimeout(() => {
+                            window.dispatchEvent(new CustomEvent('terminal-init-retry', {
+                                detail: { tabKey }
+                            }));
+                        }, 1500);
+                    }
+                }, 1000); // 给WebSocket足够的时间建立连接
             } else {
-                console.error('无法创建WebSocket连接: 缺少必要的函数或参数');
+                console.error('无法创建WebSocket连接: connId=', connId, 'sessId=', sessId, 'createWebSocketConnection=', !!createWebSocketConnection);
             }
         };
 

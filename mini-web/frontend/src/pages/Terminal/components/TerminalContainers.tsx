@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-10 22:19:37
  * @LastEditors: Await
- * @LastEditTime: 2025-05-18 12:00:48
+ * @LastEditTime: 2025-05-18 18:13:07
  * @Description: 终端容器管理组件
  */
 import React, { useCallback, useEffect } from 'react';
@@ -83,38 +83,90 @@ const TerminalContainers: React.FC<TerminalContainersProps> = ({
             return;
         }
 
-        // 检查是否已经有WebSocket连接
-        const hasExistingConnection = activeTab.webSocketRef?.current &&
-            (activeTab.webSocketRef.current.readyState === WebSocket.CONNECTING ||
-                activeTab.webSocketRef.current.readyState === WebSocket.OPEN);
+        console.log(`激活标签: ${activeTabKey}, 准备触发终端就绪事件`);
 
-        if (!hasExistingConnection) {
-            console.log(`激活标签: ${activeTabKey}, 准备触发终端就绪事件`);
+        // 检查是否有DOM容器
+        if (!activeTab.terminalRef?.current) {
+            console.error(`标签 ${activeTabKey} 没有创建DOM容器`);
+            return;
+        }
 
-            // 提取连接和会话信息
-            const connectionId = activeTab.connectionId || activeTab.connection?.id || 0;
-            const sessionId = activeTab.sessionId || '';
+        // 验证连接ID和会话ID
+        let connectionId = activeTab.connectionId || (activeTab.connection ? activeTab.connection.id : null);
+        let sessionId = activeTab.sessionId;
+        let protocol = activeTab.protocol || (activeTab.connection ? activeTab.connection.protocol : null);
 
-            // 检查必要条件
-            if (!connectionId || !sessionId) {
-                console.error(`标签缺少必要的连接信息: connectionId=${connectionId}, sessionId=${sessionId}`);
-                return;
+        if (!connectionId) {
+            console.error(`标签 ${activeTabKey} 没有有效的连接ID`);
+            // 尝试从标签键中提取连接ID
+            const match = activeTab.key.match(/conn-(\d+)/);
+            if (match && match[1]) {
+                connectionId = parseInt(match[1], 10);
+                console.log(`从标签键中提取的连接ID: ${connectionId}`);
             }
+        }
 
-            // 使用自定义事件通知终端已准备就绪，传递完整的连接信息
-            const event = new CustomEvent('terminal-ready', {
-                detail: {
-                    tabKey: activeTabKey,
-                    connectionId,
-                    sessionId,
-                    protocol: activeTab.protocol || activeTab.connection?.protocol || 'ssh'
+        if (!sessionId) {
+            console.error(`标签 ${activeTabKey} 没有有效的会话ID`);
+            // 尝试从标签键中提取会话ID
+            const match = activeTab.key.match(/session-(\d+)/);
+            if (match && match[1]) {
+                sessionId = parseInt(match[1], 10);
+                console.log(`从标签键中提取的会话ID: ${sessionId}`);
+            }
+        }
+
+        // 检查DOM容器是否已创建
+        // 仅当有标签、标签有DOM容器、标签有连接ID和会话ID时，触发终端就绪事件
+        if (connectionId && sessionId) {
+            // 检查标签页是否已有WebSocket连接
+            if (activeTab.webSocketRef?.current) {
+                const readyState = activeTab.webSocketRef.current.readyState;
+                if (readyState === WebSocket.OPEN) {
+                    console.log(`标签 ${activeTabKey} 已有打开的WebSocket连接，跳过创建`);
+                } else if (readyState === WebSocket.CONNECTING) {
+                    console.log(`标签 ${activeTabKey} 的WebSocket连接正在建立中，跳过创建`);
+                } else {
+                    // 连接已关闭或正在关闭，需要重新创建
+                    console.log(`标签 ${activeTabKey} 的WebSocket连接状态异常(${readyState})，将触发重新连接`);
+                    console.log(`触发终端就绪事件: tabKey=${activeTabKey}, connectionId=${connectionId}, sessionId=${sessionId}, protocol=${protocol}`);
+
+                    // 触发终端就绪事件
+                    window.dispatchEvent(new CustomEvent('terminal-ready', {
+                        detail: {
+                            tabKey: activeTabKey,
+                            connectionId: connectionId,
+                            sessionId: sessionId,
+                            protocol: protocol
+                        }
+                    }));
                 }
-            });
+            } else {
+                // 没有WebSocket连接，需要创建
+                console.log(`触发终端就绪事件: tabKey=${activeTabKey}, connectionId=${connectionId}, sessionId=${sessionId}, protocol=${protocol}`);
 
-            console.log(`触发终端就绪事件: tabKey=${activeTabKey}, connectionId=${connectionId}, sessionId=${sessionId}`);
-            window.dispatchEvent(event);
+                // 触发终端就绪事件
+                window.dispatchEvent(new CustomEvent('terminal-ready', {
+                    detail: {
+                        tabKey: activeTabKey,
+                        connectionId: connectionId,
+                        sessionId: sessionId,
+                        protocol: protocol
+                    }
+                }));
+            }
         } else {
-            console.log(`标签 ${activeTabKey} 已有WebSocket连接，跳过创建`);
+            console.error(`无法触发终端就绪事件: 缺少connectionId(${connectionId})或sessionId(${sessionId})`);
+            console.log('标签信息:', {
+                key: activeTab.key,
+                connectionId: activeTab.connectionId,
+                sessionId: activeTab.sessionId,
+                hasConnection: !!activeTab.connection,
+                connectionInfo: activeTab.connection ? {
+                    id: activeTab.connection.id,
+                    protocol: activeTab.connection.protocol
+                } : null
+            });
         }
     }, [activeTabKey, tabs]);
 

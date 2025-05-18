@@ -79,9 +79,38 @@ export const initTerminal = (
             visible: window.getComputedStyle(container).visibility
         });
 
+        // 确保容器可见
+        container.style.display = 'block';
+        container.style.visibility = 'visible';
+
+        // 设置为空字符串
+        container.innerHTML = '';
+
         // 打开终端
-        term.open(container);
-        console.log('终端已打开');
+        try {
+            console.log('正在调用term.open...');
+            term.open(container);
+            console.log('终端已打开');
+
+            // 立即刷新终端
+            term.refresh(0, term.rows - 1);
+            console.log('终端已刷新');
+        } catch (e) {
+            console.error('打开终端失败:', e);
+
+            // 尝试恢复
+            setTimeout(() => {
+                try {
+                    console.log('重试打开终端...');
+                    container.innerHTML = '';
+                    term.open(container);
+                    console.log('终端重试打开成功');
+                    term.refresh(0, term.rows - 1);
+                } catch (retryError) {
+                    console.error('重试打开终端失败:', retryError);
+                }
+            }, 100);
+        }
 
         // 检查终端元素是否正确创建
         const xtermTerminal = container.querySelector('.terminal') as HTMLElement;
@@ -92,15 +121,39 @@ export const initTerminal = (
             xtermTerminal.style.visibility = 'visible';
             xtermTerminal.style.opacity = '1';
             xtermTerminal.style.display = 'block';
+            xtermTerminal.style.width = '100%';
+            xtermTerminal.style.height = '100%';
 
-            // 检查文本层元素
-            const textLayer = container.querySelector('.xterm-text-layer');
-            if (textLayer) {
-                (textLayer as HTMLElement).style.visibility = 'visible';
-                (textLayer as HTMLElement).style.opacity = '1';
-                console.log('文本层DOM元素已修复');
-            } else {
-                console.warn('找不到文本层DOM元素');
+            // 检查并修复各个层
+            const layers = ['xterm-text-layer', 'xterm-cursor-layer', 'xterm-link-layer', 'xterm-selection-layer'];
+            layers.forEach(layerClass => {
+                const layer = container.querySelector(`.${layerClass}`);
+                if (layer) {
+                    (layer as HTMLElement).style.visibility = 'visible';
+                    (layer as HTMLElement).style.opacity = '1';
+                    (layer as HTMLElement).style.display = 'block';
+                    console.log(`${layerClass} 已修复`);
+                } else {
+                    console.warn(`找不到 ${layerClass}`);
+                }
+            });
+
+            // 检查xterm-viewport
+            const viewport = container.querySelector('.xterm-viewport');
+            if (viewport) {
+                (viewport as HTMLElement).style.visibility = 'visible';
+                (viewport as HTMLElement).style.opacity = '1';
+                console.log('viewport 已修复');
+            }
+
+            // 检查xterm-screen
+            const screen = container.querySelector('.xterm-screen');
+            if (screen) {
+                (screen as HTMLElement).style.visibility = 'visible';
+                (screen as HTMLElement).style.opacity = '1';
+                (screen as HTMLElement).style.width = '100%';
+                (screen as HTMLElement).style.height = '100%';
+                console.log('screen 已修复');
             }
         } else {
             console.warn('找不到终端DOM元素');
@@ -113,9 +166,18 @@ export const initTerminal = (
             // 检查dataHandler是否存在且是函数
             if (typeof dataHandler === 'function') {
                 console.log('⭐ 准备调用dataHandler函数处理输入');
-                // 将数据发送到处理函数
-                const result = dataHandler(data);
-                console.log('⭐ dataHandler调用结果:', result);
+                try {
+                    // 将数据发送到处理函数
+                    const result = dataHandler(data);
+                    console.log('⭐ dataHandler调用结果:', result);
+
+                    // 本地回显（如果服务器不提供回显）
+                    // term.write(data);
+                } catch (e) {
+                    console.error('⭐ 调用dataHandler失败:', e);
+                    // 确保本地回显
+                    term.write(data);
+                }
             } else {
                 console.error('❌ dataHandler不存在或不是函数:', dataHandler);
                 // 如果没有数据处理器，也确保添加本地回显
@@ -123,7 +185,21 @@ export const initTerminal = (
             }
         });
 
-        // 设置焦点
+        // 添加终端输出监听器
+        const originalWrite = term.write;
+        term.write = function (data: string | Uint8Array) {
+            console.log('📥 终端收到输出数据', typeof data === 'string' ?
+                (data.length > 50 ? data.substring(0, 50) + '...' : data) : '[二进制数据]');
+
+            try {
+                return originalWrite.apply(this, [data]);
+            } catch (e) {
+                console.error('📥 终端写入数据失败:', e);
+                return this;
+            }
+        };
+
+        // 设置焦点并写入欢迎消息
         setTimeout(() => {
             try {
                 // 确保终端处于可见状态
@@ -135,8 +211,11 @@ export const initTerminal = (
                 console.log('终端已获取焦点');
 
                 // 写入欢迎消息
-                term.writeln('\r\n\x1b[32m终端已成功初始化!\x1b[0m');
-                term.writeln('\r\n等待建立连接...\r\n');
+                term.write('\r\n\x1b[32m终端已成功初始化!\x1b[0m\r\n');
+                term.write('等待建立连接...\r\n\r\n');
+
+                // 立即刷新以确保显示
+                term.refresh(0, term.rows - 1);
 
                 // 触发终端就绪事件
                 const readyEvent = new CustomEvent('terminal-ready', {
@@ -146,6 +225,7 @@ export const initTerminal = (
                     }
                 });
                 window.dispatchEvent(readyEvent);
+                console.log('已分发terminal-ready事件');
             } catch (e) {
                 console.error('设置终端焦点失败:', e);
             }
@@ -155,35 +235,59 @@ export const initTerminal = (
         try {
             console.log('调整终端大小...');
             setTimeout(() => {
-                fitAddon.fit();
-                console.log('终端大小已调整为:', term.cols, term.rows);
+                try {
+                    fitAddon.fit();
+                    console.log('终端大小已调整为:', term.cols, term.rows);
 
-                // 触发大小调整事件
-                const sizeEvent = new CustomEvent('terminal-size-changed', {
-                    detail: {
-                        cols: term.cols,
-                        rows: term.rows,
-                        terminalInstance: term
-                    }
-                });
-                window.dispatchEvent(sizeEvent);
+                    // 触发大小调整事件
+                    const sizeEvent = new CustomEvent('terminal-size-changed', {
+                        detail: {
+                            cols: term.cols,
+                            rows: term.rows,
+                            terminalInstance: term
+                        }
+                    });
+                    window.dispatchEvent(sizeEvent);
+                    console.log('已分发terminal-size-changed事件');
+                } catch (sizeError) {
+                    console.error('调整终端大小失败:', sizeError);
+                }
             }, 300);
         } catch (e) {
             console.error('首次调整终端大小失败:', e);
         }
+
+        // 处理窗口尺寸变化
+        const resizeHandler = () => {
+            try {
+                fitAddon.fit();
+                console.log('窗口调整后终端大小:', term.cols, term.rows);
+            } catch (e) {
+                console.error('调整终端大小失败:', e);
+            }
+        };
+        window.addEventListener('resize', resizeHandler);
 
         // 保存终端实例到全局对象以便调试
         if (typeof window !== 'undefined') {
             (window as any).lastTerminal = term;
         }
 
-        // 返回终端和插件实例
-        console.log('终端初始化完成');
+        // 返回终端和插件实例以及清理函数
+        console.log('终端初始化完成，可以使用');
         return {
             term,
             fitAddon,
             searchAddon,
             messageQueue,
+            cleanup: () => {
+                window.removeEventListener('resize', resizeHandler);
+                try {
+                    term.dispose();
+                } catch (e) {
+                    console.warn('终端处置失败:', e);
+                }
+            }
         };
     } catch (error) {
         console.error('初始化终端失败:', error);

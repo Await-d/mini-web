@@ -183,12 +183,105 @@ class WebSocketServiceClass {
             };
 
             ws.onmessage = (event) => {
-                // 更新活动时间
-                connection.lastActivityTime = Date.now();
-                tab.lastActivityTime = connection.lastActivityTime;
+                try {
+                    const tabKey = tab.key;
+                    console.log(`【WebSocket】收到消息: ${tabKey}, 数据类型: ${typeof event.data}`);
 
-                // 调用协议处理器的message回调
-                handler.handleMessage(tab, event);
+                    // 记录数据大小和类型
+                    if (typeof event.data === 'string') {
+                        console.log(`【WebSocket】收到字符串消息: 长度=${event.data.length}, 前20字符=${event.data.substring(0, 20).replace(/\n/g, '\\n').replace(/\r/g, '\\r')}`);
+                    } else if (event.data instanceof ArrayBuffer) {
+                        console.log(`【WebSocket】收到二进制消息: 长度=${event.data.byteLength} 字节`);
+                    } else if (event.data instanceof Blob) {
+                        console.log(`【WebSocket】收到Blob消息: 大小=${event.data.size} 字节, 类型=${event.data.type}`);
+                    }
+
+                    // 更新最后活动时间
+                    tab.lastActivityTime = Date.now();
+
+                    // 查找xterm实例
+                    const xterm = tab.xtermRef?.current;
+
+                    // 如果终端还没有初始化，可以将消息加入队列等待处理
+                    if (!xterm) {
+                        console.warn(`【WebSocket】终端尚未初始化，无法显示消息: ${tabKey}`);
+                        // 将消息加入队列
+                        if (tab.messageQueueRef?.current) {
+                            if (typeof event.data === 'string') {
+                                tab.messageQueueRef.current.push(event.data);
+                                console.log(`【WebSocket】消息已加入队列，当前队列长度: ${tab.messageQueueRef.current.length}`);
+                            } else {
+                                console.warn(`【WebSocket】无法将非字符串消息加入队列`);
+                            }
+                        } else {
+                            console.warn(`【WebSocket】消息队列不存在，无法保存消息`);
+                        }
+                        return;
+                    }
+
+                    // 处理不同类型的消息
+                    if (typeof event.data === 'string') {
+                        try {
+                            // 尝试解析为JSON
+                            const jsonData = JSON.parse(event.data);
+                            console.log(`【WebSocket】解析为JSON消息:`, jsonData);
+
+                            // 处理不同类型的JSON消息
+                            if (jsonData.type === 'resize') {
+                                console.log(`【WebSocket】收到调整大小消息: cols=${jsonData.cols}, rows=${jsonData.rows}`);
+                            } else if (jsonData.type === 'error') {
+                                console.error(`【WebSocket】收到错误消息:`, jsonData.message);
+                                xterm.writeln(`\r\n\x1b[31m错误: ${jsonData.message}\x1b[0m\r\n`);
+                            } else if (jsonData.type === 'data') {
+                                // 包含终端数据的JSON
+                                console.log(`【WebSocket】收到数据消息: ${jsonData.data.length} 字符`);
+                                xterm.write(jsonData.data);
+                            } else {
+                                // 未知类型的JSON，直接写入原始消息
+                                console.log(`【WebSocket】未知类型的JSON消息，直接写入原始数据`);
+                                xterm.write(event.data);
+                            }
+                        } catch (e) {
+                            // 不是JSON，直接写入终端
+                            console.log(`【WebSocket】非JSON消息，直接写入终端: ${event.data.length} 字符`);
+                            if (event.data.length === 0) {
+                                console.warn('【WebSocket】接收到空消息，跳过写入');
+                            } else {
+                                xterm.write(event.data);
+                            }
+                        }
+                    } else if (event.data instanceof ArrayBuffer) {
+                        // 二进制数据，转换为Uint8Array然后写入
+                        const uint8Array = new Uint8Array(event.data);
+                        console.log(`【WebSocket】写入二进制数据: ${uint8Array.length} 字节`);
+                        xterm.write(uint8Array);
+                    } else if (event.data instanceof Blob) {
+                        // Blob数据，读取后写入
+                        console.log(`【WebSocket】收到Blob数据，正在读取...`);
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                            if (reader.result instanceof ArrayBuffer) {
+                                const uint8Array = new Uint8Array(reader.result);
+                                console.log(`【WebSocket】写入Blob数据: ${uint8Array.length} 字节`);
+                                xterm.write(uint8Array);
+                            } else if (typeof reader.result === 'string') {
+                                console.log(`【WebSocket】写入Blob字符串数据: ${reader.result.length} 字符`);
+                                xterm.write(reader.result);
+                            }
+                        };
+                        reader.readAsArrayBuffer(event.data);
+                    }
+
+                    // 调用自定义回调
+                    if (window._webSocketCallbacks && window._webSocketCallbacks.has(tab.key)) {
+                        const callbacks = window._webSocketCallbacks.get(tab.key);
+                        if (callbacks?.onMessage) {
+                            callbacks.onMessage(event);
+                        }
+                    }
+                } catch (error) {
+                    console.error(`【WebSocket】处理消息时出错:`, error);
+                }
             };
 
             ws.onclose = () => {

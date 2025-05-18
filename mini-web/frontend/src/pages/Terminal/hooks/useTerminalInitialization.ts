@@ -45,7 +45,7 @@ export const useTerminalInitialization = () => {
                 return false;
             }
 
-            console.log('正在初始化终端...');
+            console.log(`正在初始化终端... tabKey=${activeTab.key}, DOM元素ID=${activeTab.terminalRef.current.id}`);
 
             // 检查WebSocket连接状态
             if (!activeTab.webSocketRef?.current ||
@@ -60,7 +60,8 @@ export const useTerminalInitialization = () => {
                         detail: {
                             tabKey: activeTab.key,
                             connectionId: activeTab.connectionId,
-                            sessionId: activeTab.sessionId
+                            sessionId: activeTab.sessionId,
+                            protocol: activeTab.protocol || activeTab.connection?.protocol
                         }
                     });
                     window.dispatchEvent(event);
@@ -78,6 +79,32 @@ export const useTerminalInitialization = () => {
                 }
             }
 
+            // 如果已经有初始化的终端实例，则复用
+            if (activeTab.xtermRef?.current) {
+                console.log('检测到已有终端实例，更新数据处理器并刷新显示');
+
+                try {
+                    // 重新绑定数据处理器
+                    import('../utils/initTerminal').then(({ rebindDataHandler }) => {
+                        if (activeTab.xtermRef?.current) {
+                            rebindDataHandler(activeTab.xtermRef.current, handleTerminalData);
+                            console.log('数据处理器已更新');
+
+                            // 刷新终端显示
+                            forceTerminalRefresh(activeTab.xtermRef.current);
+
+                            // 添加就绪消息
+                            activeTab.xtermRef.current.writeln('\r\n\x1b[32m终端已重新连接!\x1b[0m\r\n');
+                        }
+                    });
+
+                    return true;
+                } catch (e) {
+                    console.error('更新终端实例失败，将重新创建:', e);
+                    // 继续执行，创建新实例
+                }
+            }
+
             // 创建更强大的数据处理函数，确保数据被发送到WebSocket
             const enhancedDataHandler = (data: string) => {
                 console.log('🚀 增强型数据处理: 收到用户输入', data.length > 20 ? data.substring(0, 20) + '...' : data);
@@ -86,31 +113,56 @@ export const useTerminalInitialization = () => {
                 if (typeof handleTerminalData === 'function') {
                     try {
                         // 调用原始处理函数
-                        handleTerminalData(data);
+                        const result = handleTerminalData(data);
+                        console.log('🚀 终端数据已发送到WebSocket', result ? '成功' : '失败');
 
                         // 使用sendDataToServer方法（如果存在）
-                        if (typeof activeTab.sendDataToServer === 'function') {
+                        if (!result && typeof activeTab.sendDataToServer === 'function') {
                             console.log('🚀 使用sendDataToServer方法发送数据到WebSocket');
-                            activeTab.sendDataToServer(data);
+                            const altResult = activeTab.sendDataToServer(data);
+                            console.log('🚀 备用发送方法结果:', altResult);
                         }
                         // 直接通过WebSocket发送数据
-                        else if (activeTab.webSocketRef?.current?.readyState === WebSocket.OPEN) {
+                        else if (!result && activeTab.webSocketRef?.current?.readyState === WebSocket.OPEN) {
                             console.log('🚀 直接通过WebSocket发送数据');
                             activeTab.webSocketRef.current.send(data);
-                        } else {
-                            console.error('❌ 无法发送数据：没有可用的WebSocket连接');
+                            console.log('🚀 数据已直接发送到WebSocket');
                         }
                     } catch (e) {
                         console.error('❌ 发送数据到服务器失败:', e);
+
+                        // 尝试重新连接
+                        if (activeTab.connectionId && activeTab.sessionId) {
+                            console.log('尝试重新连接WebSocket...');
+                            window.dispatchEvent(new CustomEvent('terminal-connection-needed', {
+                                detail: {
+                                    tabKey: activeTab.key,
+                                    connectionId: activeTab.connectionId,
+                                    sessionId: activeTab.sessionId
+                                }
+                            }));
+                        }
                     }
                 } else {
                     console.error('❌ handleTerminalData不是一个函数');
+
+                    // 尝试通过WebSocket直接发送
+                    if (activeTab.webSocketRef?.current?.readyState === WebSocket.OPEN) {
+                        try {
+                            console.log('🔄 尝试通过WebSocket直接发送数据');
+                            activeTab.webSocketRef.current.send(data);
+                            console.log('✅ 数据已直接发送到WebSocket');
+                        } catch (e) {
+                            console.error('❌ WebSocket直接发送失败:', e);
+                        }
+                    }
                 }
 
                 return true; // 返回true表示数据已处理
             };
 
             // 使用initTerminal进行初始化
+            console.log('调用initTerminal函数创建新的终端实例');
             const terminalInstance = initTerminal(
                 activeTab.terminalRef.current,
                 enhancedDataHandler
@@ -130,15 +182,24 @@ export const useTerminalInitialization = () => {
                 return false;
             }
 
+            console.log('终端实例创建成功:', terminalInstance);
+
             // 保存终端引用到window对象用于调试
             if (typeof window !== 'undefined') {
                 (window as any).lastTerminalInstance = terminalInstance;
+                (window as any).activeTerminals = (window as any).activeTerminals || {};
+                (window as any).activeTerminals[activeTab.key] = terminalInstance;
             }
 
             // 保存引用到Tab对象
             const { term, fitAddon, searchAddon } = terminalInstance;
+            activeTab.xtermRef = activeTab.xtermRef || { current: null };
             activeTab.xtermRef.current = term;
+
+            activeTab.fitAddonRef = activeTab.fitAddonRef || { current: null };
             activeTab.fitAddonRef.current = fitAddon;
+
+            activeTab.searchAddonRef = activeTab.searchAddonRef || { current: null };
             activeTab.searchAddonRef.current = searchAddon;
 
             // 显示欢迎消息
@@ -151,7 +212,7 @@ export const useTerminalInitialization = () => {
                 containerExists: !!activeTab.terminalRef.current,
                 fitAddonExists: !!fitAddon,
                 tabKey: activeTab.key,
-                protocol: activeTab.connection?.protocol
+                protocol: activeTab.connection?.protocol || activeTab.protocol
             });
 
             // 确保messageQueueRef正确初始化
@@ -167,6 +228,28 @@ export const useTerminalInitialization = () => {
                 if (customEvent.detail?.terminalInstance === term) {
                     // 终端已就绪，可以进行后续操作
                     console.log('终端就绪事件触发，开始后续初始化操作');
+
+                    // 调整终端大小
+                    try {
+                        if (fitAddon) {
+                            fitAddon.fit();
+                            console.log('终端大小已调整:', term.cols, 'x', term.rows);
+
+                            // 发送调整大小命令到服务器
+                            if (activeTab.webSocketRef?.current?.readyState === WebSocket.OPEN) {
+                                const resizeCommand = JSON.stringify({
+                                    type: 'resize',
+                                    cols: term.cols,
+                                    rows: term.rows
+                                });
+                                activeTab.webSocketRef.current.send(resizeCommand);
+                                console.log('终端大小调整命令已发送到服务器');
+                            }
+                        }
+                    } catch (e) {
+                        console.error('调整终端大小失败:', e);
+                    }
+
                     // 分发初始化成功事件
                     window.dispatchEvent(new CustomEvent('terminal-initialized', {
                         detail: {
@@ -182,7 +265,6 @@ export const useTerminalInitialization = () => {
 
             // 监听终端就绪事件
             window.addEventListener('terminal-ready', handleTerminalReady);
-
 
             // 保存刷新间隔引用以便清理
             activeTab.cleanupRef = {
