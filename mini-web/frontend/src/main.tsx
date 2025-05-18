@@ -1,3 +1,10 @@
+/*
+ * @Author: Await
+ * @Date: 2025-05-08 18:19:21
+ * @LastEditors: Await
+ * @LastEditTime: 2025-05-18 09:14:12
+ * @Description: 请填写简介
+ */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { RouterProvider } from 'react-router-dom';
@@ -5,7 +12,11 @@ import { ConfigProvider } from 'antd';
 import zhCN from 'antd/lib/locale/zh_CN';
 import { router } from './router';
 import { TerminalProvider } from './contexts/TerminalContext';
+import { initializeProtocolHandlers } from './pages/Terminal/services/ProtocolHandlers';
 import './index.css';
+
+// 初始化协议处理器，注册所有WebSocket消息处理器
+initializeProtocolHandlers();
 
 const root = ReactDOM.createRoot(document.getElementById('root')!, {
   onUncaughtError: (error, errorInfo) => {

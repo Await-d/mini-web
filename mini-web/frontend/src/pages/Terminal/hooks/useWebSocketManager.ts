@@ -2,26 +2,14 @@
  * @Author: Await
  * @Date: 2025-05-09 17:49:44
  * @LastEditors: Await
- * @LastEditTime: 2025-05-17 17:32:14
- * @Description: WebSocket管理钩子
+ * @LastEditTime: 2025-05-18 10:30:14
+ * @Description: WebSocket管理钩子 - WebSocketService的React Hook封装
  */
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
-import { getWebSocketStateText } from '../utils/websocket';
 import { terminalStateRef } from '../../../contexts/TerminalContext';
 import { writeColorText } from '../utils/terminalUtils';
-import { Terminal } from 'xterm';
-
-// 处理WebSocket消息的兼容函数
-const handleWebSocketMessage = (tab: TerminalTab, event: MessageEvent) => {
-    // 处理WebSocket消息的逻辑
-    if (!tab || !event) return;
-
-    // 如果是xterm终端，处理text数据
-    if (tab.xtermRef?.current && typeof event.data === 'string') {
-        tab.xtermRef.current.write(event.data);
-    }
-};
+import { WebSocketService } from '../services/WebSocketService';
 
 // 扩展TerminalTab接口以支持lastActivityTime和isGraphical属性
 declare module '../../../contexts/TerminalContext' {
@@ -41,31 +29,35 @@ export const quickReconnect = (tab?: TerminalTab) => {
             t => t.key === terminalStateRef.current?.activeTabKey
         );
         if (activeTab) {
-            console.log('执行快速重连', activeTab.key);
-            // 执行实际的重连逻辑
+            console.log('【WebSocket】执行快速重连', activeTab.key);
+            WebSocketService.refreshConnection(activeTab);
         }
+    } else if (tab) {
+        WebSocketService.refreshConnection(tab);
     }
 };
 
 /**
- * WebSocket管理器Hook
- * 负责创建、管理WebSocket连接的生命周期
+ * WebSocket管理器Hook - WebSocketService的React封装
+ * 提供React状态和方法，内部调用WebSocketService
  */
 export const useWebSocketManager = () => {
     const [isConnected, setIsConnected] = useState(false);
     const [latestActivityTime, setLatestActivityTime] = useState(0);
+    // 保留这些ref用于跟踪状态，与原API兼容
     const connectingRef = useRef<Set<string>>(new Set());
     const reconnectTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
 
     // 封装writeColorText以处理类型兼容性
     const writeTerminalText = useCallback((tab: TerminalTab, color: string, text: string) => {
         if (tab.xtermRef?.current) {
-            writeColorText(tab.xtermRef.current, color, text);
+            writeColorText(tab.xtermRef.current, text, color);
         }
     }, []);
 
     /**
      * 创建WebSocket连接
+     * 现在是WebSocketService.connect的封装
      */
     const createWebSocketConnection = useCallback((tab: TerminalTab, onOpen?: () => void, onMessage?: (event: MessageEvent) => void, onClose?: () => void) => {
         if (!tab.connectionId || !tab.sessionId) {
@@ -75,174 +67,122 @@ export const useWebSocketManager = () => {
             return null;
         }
 
-        // 如果已经存在连接或正在连接中，则返回
-        if (tab.webSocketRef?.current || connectingRef.current.has(tab.key)) {
-            return null;
+        // 记录自定义回调
+        const tabKey = tab.key;
+        const customCallbacks = {
+            onOpen,
+            onMessage,
+            onClose
+        };
+
+        // 存储到全局Map中，以便在事件中调用
+        if (!window._webSocketCallbacks) {
+            window._webSocketCallbacks = new Map();
         }
+        window._webSocketCallbacks.set(tabKey, customCallbacks);
 
-        // 标记为正在连接
-        connectingRef.current.add(tab.key);
-
-        // 创建WebSocket连接
-        try {
-            const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws/terminal/${tab.connectionId}/${tab.sessionId}`;
-            const ws = new WebSocket(wsUrl);
-
-            // 设置WebSocket引用
-            if (!tab.webSocketRef) {
-                tab.webSocketRef = { current: null };
-            }
-            tab.webSocketRef.current = ws;
-
-            // 设置WebSocket事件处理器
-            ws.onopen = () => {
+        // 创建定制的协议处理器
+        const customHandler = {
+            handleMessage: (t: TerminalTab, event: MessageEvent) => {
+                // 如果有自定义onMessage，则调用
+                const callbacks = window._webSocketCallbacks?.get(t.key);
+                if (callbacks?.onMessage) {
+                    callbacks.onMessage(event);
+                }
+            },
+            handleOpen: (t: TerminalTab) => {
+                // 更新Hook状态
                 setIsConnected(true);
-                connectingRef.current.delete(tab.key);
 
-                // 清除重连定时器
-                if (reconnectTimersRef.current[tab.key]) {
-                    clearTimeout(reconnectTimersRef.current[tab.key]);
-                    delete reconnectTimersRef.current[tab.key];
+                // 如果有自定义onOpen，则调用
+                const callbacks = window._webSocketCallbacks?.get(t.key);
+                if (callbacks?.onOpen) {
+                    callbacks.onOpen();
                 }
-
-                if (tab.xtermRef?.current) {
-                    writeTerminalText(tab, 'green', '连接建立成功!\r\n');
-                }
-
-                // 更新活动时间
-                tab.lastActivityTime = Date.now();
-                setLatestActivityTime(tab.lastActivityTime);
-
-                // 调用自定义onOpen回调
-                onOpen?.();
-            };
-
-            ws.onmessage = (event) => {
-                // 更新活动时间
-                tab.lastActivityTime = Date.now();
-                setLatestActivityTime(tab.lastActivityTime);
-
-                // 优先使用自定义消息处理器
-                if (onMessage) {
-                    onMessage(event);
-                } else {
-                    // 使用自定义的消息处理器
-                    handleWebSocketMessage(tab, event);
-                }
-            };
-
-            ws.onclose = () => {
-                // 只有当前引用和关闭的WebSocket相同时才清空引用
-                if (tab.webSocketRef?.current === ws) {
-                    tab.webSocketRef.current = null;
-                }
-
-                connectingRef.current.delete(tab.key);
+            },
+            handleClose: (t: TerminalTab) => {
+                // 更新Hook状态
                 setIsConnected(false);
 
-                if (tab.xtermRef?.current) {
-                    writeTerminalText(tab, 'red', '连接已关闭，将在5秒后尝试重连...\r\n');
+                // 如果有自定义onClose，则调用
+                const callbacks = window._webSocketCallbacks?.get(t.key);
+                if (callbacks?.onClose) {
+                    callbacks.onClose();
                 }
-
-                // 调用自定义onClose回调
-                onClose?.();
-
-                // 设置重连定时器
-                reconnectTimersRef.current[tab.key] = setTimeout(() => {
-                    if (terminalStateRef.current?.tabs.find(t => t.key === tab.key)) {
-                        createWebSocketConnection(tab, onOpen, onMessage, onClose);
-                    }
-                }, 5000);
-            };
-
-            ws.onerror = () => {
-                if (tab.xtermRef?.current) {
-                    writeTerminalText(tab, 'red', '连接发生错误\r\n');
-                }
-            };
-
-            return ws;
-        } catch (error) {
-            connectingRef.current.delete(tab.key);
-            if (tab.xtermRef?.current) {
-                writeTerminalText(tab, 'red', `创建WebSocket连接失败: ${error}\r\n`);
             }
-            return null;
+        };
+
+        // 记录连接中状态
+        connectingRef.current.add(tab.key);
+
+        // 调用WebSocketService创建连接
+        const ws = WebSocketService.connect(tab);
+
+        // 如果创建成功，返回WS对象
+        if (ws) {
+            return ws;
         }
+
+        // 创建失败，清理状态
+        connectingRef.current.delete(tab.key);
+        return null;
     }, [writeTerminalText]);
 
     /**
      * 关闭WebSocket连接
+     * WebSocketService.closeConnection的封装
      */
     const closeWebSocketConnection = useCallback((tab: TerminalTab) => {
-        // 清除重连定时器
+        // 清除自定义回调
+        window._webSocketCallbacks?.delete(tab.key);
+
+        // 清除本地状态
+        connectingRef.current.delete(tab.key);
         if (reconnectTimersRef.current[tab.key]) {
             clearTimeout(reconnectTimersRef.current[tab.key]);
             delete reconnectTimersRef.current[tab.key];
         }
 
-        // 关闭WebSocket连接
-        if (tab.webSocketRef?.current) {
-            try {
-                tab.webSocketRef.current.close();
-            } catch (e) {
-                // 忽略关闭错误
-            }
-            tab.webSocketRef.current = null;
-        }
-
-        connectingRef.current.delete(tab.key);
+        // 调用服务关闭连接
+        WebSocketService.closeConnection(tab.key);
     }, []);
 
     /**
      * 关闭所有WebSocket连接
+     * WebSocketService.closeAllConnections的封装
      */
     const closeAllConnections = useCallback(() => {
-        // 获取所有标签
-        const tabs = terminalStateRef.current?.tabs || [];
+        // 清除所有自定义回调
+        if (window._webSocketCallbacks) {
+            window._webSocketCallbacks.clear();
+        }
 
-        // 关闭每个标签的WebSocket连接
-        tabs.forEach(tab => {
-            closeWebSocketConnection(tab);
-        });
-
-        // 清除所有重连定时器
+        // 清除本地状态
+        connectingRef.current.clear();
         Object.keys(reconnectTimersRef.current).forEach(key => {
             clearTimeout(reconnectTimersRef.current[key]);
             delete reconnectTimersRef.current[key];
         });
 
-        // 清空连接中集合
-        connectingRef.current.clear();
-    }, [closeWebSocketConnection]);
+        // 调用服务关闭所有连接
+        WebSocketService.closeAllConnections();
+    }, []);
 
     /**
      * 向WebSocket发送数据
+     * WebSocketService.sendData的封装
      */
     const sendData = useCallback((tab: TerminalTab, data: string | ArrayBuffer | Blob) => {
-        // 如果WebSocket连接不存在或未打开，则尝试重新连接
-        if (!tab.webSocketRef?.current || tab.webSocketRef.current.readyState !== WebSocket.OPEN) {
-            if (!connectingRef.current.has(tab.key)) {
-                createWebSocketConnection(tab);
-            }
-            return false;
-        }
+        // 调用服务发送数据
+        const success = WebSocketService.sendData(tab, data);
 
-        try {
-            tab.webSocketRef.current.send(data);
-
-            // 更新活动时间
-            tab.lastActivityTime = Date.now();
+        // 如果发送成功，更新活动时间
+        if (success && tab.lastActivityTime) {
             setLatestActivityTime(tab.lastActivityTime);
-
-            return true;
-        } catch (error) {
-            if (tab.xtermRef?.current) {
-                writeTerminalText(tab, 'red', `发送数据失败: ${error}\r\n`);
-            }
-            return false;
         }
-    }, [createWebSocketConnection, writeTerminalText]);
+
+        return success;
+    }, []);
 
     /**
      * 检查WebSocket状态
@@ -252,7 +192,41 @@ export const useWebSocketManager = () => {
             return 'CLOSED';
         }
 
-        return getWebSocketStateText(tab.webSocketRef.current.readyState);
+        const readyState = tab.webSocketRef.current.readyState;
+        switch (readyState) {
+            case WebSocket.CONNECTING:
+                return 'CONNECTING';
+            case WebSocket.OPEN:
+                return 'OPEN';
+            case WebSocket.CLOSING:
+                return 'CLOSING';
+            case WebSocket.CLOSED:
+                return 'CLOSED';
+            default:
+                return 'UNKNOWN';
+        }
+    }, []);
+
+    // 定期更新连接状态
+    useEffect(() => {
+        const updateActivityInterval = setInterval(() => {
+            // 获取当前活动标签
+            const activeTab = terminalStateRef.current?.tabs.find(
+                t => t.key === terminalStateRef.current?.activeTabKey
+            );
+
+            if (activeTab) {
+                // 获取连接状态
+                const status = WebSocketService.getConnectionStatus(activeTab.key);
+                // 更新React状态
+                setIsConnected(status.isConnected);
+                setLatestActivityTime(status.lastActivityTime);
+            }
+        }, 2000);
+
+        return () => {
+            clearInterval(updateActivityInterval);
+        };
     }, []);
 
     return {
@@ -267,5 +241,16 @@ export const useWebSocketManager = () => {
         setIsConnected
     };
 };
+
+// 为自定义回调扩展Window接口
+declare global {
+    interface Window {
+        _webSocketCallbacks?: Map<string, {
+            onOpen?: () => void;
+            onMessage?: (event: MessageEvent) => void;
+            onClose?: () => void;
+        }>;
+    }
+}
 
 export default useWebSocketManager;

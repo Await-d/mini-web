@@ -129,6 +129,10 @@ export interface TerminalTab {
     remoteApp?: string;
     [key: string]: any;
   };
+  // 图形化协议组件引用
+  rdpComponentRef?: RefObject<any>; // RDP组件引用
+  vncComponentRef?: RefObject<any>; // VNC组件引用
+  lastActivityTime?: number; // 最后活动时间
 }
 
 // 定义上下文状态类型

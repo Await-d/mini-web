@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // API基础URL - 确保所有HTTP请求使用8080端口
-const API_BASE_URL = 'http://localhost:8080/api';
+export const API_BASE_URL = 'http://localhost:8080/api';
 
 // 创建axios实例
 const api = axios.create({
@@ -29,10 +29,10 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     // 对于登录请求，不自动跳转，让组件处理错误
-    const isLoginRequest = error.config && 
-                         error.config.url && 
-                         error.config.url.includes('/auth/login');
-    
+    const isLoginRequest = error.config &&
+      error.config.url &&
+      error.config.url.includes('/auth/login');
+
     // 处理401错误（非登录请求）
     if (error.response && error.response.status === 401 && !isLoginRequest) {
       // 清除本地存储
@@ -119,7 +119,7 @@ export const userAPI = {
       data: User;
     }>(`/admin/users/${id}`);
   },
-  
+
   // 创建用户
   createUser: (userData: Omit<User, 'id' | 'created_at' | 'updated_at'>) => {
     return api.post<{
@@ -128,7 +128,7 @@ export const userAPI = {
       data: User;
     }>('/admin/users', userData);
   },
-  
+
   // 更新用户
   updateUser: (id: number, userData: Partial<User>) => {
     return api.put<{
@@ -137,7 +137,7 @@ export const userAPI = {
       data: User;
     }>(`/admin/users/${id}`, userData);
   },
-  
+
   // 删除用户
   deleteUser: (id: number) => {
     return api.delete<{
@@ -145,7 +145,7 @@ export const userAPI = {
       message: string;
     }>(`/admin/users/${id}`);
   },
-  
+
   // 更改用户状态
   changeUserStatus: (id: number, status: string) => {
     return api.put<{
@@ -154,7 +154,7 @@ export const userAPI = {
       data: User;
     }>(`/admin/users/${id}/status`, { status });
   },
-  
+
   // 重置密码
   resetPassword: (id: number) => {
     return api.post<{
