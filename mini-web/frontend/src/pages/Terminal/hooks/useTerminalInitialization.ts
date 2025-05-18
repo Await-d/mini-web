@@ -1,7 +1,7 @@
-import {useCallback} from 'react';
-import type {TerminalTab} from '../../../contexts/TerminalContext';
-import {initTerminal} from '../utils';
-import {Terminal} from 'xterm';
+import { useCallback } from 'react';
+import type { TerminalTab } from '../../../contexts/TerminalContext';
+import { initTerminal } from '../utils';
+import { Terminal } from 'xterm';
 
 /**
  * 强制刷新终端显示
@@ -46,6 +46,37 @@ export const useTerminalInitialization = () => {
             }
 
             console.log('正在初始化终端...');
+
+            // 检查WebSocket连接状态
+            if (!activeTab.webSocketRef?.current ||
+                (activeTab.webSocketRef.current.readyState !== WebSocket.CONNECTING &&
+                    activeTab.webSocketRef.current.readyState !== WebSocket.OPEN)) {
+                console.warn(`初始化终端前发现WebSocket未连接: ${activeTab.key}`);
+
+                // 确保有连接ID和会话ID
+                if (activeTab.connectionId && activeTab.sessionId) {
+                    // 触发连接事件
+                    const event = new CustomEvent('terminal-connection-needed', {
+                        detail: {
+                            tabKey: activeTab.key,
+                            connectionId: activeTab.connectionId,
+                            sessionId: activeTab.sessionId
+                        }
+                    });
+                    window.dispatchEvent(event);
+
+                    console.log(`已触发WebSocket连接事件: ${activeTab.key}`);
+
+                    // 需要先连接WebSocket，延迟初始化终端
+                    setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('terminal-init-retry', {
+                            detail: { tabKey: activeTab.key }
+                        }));
+                    }, 1000);
+
+                    return false;
+                }
+            }
 
             // 创建更强大的数据处理函数，确保数据被发送到WebSocket
             const enhancedDataHandler = (data: string) => {
@@ -105,14 +136,27 @@ export const useTerminalInitialization = () => {
             }
 
             // 保存引用到Tab对象
-            const {term, fitAddon, searchAddon} = terminalInstance;
+            const { term, fitAddon, searchAddon } = terminalInstance;
             activeTab.xtermRef.current = term;
             activeTab.fitAddonRef.current = fitAddon;
             activeTab.searchAddonRef.current = searchAddon;
 
+            // 显示欢迎消息
+            term.writeln('\r\n\x1b[32m欢迎使用SSH终端！\x1b[0m');
+            term.writeln('\r\n连接中，请稍候...');
+
+            // 记录终端状态
+            console.log('终端初始化成功', {
+                termExists: !!term,
+                containerExists: !!activeTab.terminalRef.current,
+                fitAddonExists: !!fitAddon,
+                tabKey: activeTab.key,
+                protocol: activeTab.connection?.protocol
+            });
+
             // 确保messageQueueRef正确初始化
             if (!activeTab.messageQueueRef) {
-                activeTab.messageQueueRef = {current: terminalInstance.messageQueue};
+                activeTab.messageQueueRef = { current: terminalInstance.messageQueue };
             } else {
                 activeTab.messageQueueRef.current = terminalInstance.messageQueue;
             }
@@ -275,7 +319,7 @@ export const useTerminalInitialization = () => {
 
                     // 发送消息
                     activeTab.webSocketRef.current.send(resizeMessage);
-                    console.log('已发送终端调整大小消息', {cols: newCols, rows: newRows});
+                    console.log('已发送终端调整大小消息', { cols: newCols, rows: newRows });
                 } catch (e) {
                     console.error('发送终端调整大小消息失败:', e);
                 }

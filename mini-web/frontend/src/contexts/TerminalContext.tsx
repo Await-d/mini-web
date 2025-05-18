@@ -154,6 +154,21 @@ export type TerminalAction =
   | { type: 'SET_ACTIVE_TAB'; payload: string }
   | { type: 'CLEAR_TABS' };
 
+// 声明WebSocketService全局变量
+declare global {
+  interface Window {
+    WebSocketService?: {
+      closeConnection: (tabKey: string) => void;
+      closeAllConnections: () => void;
+    };
+    _webSocketCallbacks?: Map<string, {
+      onOpen?: () => void;
+      onMessage?: (event: MessageEvent) => void;
+      onClose?: () => void;
+    }>;
+  }
+}
+
 // 定义上下文类型
 interface TerminalContextType {
   state: TerminalContextState;
@@ -443,14 +458,64 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
         // 清理 WebSocket, xterm 等资源
         try {
+          // 立即清理WebSocket连接
           if (closedTab.webSocketRef?.current) {
-            safelyCloseWebSocket(closedTab.webSocketRef.current, closedTab.sessionId);
+            console.log(`立即关闭WebSocket连接: ${action.payload} (状态: ${closedTab.webSocketRef.current.readyState})`);
+
+            // 无论WebSocket当前状态如何，都尝试关闭
+            try {
+              // 如果WebSocket打开，尝试发送终止消息
+              if (closedTab.webSocketRef.current.readyState === WebSocket.OPEN) {
+                closedTab.webSocketRef.current.send(JSON.stringify({
+                  type: 'terminate',
+                  sessionId: closedTab.sessionId
+                }));
+              }
+
+              // 强制关闭WebSocket连接
+              closedTab.webSocketRef.current.close();
+              closedTab.webSocketRef.current.onopen = null;
+              closedTab.webSocketRef.current.onclose = null;
+              closedTab.webSocketRef.current.onerror = null;
+              closedTab.webSocketRef.current.onmessage = null;
+
+              // 清除WebSocket引用
+              closedTab.webSocketRef.current = null;
+            } catch (wsError) {
+              console.error(`关闭WebSocket连接时出错:`, wsError);
+            }
+
+            // 调用WebSocketService关闭连接
+            if (window.WebSocketService) {
+              window.WebSocketService.closeConnection(action.payload);
+            }
           }
 
+          // 清理终端实例
           if (closedTab.xtermRef?.current) {
-            closedTab.fitAddonRef?.current?.dispose();
-            closedTab.searchAddonRef?.current?.dispose();
+            console.log(`清理终端实例: ${action.payload}`);
+
+            // 清理终端插件
+            if (closedTab.fitAddonRef?.current) {
+              closedTab.fitAddonRef.current.dispose();
+              closedTab.fitAddonRef.current = null;
+            }
+
+            if (closedTab.searchAddonRef?.current) {
+              closedTab.searchAddonRef.current.dispose();
+              closedTab.searchAddonRef.current = null;
+            }
+
+            // 清理终端实例
             closedTab.xtermRef.current.dispose();
+            closedTab.xtermRef.current = null;
+          }
+
+          // 执行任何自定义清理函数
+          if (closedTab.cleanupRef?.current) {
+            console.log(`执行自定义清理函数: ${action.payload}`);
+            closedTab.cleanupRef.current();
+            closedTab.cleanupRef.current = null;
           }
 
           // 清理会话相关的localStorage存储
@@ -461,8 +526,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
             // 清理该会话的localStorage存储
             localStorage.removeItem(`session_${closedTab.sessionId}`);
           }
-
-          // 记录关闭的标签信息，用于防止自动重新创建
         } catch (e) {
           console.error(`关闭标签资源时出错 ${action.payload}:`, e);
         }
@@ -915,14 +978,64 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     // 清理 WebSocket, xterm 等资源
     try {
+      // 立即清理WebSocket连接
       if (tabToClose.webSocketRef?.current) {
-        safelyCloseWebSocket(tabToClose.webSocketRef.current, tabToClose.sessionId);
+        console.log(`立即关闭WebSocket连接: ${key} (状态: ${tabToClose.webSocketRef.current.readyState})`);
+
+        // 无论WebSocket当前状态如何，都尝试关闭
+        try {
+          // 如果WebSocket打开，尝试发送终止消息
+          if (tabToClose.webSocketRef.current.readyState === WebSocket.OPEN) {
+            tabToClose.webSocketRef.current.send(JSON.stringify({
+              type: 'terminate',
+              sessionId: tabToClose.sessionId
+            }));
+          }
+
+          // 强制关闭WebSocket连接
+          tabToClose.webSocketRef.current.close();
+          tabToClose.webSocketRef.current.onopen = null;
+          tabToClose.webSocketRef.current.onclose = null;
+          tabToClose.webSocketRef.current.onerror = null;
+          tabToClose.webSocketRef.current.onmessage = null;
+
+          // 清除WebSocket引用
+          tabToClose.webSocketRef.current = null;
+        } catch (wsError) {
+          console.error(`关闭WebSocket连接时出错:`, wsError);
+        }
+
+        // 调用WebSocketService关闭连接
+        if (window.WebSocketService) {
+          window.WebSocketService.closeConnection(key);
+        }
       }
 
+      // 清理终端实例
       if (tabToClose.xtermRef?.current) {
-        tabToClose.fitAddonRef?.current?.dispose();
-        tabToClose.searchAddonRef?.current?.dispose();
+        console.log(`清理终端实例: ${key}`);
+
+        // 清理终端插件
+        if (tabToClose.fitAddonRef?.current) {
+          tabToClose.fitAddonRef.current.dispose();
+          tabToClose.fitAddonRef.current = null;
+        }
+
+        if (tabToClose.searchAddonRef?.current) {
+          tabToClose.searchAddonRef.current.dispose();
+          tabToClose.searchAddonRef.current = null;
+        }
+
+        // 清理终端实例
         tabToClose.xtermRef.current.dispose();
+        tabToClose.xtermRef.current = null;
+      }
+
+      // 执行任何自定义清理函数
+      if (tabToClose.cleanupRef?.current) {
+        console.log(`执行自定义清理函数: ${key}`);
+        tabToClose.cleanupRef.current();
+        tabToClose.cleanupRef.current = null;
       }
 
       // 清理会话相关的localStorage存储

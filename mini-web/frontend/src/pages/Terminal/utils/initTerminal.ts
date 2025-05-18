@@ -25,7 +25,7 @@ export const initTerminal = (
     }
 
     try {
-        console.log('开始初始化终端...');
+        console.log('开始初始化终端...', container);
 
         // 准备容器
         prepareContainer(container);
@@ -49,6 +49,8 @@ export const initTerminal = (
             cols: 80,
             rows: 24,
             allowProposedApi: true,
+            convertEol: true,           // 确保回车换行正确处理
+            rendererType: 'dom',        // 使用DOM渲染器提高兼容性
         });
 
         // 创建并加载fit插件以自动调整大小
@@ -71,14 +73,38 @@ export const initTerminal = (
         const messageQueue: string[] = [];
 
         // 打开终端前添加日志
-        console.log('准备打开终端...');
+        console.log('准备打开终端...', {
+            container: container.id,
+            size: { width: container.clientWidth, height: container.clientHeight },
+            visible: window.getComputedStyle(container).visibility
+        });
 
         // 打开终端
         term.open(container);
         console.log('终端已打开');
 
-        // 应用所有终端修复
-        console.log('应用终端修复...');
+        // 检查终端元素是否正确创建
+        const xtermTerminal = container.querySelector('.terminal') as HTMLElement;
+        if (xtermTerminal) {
+            console.log('终端DOM元素已创建:', xtermTerminal);
+
+            // 强制设置终端元素的样式
+            xtermTerminal.style.visibility = 'visible';
+            xtermTerminal.style.opacity = '1';
+            xtermTerminal.style.display = 'block';
+
+            // 检查文本层元素
+            const textLayer = container.querySelector('.xterm-text-layer');
+            if (textLayer) {
+                (textLayer as HTMLElement).style.visibility = 'visible';
+                (textLayer as HTMLElement).style.opacity = '1';
+                console.log('文本层DOM元素已修复');
+            } else {
+                console.warn('找不到文本层DOM元素');
+            }
+        } else {
+            console.warn('找不到终端DOM元素');
+        }
 
         // 添加数据处理器
         term.onData((data) => {
@@ -95,51 +121,22 @@ export const initTerminal = (
                 // 如果没有数据处理器，也确保添加本地回显
                 term.write(data);
             }
-
-            // 注意：不在这里添加额外的本地回显，由dataHandler负责回显或在上面的else分支中处理
         });
-
-        // 添加特殊按键事件监听器
-        term.onKey((event) => {
-            console.log('⭐ 终端接收到按键事件:', event.key, event.domEvent);
-
-            // 特别检查回车键
-            if (event.domEvent.key === 'Enter') {
-                console.log('⭐ 检测到回车键事件，domEvent:', event.domEvent);
-            }
-        });
-
-        // 添加终端就绪事件
-        term.onResize(() => {
-            console.log('终端大小已调整:', term.cols, term.rows);
-
-            // 触发终端就绪事件
-            const readyEvent = new CustomEvent('terminal-size-changed', {
-                detail: {
-                    cols: term.cols,
-                    rows: term.rows,
-                    terminalInstance: term
-                }
-            });
-            window.dispatchEvent(readyEvent);
-        });
-
-        // 调整大小
-        try {
-            console.log('调整终端大小...');
-            setTimeout(() => {
-                fitAddon.fit();
-                console.log('终端大小已调整为:', term.cols, term.rows);
-            }, 0);
-        } catch (e) {
-            console.error('首次调整终端大小失败:', e);
-        }
 
         // 设置焦点
         setTimeout(() => {
             try {
+                // 确保终端处于可见状态
+                container.style.visibility = 'visible';
+                container.style.display = 'block';
+                container.style.opacity = '1';
+
                 term.focus();
                 console.log('终端已获取焦点');
+
+                // 写入欢迎消息
+                term.writeln('\r\n\x1b[32m终端已成功初始化!\x1b[0m');
+                term.writeln('\r\n等待建立连接...\r\n');
 
                 // 触发终端就绪事件
                 const readyEvent = new CustomEvent('terminal-ready', {
@@ -154,11 +151,26 @@ export const initTerminal = (
             }
         }, 100);
 
-        // 添加终端销毁时的清理函数
-        const originalDispose = term.dispose.bind(term);
-        term.dispose = () => {
-            originalDispose();
-        };
+        // 调整大小
+        try {
+            console.log('调整终端大小...');
+            setTimeout(() => {
+                fitAddon.fit();
+                console.log('终端大小已调整为:', term.cols, term.rows);
+
+                // 触发大小调整事件
+                const sizeEvent = new CustomEvent('terminal-size-changed', {
+                    detail: {
+                        cols: term.cols,
+                        rows: term.rows,
+                        terminalInstance: term
+                    }
+                });
+                window.dispatchEvent(sizeEvent);
+            }, 300);
+        } catch (e) {
+            console.error('首次调整终端大小失败:', e);
+        }
 
         // 保存终端实例到全局对象以便调试
         if (typeof window !== 'undefined') {
@@ -196,6 +208,8 @@ function prepareContainer(container: HTMLElement) {
     container.style.display = 'flex';
     container.style.flex = '1';
     container.style.backgroundColor = '#1e1e1e';
+    container.style.visibility = 'visible';
+    container.style.opacity = '1';
 
     // 添加额外的类用于样式选择器
     container.classList.add('xterm-container');
@@ -228,9 +242,22 @@ function prepareContainer(container: HTMLElement) {
                 display: block !important;
                 z-index: 20 !important;
             }
+            .terminal {
+                visibility: visible !important;
+                display: block !important;
+                opacity: 1 !important;
+            }
+            .terminal-wrapper {
+                height: 100% !important;
+                width: 100% !important;
+                visibility: visible !important;
+                display: block !important;
+            }
         `;
         document.head.appendChild(style);
     }
+
+    console.log('终端容器已准备完毕');
 }
 
 /**

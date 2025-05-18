@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-18 16:40:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-18 11:39:45
+ * @LastEditTime: 2025-05-18 11:46:01
  * @Description: WebSocket统一管理服务
  */
 import type { TerminalTab } from '../../../contexts/TerminalContext';
@@ -280,7 +280,29 @@ class WebSocketServiceClass {
         try {
             if (connection.ws.readyState === WebSocket.OPEN ||
                 connection.ws.readyState === WebSocket.CONNECTING) {
+                // 如果WebSocket打开，尝试发送终止消息
+                if (connection.ws.readyState === WebSocket.OPEN) {
+                    try {
+                        connection.ws.send(JSON.stringify({
+                            type: 'terminate',
+                            sessionId: connection.sessionId
+                        }));
+                    } catch (e) {
+                        // 忽略发送终止消息的错误
+                        console.warn(`发送终止消息失败:`, e);
+                    }
+                }
+
+                // 清除所有回调函数
+                connection.ws.onopen = null;
+                connection.ws.onclose = null;
+                connection.ws.onerror = null;
+                connection.ws.onmessage = null;
+
+                // 关闭WebSocket
                 connection.ws.close();
+
+                console.log(`WebSocket已强制关闭: ${tabKey}`);
             }
         } catch (e) {
             console.error(`【WebSocket】关闭连接错误:`, e);
@@ -306,10 +328,30 @@ class WebSocketServiceClass {
             try {
                 if (connection.ws.readyState === WebSocket.OPEN ||
                     connection.ws.readyState === WebSocket.CONNECTING) {
+                    // 如果WebSocket打开，尝试发送终止消息
+                    if (connection.ws.readyState === WebSocket.OPEN) {
+                        try {
+                            connection.ws.send(JSON.stringify({
+                                type: 'terminate',
+                                sessionId: connection.sessionId
+                            }));
+                        } catch (e) {
+                            // 忽略发送终止消息的错误
+                        }
+                    }
+
+                    // 清除所有回调函数，防止触发不必要的事件
+                    connection.ws.onopen = null;
+                    connection.ws.onclose = null;
+                    connection.ws.onerror = null;
+                    connection.ws.onmessage = null;
+
+                    // 关闭WebSocket
                     connection.ws.close();
                 }
             } catch (e) {
                 // 忽略关闭错误
+                console.warn(`关闭WebSocket连接失败: ${tabKey}`, e);
             }
         }
 
@@ -400,6 +442,11 @@ class WebSocketServiceClass {
 
 // 导出单例实例
 export const WebSocketService = new WebSocketServiceClass();
+
+// 将实例添加到window对象中以便于全局访问
+if (typeof window !== 'undefined') {
+    window.WebSocketService = WebSocketService;
+}
 
 // 默认导出，方便导入
 export default WebSocketService; 

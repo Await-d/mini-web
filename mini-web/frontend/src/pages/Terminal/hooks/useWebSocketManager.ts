@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-09 17:49:44
  * @LastEditors: Await
- * @LastEditTime: 2025-05-18 10:30:14
+ * @LastEditTime: 2025-05-18 17:55:18
  * @Description: WebSocket管理钩子 - WebSocketService的React Hook封装
  */
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -58,75 +58,102 @@ export const useWebSocketManager = () => {
     /**
      * 创建WebSocket连接
      * 现在是WebSocketService.connect的封装
+     * 支持两种调用方式:
+     * 1. createWebSocketConnection(tab) - 直接传递标签对象
+     * 2. createWebSocketConnection(connectionId, sessionId, tabKey) - 传递参数
      */
-    const createWebSocketConnection = useCallback((tab: TerminalTab, onOpen?: () => void, onMessage?: (event: MessageEvent) => void, onClose?: () => void) => {
-        if (!tab.connectionId || !tab.sessionId) {
-            if (tab.xtermRef?.current) {
-                writeTerminalText(tab, 'red', '错误: 缺少必要的连接参数\r\n');
+    const createWebSocketConnection = useCallback((
+        tabOrConnectionId: TerminalTab | number,
+        sessionId?: number,
+        tabKey?: string
+    ) => {
+        let tab: TerminalTab | undefined;
+
+        // 检查第一个参数是否是标签对象
+        if (typeof tabOrConnectionId === 'object') {
+            tab = tabOrConnectionId;
+            tabKey = tab.key;
+        } else if (typeof tabOrConnectionId === 'number' && typeof sessionId === 'number' && tabKey) {
+            // 查找对应的标签
+            tab = terminalStateRef.current?.tabs.find(t => t.key === tabKey);
+
+            // 如果没有找到标签，但有连接ID和会话ID，尝试通过这些信息查找
+            if (!tab) {
+                tab = terminalStateRef.current?.tabs.find(t =>
+                    t.connectionId === tabOrConnectionId &&
+                    t.sessionId === sessionId
+                );
+            }
+
+            // 如果仍然没有找到标签，尝试从活动标签获取
+            if (!tab && terminalStateRef.current?.activeTabKey) {
+                const activeTab = terminalStateRef.current.tabs.find(t =>
+                    t.key === terminalStateRef.current?.activeTabKey
+                );
+                if (activeTab) {
+                    console.warn(`通过tabKey=${tabKey}未找到标签，使用活动标签: ${activeTab.key}`);
+                    tab = activeTab;
+                    tabKey = activeTab.key;
+                }
+            }
+        }
+
+        if (!tab) {
+            console.error(`找不到标签: ${tabKey || 'undefined'}, 连接ID: ${typeof tabOrConnectionId === 'number' ? tabOrConnectionId : 'N/A'
+                }, 会话ID: ${sessionId || 'undefined'}`);
+
+            // 如果找不到标签但有足够的信息，可以考虑创建新标签
+            if (typeof tabOrConnectionId === 'number' && sessionId) {
+                console.log('未找到标签，将在下次渲染时重试');
+                // 延迟执行，期望下一次渲染后标签已创建
+                setTimeout(() => {
+                    createWebSocketConnection(tabOrConnectionId, sessionId, tabKey);
+                }, 1000);
             }
             return null;
         }
 
-        // 记录自定义回调
-        const tabKey = tab.key;
-        const customCallbacks = {
-            onOpen,
-            onMessage,
-            onClose
-        };
-
-        // 存储到全局Map中，以便在事件中调用
-        if (!window._webSocketCallbacks) {
-            window._webSocketCallbacks = new Map();
+        // 更新标签连接信息（如果是通过参数调用的情况）
+        if (typeof tabOrConnectionId === 'number') {
+            tab.connectionId = tabOrConnectionId;
+            if (sessionId) tab.sessionId = sessionId;
         }
-        window._webSocketCallbacks.set(tabKey, customCallbacks);
 
-        // 创建定制的协议处理器
-        const customHandler = {
-            handleMessage: (t: TerminalTab, event: MessageEvent) => {
-                // 如果有自定义onMessage，则调用
-                const callbacks = window._webSocketCallbacks?.get(t.key);
-                if (callbacks?.onMessage) {
-                    callbacks.onMessage(event);
-                }
-            },
-            handleOpen: (t: TerminalTab) => {
-                // 更新Hook状态
-                setIsConnected(true);
-
-                // 如果有自定义onOpen，则调用
-                const callbacks = window._webSocketCallbacks?.get(t.key);
-                if (callbacks?.onOpen) {
-                    callbacks.onOpen();
-                }
-            },
-            handleClose: (t: TerminalTab) => {
-                // 更新Hook状态
-                setIsConnected(false);
-
-                // 如果有自定义onClose，则调用
-                const callbacks = window._webSocketCallbacks?.get(t.key);
-                if (callbacks?.onClose) {
-                    callbacks.onClose();
+        // 检查是否已经有活跃连接
+        if (tab.webSocketRef?.current) {
+            const readyState = tab.webSocketRef.current.readyState;
+            if (readyState === WebSocket.CONNECTING || readyState === WebSocket.OPEN) {
+                console.log(`标签 ${tab.key} 已有活跃WebSocket连接(状态: ${readyState})，跳过创建`);
+                return tab.webSocketRef.current;
+            } else {
+                // 如果连接已关闭或正在关闭，清理它
+                console.log(`标签 ${tab.key} 的WebSocket连接已关闭或正在关闭(状态: ${readyState})，将创建新连接`);
+                try {
+                    tab.webSocketRef.current.close();
+                    tab.webSocketRef.current = null;
+                } catch (e) {
+                    console.warn('关闭旧WebSocket连接失败:', e);
                 }
             }
-        };
-
-        // 记录连接中状态
-        connectingRef.current.add(tab.key);
-
-        // 调用WebSocketService创建连接
-        const ws = WebSocketService.connect(tab);
-
-        // 如果创建成功，返回WS对象
-        if (ws) {
-            return ws;
         }
 
-        // 创建失败，清理状态
-        connectingRef.current.delete(tab.key);
-        return null;
-    }, [writeTerminalText]);
+        // 调用WebSocketService创建连接
+        console.log(`创建WebSocket连接: connectionId=${tab.connectionId}, sessionId=${tab.sessionId}, tabKey=${tab.key}`);
+        const ws = WebSocketService.connect(tab);
+
+        if (ws) {
+            console.log(`WebSocket连接创建成功: ${tab.key}`);
+            // 确保更新标签的WebSocketRef
+            if (!tab.webSocketRef) {
+                tab.webSocketRef = { current: null };
+            }
+            tab.webSocketRef.current = ws;
+        } else {
+            console.error(`WebSocket连接创建失败: ${tab.key}`);
+        }
+
+        return ws;
+    }, []);
 
     /**
      * 关闭WebSocket连接

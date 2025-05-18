@@ -192,26 +192,23 @@ export const initializeTerminal = async (tab: any, options?: any): Promise<any> 
             }
         }
 
-        // 应用容器级别的样式修复
-        tab.classList.add('xterm-container');
-        tab.style.backgroundColor = TERMINAL_BG_COLOR;
-        tab.style.color = TERMINAL_FG_COLOR;
-        tab.style.overflow = 'hidden';
-        tab.style.position = 'relative';
-        tab.style.width = '100%';
-        tab.style.height = '100%';
-        tab.style.zIndex = '5';
-        tab.style.visibility = 'visible';
-        tab.style.display = 'block';
-        tab.style.opacity = '1';
+        // 为非图形协议初始化xterm终端
+        console.log('正在初始化非图形化终端 (SSH/Telnet):', protocol);
 
-        // 检查XTerm是否直接可用
-        let term: Terminal;
-        let fitAddon: FitAddon;
-        let searchAddon: SearchAddon;
-        let webLinksAddon: WebLinksAddon;
+        // 清空容器内容
+        if (tab.innerHTML) {
+            tab.innerHTML = '';
+        }
 
         try {
+            // 确保Tab有必要的引用
+            if (!tab.xtermRef) {
+                tab.xtermRef = { current: null };
+            }
+
+            // 解决容器尺寸问题
+            fixTerminalDomStyles(tab);
+
             // 优先使用直接导入的XTerm
             term = new Terminal({
                 cursorBlink: true,
@@ -248,7 +245,7 @@ export const initializeTerminal = async (tab: any, options?: any): Promise<any> 
                 lineHeight: 1.3,     // 增加行高，减少堆叠问题
                 rendererType: 'dom', // 强制使用DOM渲染器而非WebGL，解决某些堆叠问题
                 drawBoldTextInBrightColors: true, // 提高文本清晰度
-            } as any);
+            });
 
             fitAddon = new FitAddon();
             searchAddon = new SearchAddon();
