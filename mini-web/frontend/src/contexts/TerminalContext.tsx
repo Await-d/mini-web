@@ -16,7 +16,6 @@ const closeSessionSafely = async (sessionId?: number) => {
 
   // 如果会话已在关闭列表中，跳过
   if (closingSessionsSet.has(sessionId)) {
-    console.log(`【会话关闭】会话 ${sessionId} 已在关闭列表中，不重复关闭`);
     return;
   }
 
@@ -25,7 +24,6 @@ const closeSessionSafely = async (sessionId?: number) => {
 
   try {
     await sessionAPI.closeSession(sessionId);
-    console.log(`【会话关闭】成功关闭会话 ${sessionId}`);
   } catch (err) {
     console.error(`【会话关闭】关闭会话 ${sessionId} 失败:`, err);
     // 即使失败也假定会话已关闭或将被关闭，以防止重复请求
@@ -182,7 +180,6 @@ const updateTabsInLocalStorage = (tabs: TerminalTab[], activeKey: string) => {
       if (tabKey.startsWith('tab-') && tab.connectionId && tab.sessionId) {
         const timestamp = tabKey.split('-').pop() || Date.now().toString();
         tabKey = `conn-${tab.connectionId}-session-${tab.sessionId}-${timestamp}`;
-        console.log(`【存储】转换旧格式标签键: ${tab.key} -> ${tabKey}`);
       }
 
       // 针对每个标签提取必要信息
@@ -225,7 +222,6 @@ const cleanupOldFormatTabs = () => {
     const allTabsClosed = localStorage.getItem('all_tabs_closed') === 'true';
 
     if (forceClosingLastTab || allTabsClosed) {
-      console.log('【清理】检测到标签关闭标志，跳过旧格式转换并清理标签数据');
       localStorage.removeItem('terminal_tabs');
       return;
     }
@@ -251,7 +247,6 @@ const cleanupOldFormatTabs = () => {
 
         // 如果有旧格式标签，更新localStorage
         if (hasOldFormat) {
-          console.log('【清理】将旧格式标签转换为新格式');
           localStorage.setItem('terminal_tabs', JSON.stringify(cleanedTabs));
         }
       }
@@ -266,7 +261,6 @@ const clearAllTabClosingFlags = () => {
   localStorage.removeItem('force_closing_last_tab');
   localStorage.removeItem('all_tabs_closed');
   localStorage.removeItem('recently_closed_tab');
-  console.log('【标签标志】强制清除所有标签关闭标志');
 };
 
 // 在合适的位置添加检查标签关闭状态的辅助函数
@@ -301,7 +295,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
         // 如果是强制创建，清除所有关闭标志
         if (forceCreate) {
-          console.log(`【标签添加】检测到强制创建标志，清除所有关闭标志`);
           // 清除所有关闭标志
           localStorage.removeItem('force_closing_last_tab');
           localStorage.removeItem('all_tabs_closed');
@@ -317,7 +310,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           const recentlyClosedTab = localStorage.getItem('recently_closed_tab');
 
           if (forceClosingLastTab || allTabsClosed || recentlyClosedTab) {
-            console.log(`【标签添加】检测到标签关闭标志，跳过添加标签`);
             return state;
           }
         }
@@ -330,7 +322,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
         if (existingTabWithSameConnection) {
           // 如果已存在相同连接和会话的标签，激活它而不是创建新标签
-          console.log(`【标签去重】发现已存在的标签（相同连接ID和会话ID）: ${existingTabWithSameConnection.key}`);
           newState = {
             ...state,
             activeTabKey: existingTabWithSameConnection.key,
@@ -430,7 +421,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         // 检查是否是最后一个标签
         const isLastTab = state.tabs.length === 1;
         if (isLastTab) {
-          console.log(`【标签关闭】检测到关闭最后一个标签: ${action.payload}`);
           // 设置标志以防止URL变化触发标签创建
           localStorage.setItem('force_closing_last_tab', 'true');
           localStorage.setItem('all_tabs_closed', 'true');
@@ -469,7 +459,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           }
 
           // 记录关闭的标签信息，用于防止自动重新创建
-          console.log(`【标签清理】关闭标签 ${action.payload} 并清理相关资源`);
         } catch (e) {
           console.error(`关闭标签资源时出错 ${action.payload}:`, e);
         }
@@ -482,7 +471,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
         // 如果这是最后一个被关闭的标签，执行更彻底的清理
         if (updatedTabs.length === 0) {
-          console.log('【标签清理】关闭最后一个标签，执行彻底清理');
 
           // 清理所有标签相关的localStorage
           localStorage.removeItem('terminal_tabs');
@@ -523,12 +511,8 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           setTimeout(() => {
             // 再次检查当前是否确实没有标签了
             if (terminalStateRef.current && terminalStateRef.current.tabs.length === 0) {
-              console.log('【标签清理】确认所有标签已完全关闭，安全移除force_closing_last_tab标志');
               // 标签确实已关闭，可以安全移除标志
               localStorage.removeItem('force_closing_last_tab');
-            } else {
-              console.log('【标签清理】检测到仍有标签存在，继续保持关闭标志');
-              // 如果依然有标签，说明可能有新的恢复或创建逻辑执行，保持标志不变
             }
           }, 1000);
         } else {
@@ -650,7 +634,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
   const openOrActivateTab = useCallback((tabData: any) => {
     // 首先检查是否处于标签关闭状态，如果是则跳过创建
     if (isTabClosingActive()) {
-      console.log(`【标签创建】检测到标签关闭标志，跳过标签创建`);
       return;
     }
 
@@ -660,7 +643,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       // 使用统一的格式重新生成标签键
       const timestamp = tabData.timestamp || Date.now();
       standardTabKey = `conn-${tabData.connectionId}-session-${tabData.sessionId}-${timestamp}`;
-      console.log(`【标签格式】标准化标签键: ${tabData.tabKey || 'undefined'} -> ${standardTabKey}`);
     }
 
     // 首先检查是否已存在具有相同connectionId和sessionId的标签，无论键是什么
@@ -670,7 +652,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     );
 
     if (existingTabBySameConnection) {
-      console.log(`【标签激活】找到相同连接和会话的标签: ${existingTabBySameConnection.key}`);
       // 如果标签已存在，并且当前不是活动标签，则激活它
       if (state.activeTabKey !== existingTabBySameConnection.key) {
         dispatch({ type: 'SET_ACTIVE_TAB', payload: existingTabBySameConnection.key });
@@ -681,7 +662,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     // 然后按键检查标签是否存在
     const existingTab = state.tabs.find(t => t.key === standardTabKey);
     if (existingTab) {
-      console.log(`【标签激活】找到相同键的标签: ${existingTab.key}`);
       // 如果标签已存在，并且当前不是活动标签，则激活它
       if (state.activeTabKey !== standardTabKey) {
         dispatch({ type: 'SET_ACTIVE_TAB', payload: standardTabKey });
@@ -689,12 +669,10 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     } else {
       // 再次检查标签关闭状态，确保安全
       if (isTabClosingActive()) {
-        console.log(`【标签创建】二次检查发现关闭标志，跳过创建`);
         return;
       }
 
       // 标签不存在，创建新标签
-      console.log(`【标签创建】创建新标签: ${standardTabKey}`);
       const newTab: TerminalTab = {
         key: standardTabKey,
         title: tabData.connectionName || '新终端',
@@ -733,7 +711,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       // 如果是强制创建模式，清除所有关闭标志
       if (forceCreate) {
         clearAllTabClosingFlags();
-        console.log('【标签事件】强制创建模式，清除所有关闭标志');
       } else {
         // 先检查是否处于标签关闭状态
         if (isTabClosingActive()) {
@@ -744,11 +721,8 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           if (now - lastCloseTime > 5000) {
             // 超过5秒，自动清除标志
             clearAllTabClosingFlags();
-            console.log('【标签事件】关闭标志已超时，自动清除');
-          } else {
-            console.log(`【标签事件】检测到标签关闭标志，跳过处理open-terminal-tab事件`);
-            return;
           }
+          return;
         }
       }
 
@@ -772,7 +746,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     const allTabsClosed = localStorage.getItem('all_tabs_closed') === 'true';
 
     if (forceClosingLastTab || allTabsClosed) {
-      console.log(`【标签恢复】检测到标签关闭标志(force_closing_last_tab: ${forceClosingLastTab}, all_tabs_closed: ${allTabsClosed})，不恢复标签`);
       // 清除所有可能导致重新创建标签的存储
       localStorage.removeItem('terminal_tabs');
       localStorage.removeItem('terminal_active_tab');
@@ -793,7 +766,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         // 再次检查，确保在处理过程中没有设置关闭标志
         if (localStorage.getItem('force_closing_last_tab') === 'true' ||
           localStorage.getItem('all_tabs_closed') === 'true') {
-          console.log('【标签恢复】在处理过程中检测到关闭标志，中止恢复');
           localStorage.removeItem('terminal_tabs');
           localStorage.removeItem('terminal_active_tab');
           return;
@@ -808,7 +780,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
             if (tabKey.startsWith('tab-') && tabInfo.connectionId && tabInfo.sessionId) {
               const timestamp = tabKey.split('-').pop() || Date.now().toString();
               tabKey = `conn-${tabInfo.connectionId}-session-${tabInfo.sessionId}-${timestamp}`;
-              console.log(`【标签恢复】转换旧格式标签: ${tabInfo.key} -> ${tabKey}`);
             }
 
             return {
@@ -835,7 +806,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           // 最终检查，确保没有设置任何关闭标志
           if (localStorage.getItem('force_closing_last_tab') === 'true' ||
             localStorage.getItem('all_tabs_closed') === 'true') {
-            console.log('【标签恢复】在恢复前最终检查检测到关闭标志，中止恢复');
             localStorage.removeItem('terminal_tabs');
             localStorage.removeItem('terminal_active_tab');
             return;
@@ -874,12 +844,10 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     // 如果是强制创建，清除所有关闭标志
     if (forceCreate) {
-      console.log(`【标签添加】强制创建标签，清除所有关闭标志`);
       clearAllTabClosingFlags();
     }
     // 如果不是强制创建，才检查关闭标志
     else if (isTabClosingActive()) {
-      console.log(`【标签添加】检测到标签关闭标志，跳过添加标签`);
       return;
     }
 
@@ -888,13 +856,10 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       const timestamp = Date.now();
       tab.key = `conn-${tab.connectionId}-session-${tab.sessionId}-${timestamp}`;
     } else if (tab.key.startsWith('tab-')) {
-      // 将旧格式转换为新格式
-      console.log(`【标签格式】转换旧格式标签键: ${tab.key} 到标准格式`);
       tab.key = tab.key.replace('tab-', 'conn-');
     }
 
     // 清除全部标签关闭的标志
-    console.log(`【标签添加】添加新标签 ${tab.key}，清除关闭标志`);
     localStorage.removeItem('all_tabs_closed');
     localStorage.removeItem('recently_closed_tab');
     localStorage.removeItem('force_closing_last_tab');
@@ -928,7 +893,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     // 检查是否是最后一个标签
     const isLastTab = state.tabs.length === 1;
     if (isLastTab) {
-      console.log(`【标签关闭】检测到关闭最后一个标签: ${key}`);
       // 设置标志以防止URL变化触发标签创建
       localStorage.setItem('force_closing_last_tab', 'true');
       localStorage.setItem('all_tabs_closed', 'true');
@@ -965,9 +929,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         // 清理该会话的localStorage存储
         localStorage.removeItem(`session_${tabToClose.sessionId}`);
       }
-
-      // 记录关闭的标签信息，用于防止自动重新创建
-      console.log(`【标签清理】关闭标签 ${key} 并清理相关资源`);
     } catch (e) {
       console.error(`关闭标签资源时出错 ${key}:`, e);
     }

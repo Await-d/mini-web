@@ -7,21 +7,11 @@ import type { ProtocolType } from '../Terminal.d';
  * @returns 协议类型或undefined
  */
 export const getTabProtocol = (tab: TerminalTab): ProtocolType | undefined => {
-    // 增加日志记录
-    console.log(`【协议检测】检测标签 ${tab.key} 的协议类型:`, {
-        tabProtocol: tab.protocol,
-        connectionProtocol: tab.connection?.protocol,
-        port: tab.port || tab.connection?.port,
-        name: tab.connection?.name,
-        host: tab.connection?.host
-    });
-
     // 增强协议识别：检查连接名称或主机名中是否包含rdp字样
     const connectionName = tab.connection?.name?.toLowerCase() || '';
     const connectionHost = tab.connection?.host?.toLowerCase() || '';
 
     if (connectionName.includes('rdp') || connectionHost.includes('rdp')) {
-        console.log(`【协议检测】通过名称/主机发现 RDP 连接: ${connectionName || connectionHost}`);
         return 'rdp';
     }
 
@@ -29,7 +19,6 @@ export const getTabProtocol = (tab: TerminalTab): ProtocolType | undefined => {
     if (tab.protocol) {
         const protocol = tab.protocol.toLowerCase();
         if (['ssh', 'telnet', 'rdp', 'vnc'].includes(protocol)) {
-            console.log(`【协议检测】标签显式协议: ${protocol}`);
             return protocol as ProtocolType;
         }
     }
@@ -38,7 +27,6 @@ export const getTabProtocol = (tab: TerminalTab): ProtocolType | undefined => {
     if (tab.connection?.protocol) {
         const connProtocol = tab.connection.protocol.toLowerCase();
         if (['ssh', 'telnet', 'rdp', 'vnc'].includes(connProtocol)) {
-            console.log(`【协议检测】连接对象协议: ${connProtocol}`);
             return connProtocol as ProtocolType;
         }
     }
@@ -71,9 +59,6 @@ export const getTabProtocol = (tab: TerminalTab): ProtocolType | undefined => {
             return portProtocol;
         }
     }
-
-    // 无法确定协议类型
-    console.log(`【协议检测】无法确定协议类型，默认为SSH`);
     return 'ssh'; // 默认返回ssh而不是undefined，避免渲染问题
 };
 
@@ -85,7 +70,6 @@ export const getTabProtocol = (tab: TerminalTab): ProtocolType | undefined => {
 export const isGraphicalProtocol = (protocol?: string): boolean => {
     if (!protocol) return false;
     const isGraphical = ['rdp', 'vnc'].includes(protocol.toLowerCase());
-    console.log(`【图形协议检测】${protocol} 是否为图形协议: ${isGraphical}`);
     return isGraphical;
 };
 

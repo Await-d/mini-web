@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-17 20:14:15
  * @LastEditors: Await
- * @LastEditTime: 2025-05-18 00:52:00
+ * @LastEditTime: 2025-05-18 08:43:09
  * @Description: 根据URL参数处理标签页的自定义hook
  */
 import { useEffect, useCallback, useRef } from 'react';
@@ -33,7 +33,6 @@ const findExistingTab = (
             tab.sessionId === Number(sessionId)
         );
         if (tabByIds) {
-            console.log(`【标签查找】通过连接ID和会话ID找到现有标签: ${tabByIds.key}`);
             return tabByIds;
         }
     }
@@ -42,7 +41,6 @@ const findExistingTab = (
     if (tabKey) {
         const tabByKey = tabs.find(tab => tab.key === tabKey);
         if (tabByKey) {
-            console.log(`【标签查找】通过标签键找到现有标签: ${tabByKey.key}`);
             return tabByKey;
         }
     }
@@ -59,7 +57,6 @@ const findExistingTab = (
         );
 
         if (tabByPartialKey) {
-            console.log(`【标签查找】通过部分键匹配找到现有标签: ${tabByPartialKey.key}`);
             return tabByPartialKey;
         }
     }
@@ -99,7 +96,6 @@ const clearAllTabClosingFlags = () => {
     localStorage.removeItem('recently_closed_tab');
     localStorage.removeItem('closing_flags_expiry');
     localStorage.removeItem('last_tab_close_time');
-    console.log('【标签标志】强制清除所有标签关闭标志');
 };
 
 /**
@@ -118,8 +114,6 @@ const cleanupTabData = (): void => {
     // 移除强制关闭标志，但保留全部关闭标志
     // 全部关闭标志将在明确创建新标签时移除
     localStorage.removeItem('force_closing_last_tab');
-
-    console.log('【URL监听】已完成标签关闭过程，清理标签数据');
 };
 
 /**
@@ -154,12 +148,10 @@ export const useTabFromUrl = () => {
         // 如果有forceCreate参数，强制清除所有关闭标志
         if (forceCreate) {
             clearAllTabClosingFlags();
-            console.log(`【URL参数】检测到forceCreate参数，强制清除所有关闭标志`);
         }
 
         // 如果标签关闭过程中，且不是强制创建，直接跳过创建
         if (isInTabClosingProcess() && !forceCreate) {
-            console.log(`【URL参数】检测到标签关闭标志，跳过标签创建`);
             processedRef.current.closingInProgress = true;
             return;
         }
@@ -168,7 +160,6 @@ export const useTabFromUrl = () => {
         if (processedRef.current.closingInProgress &&
             Date.now() - processedRef.current.lastProcessTime < 5000 &&
             !forceCreate) {
-            console.log(`【URL参数】检测到最近有关闭操作，延迟创建标签`);
             return;
         }
 
@@ -176,7 +167,6 @@ export const useTabFromUrl = () => {
         processedRef.current.closingInProgress = false;
 
         if (!connectionId || !sessionParam) {
-            console.log(`【URL参数】缺少必要参数，跳过标签创建`);
             return;
         }
 
@@ -193,7 +183,6 @@ export const useTabFromUrl = () => {
             processedRef.current.processed &&
             Date.now() - processedRef.current.lastProcessTime < 2000 &&
             !forceCreate) {
-            console.log(`【URL参数】已处理过相同参数，跳过`);
             return;
         }
 
@@ -207,14 +196,12 @@ export const useTabFromUrl = () => {
 
         // 如果不是强制创建，再次检查是否有关闭标志，确保不会创建不必要的标签
         if (!forceCreate && isInTabClosingProcess()) {
-            console.log(`【URL参数】二次检查发现关闭标志，跳过标签创建`);
             return;
         }
 
         // 防止重复标签
         const existingTab = findExistingTab(tabs, connectionId, sessionParam, tabKeyParam);
         if (existingTab) {
-            console.log(`【URL参数】标签已存在 ${existingTab.key}，激活该标签`);
             setActiveTab(existingTab.key);
             return;
         }
@@ -227,17 +214,14 @@ export const useTabFromUrl = () => {
             // 如果传入的tabKey不符合格式标准，修正格式
             const parts = finalTabKey.split('-');
             finalTabKey = `conn-${parts[1]}-session-${parts[2]}-${parts[3] || Date.now()}`;
-            console.log(`【标签格式】重写非标准格式标签: ${tabKeyParam} -> ${finalTabKey}`);
         }
 
         // 如果不是强制创建，最终检查，确保不会因为导航事件立即创建标签
         if (!forceCreate && isInTabClosingProcess()) {
-            console.log(`【URL参数】最终检查发现关闭标志，跳过标签创建`);
             return;
         }
 
         // 创建新标签前，清除所有关闭标志
-        console.log(`【标签创建】准备创建新标签 ${finalTabKey}，清除所有关闭标志`);
         clearAllTabClosingFlags();
 
         // 创建新标签 - 通过事件通知TerminalContext
@@ -260,7 +244,6 @@ export const useTabFromUrl = () => {
         if (!connectionId) {
             // 如果当前路径是/terminal，可能是关闭标签后的状态
             if (window.location.pathname === '/terminal') {
-                console.log(`【URL监听】检测到没有connectionId参数，可能是关闭后的状态`);
                 // 记录关闭状态
                 processedRef.current.closingInProgress = true;
                 processedRef.current.lastProcessTime = Date.now();
@@ -280,7 +263,6 @@ export const useTabFromUrl = () => {
 
         // 防止在标签关闭过程中处理URL参数
         if (isInTabClosingProcess()) {
-            console.log(`【URL监听】检测到标签关闭标志，不处理URL参数`);
             processedRef.current.closingInProgress = true;
             processedRef.current.lastProcessTime = Date.now();
             return;
@@ -293,13 +275,10 @@ export const useTabFromUrl = () => {
                 // 检查从上次关闭标签到现在的时间是否足够长（至少3秒）
                 if (processedRef.current.closingInProgress &&
                     Date.now() - processedRef.current.lastProcessTime < 3000) {
-                    console.log(`【URL监听】关闭后时间间隔太短，暂不处理URL参数`);
                     return;
                 }
 
                 processTabFromParams();
-            } else {
-                console.log(`【URL监听】延迟检查仍处于标签关闭过程，不处理URL参数`);
             }
         }, 500);
 

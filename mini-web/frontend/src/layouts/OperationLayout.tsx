@@ -123,14 +123,8 @@ const OperationLayout: React.FC = () => {
             console.warn('保存会话信息到本地存储失败:', error);
           }
 
-          // 记录标签创建信息，方便调试
-          console.log(`【树节点连接】创建标签: conn-${connection.id}-session-${sessionId}-${Date.now()}, 连接ID: ${connection.id}, 会话ID: ${sessionId}`);
-
           // 导航到终端页面
           navigate(`/terminal/${connection.id}?session=${sessionId}&forceCreate=true`);
-
-          // 阻止事件冒泡
-          eventSource?.stopPropagation();
         } else {
           message.error('创建会话失败');
         }
@@ -288,7 +282,6 @@ const OperationLayout: React.FC = () => {
   const handleSelect = (selectedKeys: React.Key[], info: any) => {
     const node = info.node as TreeNode;
     if (node.isLeaf && node.connection) {
-      // console.log("【树节点】用户选择了节点:", node.title, "，连接ID:", node.connection.id);
       handleConnect(node.connection);
     }
   };

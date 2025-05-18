@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-10 21:34:58
  * @LastEditors: Await
- * @LastEditTime: 2025-05-18 00:48:32
+ * @LastEditTime: 2025-05-18 08:46:00
  * @Description: 终端页面组件
  */
 import React, { useCallback, useEffect } from 'react';
@@ -37,7 +37,6 @@ const { Content } = Layout;
 const Terminal: React.FC = () => {
   // 使用导航和位置钩子
   const navigate = useNavigate();
-  const location = useLocation();
 
   // 使用终端上下文
   const { state, setActiveTab, closeTab } = useTerminal();
@@ -49,7 +48,6 @@ const Terminal: React.FC = () => {
 
   // 标签页切换处理
   const handleTabChange = useCallback((activeKey: string) => {
-    console.log(`【标签切换】切换到标签: ${activeKey}`);
     setActiveTab(activeKey);
 
     // 更新URL以反映当前标签
@@ -69,7 +67,6 @@ const Terminal: React.FC = () => {
     const tabToClose = tabs.find(t => t.key === tabKey);
     if (!tabToClose) return;
 
-    console.log(`【标签关闭】关闭标签: ${tabKey}`);
 
     // 记录刚关闭的标签信息，防止自动重新创建
     localStorage.setItem('recently_closed_tab', tabKey);
@@ -84,8 +81,6 @@ const Terminal: React.FC = () => {
       // 立即清理localStorage中的标签数据
       localStorage.removeItem('terminal_tabs');
       localStorage.removeItem('terminal_active_tab');
-
-      console.log('【标签关闭】关闭最后一个标签，导航至/terminal');
 
       // 先关闭标签，再导航
       closeTab(tabKey);
@@ -145,9 +140,6 @@ const Terminal: React.FC = () => {
       message.error('找不到要刷新的标签页');
       return;
     }
-
-    console.log(`【标签刷新】刷新标签: ${tabKey}`);
-
     // 触发刷新事件
     window.dispatchEvent(new CustomEvent('terminal-tab-refresh', {
       detail: { tabKey }
@@ -163,9 +155,6 @@ const Terminal: React.FC = () => {
       message.error('找不到要复制的标签页或连接信息不完整');
       return;
     }
-
-    console.log(`【标签复制】复制标签: ${tabKey}`);
-
     // 创建新会话
     sessionAPI.createSession(tab.connectionId)
       .then(response => {
@@ -243,6 +232,7 @@ const Terminal: React.FC = () => {
                     onTabClose={handleTabClose}
                     onRefreshTab={handleRefreshTab}
                     onDuplicateTab={handleDuplicateTab}
+                    networkLatency={props.networkLatency}
                   />
 
                   {/* 终端容器 */}

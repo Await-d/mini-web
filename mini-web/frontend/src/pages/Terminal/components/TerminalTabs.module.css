@@ -4,9 +4,9 @@
   overflow-y: hidden; /* 防止出现垂直滚动条 */
   border-bottom: 1px solid #f0f0f0;
   background-color: #fafafa;
-  height: 44px; /* 稍微减小高度 */
-  min-height: 44px; /* 最小高度限制 */
-  display: block; /* 使用块级布局 */
+  height: 36px; /* 减小高度 */
+  min-height: 36px; /* 减小最小高度 */
+  display: flex; /* 改为flex布局 */
   position: relative; /* 启用定位 */
   padding: 0; /* 移除内边距 */
   margin: 0; /* 移除外边距 */
@@ -24,8 +24,8 @@
   background-color: #fafafa;
   white-space: nowrap; /* 防止标签换行 */
   transition: all 0.3s ease; /* 添加过渡效果 */
-  width: 100%; /* 占满容器宽度 */
-  height: 44px; /* 固定高度 */
+  flex-grow: 1; /* 占用可用空间 */
+  height: 36px; /* 减小高度 */
   position: relative; /* 启用定位 */
   overflow: visible; /* 确保内容不被裁剪 */
 }
@@ -35,7 +35,7 @@
   padding: 0 8px; /* 增加左右内边距 */
   background-color: #fafafa;
   overflow: visible; /* 防止内容被裁剪 */
-  height: 44px; /* 固定高度与容器一致 */
+  height: 36px; /* 减小高度与容器一致 */
   display: flex;
   align-items: center; /* 垂直居中标签 */
   width: 100%; /* 占满容器宽度 */
@@ -45,7 +45,7 @@
 .terminalTabs :global(.ant-tabs-nav-wrap) {
   overflow-y: hidden !important; /* 强制隐藏垂直滚动条 */
   margin-bottom: 0 !important;
-  height: 44px !important;
+  height: 36px !important;
   position: relative !important;
   width: 100% !important;
 }
@@ -54,14 +54,14 @@
 .terminalTabs :global(.ant-tabs-nav-list) {
   display: flex !important;
   align-items: center !important;
-  height: 44px !important;
+  height: 36px !important;
   position: relative !important;
   transition: transform 0.3s !important;
 }
 
 .terminalTabs :global(.ant-tabs-tab) {
-  padding: 6px 16px !important;
-  margin: 0 4px !important; /* 增加标签间距 */
+  padding: 4px 12px !important; /* 减小内边距 */
+  margin: 0 2px !important; /* 减小标签间距 */
   transition: all 0.3s;
   background-color: #fafafa; /* 更亮的底色 */
   background-image: linear-gradient(to bottom, #ffffff, #f5f5f5); /* 精致渐变效果 */
@@ -71,11 +71,11 @@
   color: rgba(0, 0, 0, 0.65); /* 适当的文字颜色 */
   font-weight: normal;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-  height: 36px !important; /* 统一高度 */
+  height: 28px !important; /* 减小高度 */
   display: inline-flex !important;
   align-items: center !important;
   position: relative; /* 启用定位 */
-  top: 5px; /* 向下微调位置 */
+  top: 4px; /* 向下微调位置 */
   z-index: 1; /* 确保在适当层次 */
 }
 
@@ -83,10 +83,10 @@
   background-color: #1677ff !important; /* 使用与左侧树形结构选中项一致的蓝色 */
   background-image: linear-gradient(to bottom, #1677ff, #1668dc) !important; /* 更舒适的渐变效果 */
   color: white !important;
-  box-shadow: 0 3px 6px rgba(22, 119, 255, 0.25) !important; /* 精致阴影效果 */
+  box-shadow: 0 2px 4px rgba(22, 119, 255, 0.25) !important; /* 精致阴影效果 */
   border: 1px solid #1668dc !important;
   border-bottom: none !important;
-  height: 38px !important; /* 活动标签稍高 */
+  height: 30px !important; /* 活动标签稍高 */
   position: relative !important; /* 启用定位 */
   z-index: 2 !important; /* 确保活动标签在上层 */
   top: 2px !important; /* 调整位置 */
@@ -98,7 +98,7 @@
   color: white !important;
   font-weight: 500;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); /* 增强文字立体感 */
-  letter-spacing: 0.3px; /* 字母间距增加可读性 */
+  letter-spacing: 0.2px; /* 减小字母间距 */
 }
 
 .terminalTabs :global(.ant-tabs-tab:hover) {
@@ -128,7 +128,7 @@
 .tabLabel {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   height: 100%;
 }
 
@@ -136,34 +136,34 @@
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  font-size: 16px; /* 稍微大一点的图标 */
-  margin-right: 6px; /* 增加与标题的间距 */
+  font-size: 14px; /* 减小图标 */
+  margin-right: 4px; /* 减小与标题的间距 */
   transition: all 0.3s ease;
 }
 
 .tabTitle {
-  max-width: 180px;
+  max-width: 120px; /* 减小最大宽度 */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
-  letter-spacing: 0.3px; /* 增加字母间距 */
+  font-size: 12px; /* 减小字体大小 */
+  letter-spacing: 0.2px; /* 减小字母间距 */
   font-weight: 500; /* 中等粗细 */
 }
 
 /* 关闭按钮样式 */
 .terminalTabs :global(.ant-tabs-tab-remove) {
-  margin-left: 8px;
+  margin-left: 4px; /* 减小间距 */
   color: inherit;
   transition: all 0.3s;
   border-radius: 50%;
-  width: 16px;
-  height: 16px;
+  width: 14px; /* 减小宽度 */
+  height: 14px; /* 减小高度 */
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   opacity: 0.7; /* 默认稍微透明 */
-  font-size: 12px; /* 稍小的关闭图标 */
+  font-size: 10px; /* 减小关闭图标 */
   margin-top: 0 !important; /* 防止上下错位 */
   position: relative !important;
 }
@@ -183,45 +183,104 @@
 /* 自定义协议图标颜色 */
 .ssh {
   color: #52c41a;
-  font-size: 16px;
+  font-size: 14px; /* 减小图标大小 */
 }
 
 .rdp {
   color: #1890ff;
-  font-size: 16px;
+  font-size: 14px; /* 减小图标大小 */
 }
 
 .vnc {
   color: #722ed1;
-  font-size: 16px;
+  font-size: 14px; /* 减小图标大小 */
 }
 
 .telnet {
   color: #fa8c16;
-  font-size: 16px;
+  font-size: 14px; /* 减小图标大小 */
 }
 
 /* 优化小尺寸标签样式 */
 .terminalTabs :global(.ant-tabs-small) :global(.ant-tabs-tab) {
-  padding: 6px 12px;
+  padding: 4px 8px; /* 进一步减小小尺寸标签的内边距 */
 }
 
 /* 标签栏底部线条 */
 .terminalTabs :global(.ant-tabs-ink-bar) {
   background-color: #1677ff; /* 与活动标签匹配 */
-  height: 3px;
-  border-radius: 3px 3px 0 0;
-  box-shadow: 0 1px 3px rgba(22, 119, 255, 0.3); /* 为底部线条添加阴影 */
+  height: 2px; /* 减小高度 */
+  border-radius: 2px 2px 0 0;
+  box-shadow: 0 1px 2px rgba(22, 119, 255, 0.3); /* 为底部线条添加阴影 */
+}
+
+/* 网络延迟信息容器 */
+.networkLatencyContainer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 36px;
+  padding: 0 12px;
+  margin-left: auto;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+  white-space: nowrap;
+  border-left: 1px solid #f0f0f0;
+  background-color: #fafafa;
+  min-width: 80px;
+}
+
+.latencyBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 9px;
+  background-color: #f5f5f5;
+  margin-left: 4px;
+}
+
+.latencyGood {
+  background-color: #f6ffed;
+  color: #52c41a;
+  border: 1px solid #b7eb8f;
+}
+
+.latencyNormal {
+  background-color: #e6f7ff;
+  color: #1890ff;
+  border: 1px solid #91d5ff;
+}
+
+.latencyWarning {
+  background-color: #fffbe6;
+  color: #faad14;
+  border: 1px solid #ffe58f;
+}
+
+.latencyBad {
+  background-color: #fff2f0;
+  color: #ff4d4f;
+  border: 1px solid #ffccc7;
 }
 
 /* 优化移动设备上的显示 */
 @media (max-width: 768px) {
   .terminalTabs :global(.ant-tabs-tab) {
-    padding: 6px 10px;
+    padding: 3px 8px; /* 移动设备减少内边距 */
     margin: 0 1px;
   }
   
   .tabTitle {
-    max-width: 120px;
+    max-width: 80px; /* 移动设备减少标题宽度 */
+    font-size: 11px; /* 移动设备减少字体大小 */
+  }
+  
+  .networkLatencyContainer {
+    min-width: 60px;
+    padding: 0 6px;
   }
 }

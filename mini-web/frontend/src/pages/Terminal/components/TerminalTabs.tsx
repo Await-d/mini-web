@@ -10,7 +10,8 @@ import {
   ReloadOutlined,
   CopyOutlined,
   CloseOutlined,
-  CloseCircleOutlined
+  CloseCircleOutlined,
+  ThunderboltOutlined
 } from '@ant-design/icons';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
 import styles from './TerminalTabs.module.css';
@@ -27,6 +28,7 @@ export interface TerminalTabsProps {
   onAddTab?: () => void;
   onRefreshTab?: (key: string) => void;
   onDuplicateTab?: (key: string) => void;
+  networkLatency?: number | null; // 添加网络延迟属性
 }
 
 // 右键菜单项类型
@@ -41,6 +43,38 @@ type ContextMenuItem = {
   );
 
 /**
+ * 渲染网络延迟信息
+ */
+const NetworkLatencyDisplay: React.FC<{ latency: number | null | undefined }> = ({ latency }) => {
+  if (latency === null || latency === undefined) {
+    return null;
+  }
+
+  // 根据延迟值计算显示样式
+  let latencyClass = styles.latencyNormal;
+  let latencyText = `${latency}ms`;
+
+  if (latency < 100) {
+    latencyClass = styles.latencyGood;
+  } else if (latency >= 100 && latency < 300) {
+    latencyClass = styles.latencyNormal;
+  } else if (latency >= 300 && latency < 600) {
+    latencyClass = styles.latencyWarning;
+  } else {
+    latencyClass = styles.latencyBad;
+  }
+
+  return (
+    <div className={styles.networkLatencyContainer}>
+      <span>延迟:</span>
+      <span className={`${styles.latencyBadge} ${latencyClass}`}>
+        {latencyText}
+      </span>
+    </div>
+  );
+};
+
+/**
  * 终端标签页组件
  * 显示并管理终端标签页
  */
@@ -51,7 +85,8 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
   onTabEdit,
   onTabClose,
   onRefreshTab,
-  onDuplicateTab
+  onDuplicateTab,
+  networkLatency
 }) => {
   // 状态：右键菜单相关
   const [contextMenuTabKey, setContextMenuTabKey] = useState<string | null>(null);
@@ -255,11 +290,14 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
         className={styles.terminalTabs}
         tabBarStyle={{ margin: 0, borderBottom: 0 }}
         items={items}
-        size="middle"
+        size="small"
         tabPosition="top"
         animated={{ inkBar: true, tabPane: false }}
-        moreIcon={<span style={{ color: '#1677ff', fontSize: '16px' }}>···</span>}
+        moreIcon={<span style={{ color: '#1677ff', fontSize: '14px' }}>···</span>}
       />
+
+      {/* 网络延迟信息显示 */}
+      <NetworkLatencyDisplay latency={networkLatency} />
 
       {/* 标签右键菜单 */}
       {contextMenuPosition && contextMenuTabKey && (
