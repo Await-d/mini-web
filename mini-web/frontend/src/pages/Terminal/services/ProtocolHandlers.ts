@@ -64,21 +64,14 @@ export const SshProtocolHandler: ProtocolHandler = {
 
     handleOpen: (tab: TerminalTab) => {
         if (!tab.xtermRef?.current) return;
-
-        // 连接建立后，显示欢迎消息
-        writeColorText(tab.xtermRef.current, '=== SSH连接已建立 ===\r\n', 'green');
     },
 
     handleClose: (tab: TerminalTab) => {
         if (!tab.xtermRef?.current) return;
-
-        // 连接关闭时，显示断开消息
-        writeColorText(tab.xtermRef.current, '=== SSH连接已断开 ===\r\n', 'yellow');
     },
 
     handleError: (tab: TerminalTab, error: Event) => {
         if (!tab.xtermRef?.current) return;
-
         // 连接错误时，显示错误消息
         writeColorText(tab.xtermRef.current, `=== SSH连接错误: ${error} ===\r\n`, 'red');
     }

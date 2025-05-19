@@ -2,12 +2,12 @@
  * @Author: Await
  * @Date: 2025-05-18 16:40:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-18 11:46:01
+ * @LastEditTime: 2025-05-19 21:01:12
  * @Description: WebSocket统一管理服务
  */
 import type { TerminalTab } from '../../../contexts/TerminalContext';
 import { terminalStateRef } from '../../../contexts/TerminalContext';
-import { writeColorText } from '../utils/terminalUtils';
+import { writeColorText, writeWelcomeBanner } from '../utils/terminalUtils';
 import { API_BASE_URL } from '../../../services/api';
 
 // WebSocket基础URL - 使用API_BASE_URL中的主机地址
@@ -175,8 +175,16 @@ class WebSocketServiceClass {
                     connection.reconnectTimer = undefined;
                 }
 
-                // 写入连接成功消息
-                this.writeToTerminal(tab, 'green', '连接建立成功!\r\n');
+                // 获取连接名称
+                const connectionName = tab.title || `${protocol.toUpperCase()} 连接`;
+
+                // 清除终端内容，然后使用writeWelcomeBanner显示欢迎信息
+                if (tab.xtermRef?.current) {
+                    // 先清除终端内容
+                    tab.xtermRef.current.clear();
+                    // 刷新终端显示
+                    tab.xtermRef.current.refresh(0, tab.xtermRef.current.rows - 1);
+                }
 
                 // 调用协议处理器的open回调
                 handler.handleOpen?.(tab);
@@ -201,20 +209,33 @@ class WebSocketServiceClass {
 
                     // 查找xterm实例
                     const xterm = tab.xtermRef?.current;
-
                     // 如果终端还没有初始化，可以将消息加入队列等待处理
                     if (!xterm) {
                         console.warn(`【WebSocket】终端尚未初始化，无法显示消息: ${tabKey}`);
+
+                        // 创建或获取消息队列
+                        if (!tab.messageQueueRef) {
+                            tab.messageQueueRef = { current: [] };
+                            console.log(`【WebSocket】为标签 ${tabKey} 创建新消息队列`);
+                        } else if (!tab.messageQueueRef.current) {
+                            tab.messageQueueRef.current = [];
+                            console.log(`【WebSocket】为标签 ${tabKey} 重置消息队列`);
+                        }
+
                         // 将消息加入队列
-                        if (tab.messageQueueRef?.current) {
+                        if (tab.messageQueueRef.current) {
                             if (typeof event.data === 'string') {
                                 tab.messageQueueRef.current.push(event.data);
                                 console.log(`【WebSocket】消息已加入队列，当前队列长度: ${tab.messageQueueRef.current.length}`);
+                            } else if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+                                // 标记二进制数据
+                                tab.messageQueueRef.current.push('[二进制数据]');
+                                console.log(`【WebSocket】二进制数据已标记并加入队列`);
                             } else {
-                                console.warn(`【WebSocket】无法将非字符串消息加入队列`);
+                                console.warn(`【WebSocket】无法将未知类型消息加入队列`);
                             }
                         } else {
-                            console.warn(`【WebSocket】消息队列不存在，无法保存消息`);
+                            console.warn(`【WebSocket】消息队列仍不存在，无法保存消息`);
                         }
                         return;
                     }
@@ -263,10 +284,34 @@ class WebSocketServiceClass {
                             if (reader.result instanceof ArrayBuffer) {
                                 const uint8Array = new Uint8Array(reader.result);
                                 console.log(`【WebSocket】写入Blob数据: ${uint8Array.length} 字节`);
-                                xterm.write(uint8Array);
+                                try {
+                                    // 写入数据
+                                    xterm.write(uint8Array);
+                                    // 如果是大块数据，可能包含多行内容，尝试滚动以显示最新内容
+                                    if (uint8Array.length > 50) {
+                                        setTimeout(() => {
+                                            try {
+                                                if (xterm.buffer && xterm.buffer.active) {
+                                                    // 尝试滚动到最新内容
+                                                    const currentY = xterm.buffer.active.baseY + xterm.buffer.active.cursorY;
+                                                    xterm.scrollToLine(currentY);
+                                                }
+                                            } catch (scrollError) {
+                                                console.warn('终端滚动失败:', scrollError);
+                                            }
+                                        }, 20);
+                                    }
+                                } catch (writeError) {
+                                    console.error('写入Blob数据失败:', writeError);
+                                }
                             } else if (typeof reader.result === 'string') {
                                 console.log(`【WebSocket】写入Blob字符串数据: ${reader.result.length} 字符`);
-                                xterm.write(reader.result);
+                                try {
+                                    // 写入数据
+                                    xterm.write(reader.result);
+                                } catch (writeError) {
+                                    console.error('写入Blob字符串数据失败:', writeError);
+                                }
                             }
                         };
                         reader.readAsArrayBuffer(event.data);
@@ -525,10 +570,11 @@ class WebSocketServiceClass {
      * @param tab 标签对象
      * @param color 颜色
      * @param text 文本
+     * @param style 文本样式
      */
-    private writeToTerminal(tab: TerminalTab, color: string, text: string): void {
+    private writeToTerminal(tab: TerminalTab, color: string, text: string, style?: string): void {
         if (tab.xtermRef?.current) {
-            writeColorText(tab.xtermRef.current, text, color);
+            writeColorText(tab.xtermRef.current, text, color, style);
         }
     }
 }

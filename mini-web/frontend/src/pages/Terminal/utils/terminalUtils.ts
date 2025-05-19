@@ -85,8 +85,12 @@ export const detectTerminalMode = (term: XTerm): string => {
 
 /**
  * 向终端写入彩色文本
+ * @param term 终端实例
+ * @param text 文本内容
+ * @param color 文本颜色
+ * @param style 文本样式，可以是bold, italic, underline, blink或它们的组合
  */
-export const writeColorText = (term: XTerm | null, color: string, text: string) => {
+export const writeColorText = (term: XTerm | null, text: string, color: string = 'white', style?: string) => {
   if (!term) return;
 
   let colorCode = '37'; // 默认白色
@@ -116,9 +120,40 @@ export const writeColorText = (term: XTerm | null, color: string, text: string) 
     case 'black':
       colorCode = '30';
       break;
+    case 'brightred':
+      colorCode = '91';
+      break;
+    case 'brightgreen':
+      colorCode = '92';
+      break;
+    case 'brightyellow':
+      colorCode = '93';
+      break;
+    case 'brightblue':
+      colorCode = '94';
+      break;
+    case 'brightmagenta':
+      colorCode = '95';
+      break;
+    case 'brightcyan':
+      colorCode = '96';
+      break;
+    case 'brightwhite':
+      colorCode = '97';
+      break;
   }
 
-  term.write(`\x1b[${colorCode}m${text}\x1b[0m`);
+  // 处理样式
+  let styleCode = '';
+  if (style) {
+    if (style.includes('bold')) styleCode += '1;';
+    if (style.includes('italic')) styleCode += '3;';
+    if (style.includes('underline')) styleCode += '4;';
+    if (style.includes('blink')) styleCode += '5;';
+  }
+
+  // 写入带样式的文本
+  term.write(`\x1b[${styleCode}${colorCode}m${text}\x1b[0m`);
 };
 
 /**
@@ -157,4 +192,47 @@ export const cleanTerminalContent = (content: string): string => {
   cleaned = cleaned.replace(/\n\s*\n/g, '\n');
 
   return cleaned.trim();
+};
+
+/**
+ * 生成漂亮的欢迎横幅
+ * @param term 终端实例
+ * @param title 横幅标题
+ * @param protocol 连接协议
+ * @param features 特性列表
+ */
+export const writeWelcomeBanner = (term: XTerm | null, title: string, protocol: string = 'SSH', features: string[] = []) => {
+  if (!term) return;
+
+  // 默认特性列表
+  if (features.length === 0) {
+    features = [
+      '支持多种协议：SSH、RDP、VNC、Telnet',
+      '多标签页管理，支持会话保存',
+      '文件传输，命令批处理',
+      '高性能、低延迟的远程操作体验'
+    ];
+  }
+
+  // 计算横幅宽度 (基于最长特性的长度)
+  const maxLength = Math.max(...features.map(f => f.length)) + 10;
+  const horizontalBorder = '─'.repeat(maxLength);
+
+  // 写入顶部边框
+  writeColorText(term, `┌${horizontalBorder}┐\r\n`, 'yellow');
+
+  // 写入协议信息
+  writeColorText(term, `│ `, 'yellow');
+  writeColorText(term, `当前协议: ${protocol}`, 'brightgreen', 'bold');
+  writeColorText(term, ' '.repeat(maxLength - 11 - protocol.length) + ' │\r\n', 'yellow');
+  writeColorText(term, `│${horizontalBorder.replace(/─/g, '─')}│\r\n`, 'yellow');
+  features.forEach(feature => {
+    writeColorText(term, `│ `, 'yellow');
+    writeColorText(term, `✓ `, 'brightgreen', 'bold');
+    writeColorText(term, feature, 'white');
+    writeColorText(term, ' '.repeat(maxLength - feature.length - 2) + ' │\r\n', 'yellow');
+  });
+
+  // 写入底部边框
+  writeColorText(term, `└${horizontalBorder}┘\r\n\r\n`, 'yellow');
 };

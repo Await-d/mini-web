@@ -89,12 +89,7 @@ export const useTerminalInitialization = () => {
                         if (activeTab.xtermRef?.current) {
                             rebindDataHandler(activeTab.xtermRef.current, handleTerminalData);
                             console.log('数据处理器已更新');
-
-                            // 刷新终端显示
                             forceTerminalRefresh(activeTab.xtermRef.current);
-
-                            // 添加就绪消息
-                            activeTab.xtermRef.current.writeln('\r\n\x1b[32m终端已重新连接!\x1b[0m\r\n');
                         }
                     });
 
@@ -201,11 +196,6 @@ export const useTerminalInitialization = () => {
 
             activeTab.searchAddonRef = activeTab.searchAddonRef || { current: null };
             activeTab.searchAddonRef.current = searchAddon;
-
-            // 显示欢迎消息
-            term.writeln('\r\n\x1b[32m欢迎使用SSH终端！\x1b[0m');
-            term.writeln('\r\n连接中，请稍候...');
-
             // 记录终端状态
             console.log('终端初始化成功', {
                 termExists: !!term,

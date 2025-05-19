@@ -165,8 +165,10 @@ const TerminalContainer: React.FC<TerminalContainerProps> = ({
                 data-tab-key={tab.key}
                 data-connection-id={tab.connectionId}
                 data-session-id={tab.sessionId}
+                data-protocol={tab.protocol || 'ssh'}
                 data-active={isVisible}
             />
+            {console.log(`SSH终端DOM容器已创建 ID=${uniqueDomId}`, document.getElementById(uniqueDomId))}
         </div>
     );
 };

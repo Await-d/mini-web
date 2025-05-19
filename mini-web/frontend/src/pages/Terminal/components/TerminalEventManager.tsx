@@ -138,32 +138,108 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
     useEffect(() => {
         const handleTerminalReady = (event: Event) => {
             const customEvent = event as CustomEvent;
-            const { tabKey, connectionId, sessionId, protocol } = customEvent.detail;
+            const { tabKey, connectionId, sessionId, protocol, terminalInstance, containerElement } = customEvent.detail;
+
             console.log(`终端准备就绪事件触发: tabKey=${tabKey}, connectionId=${connectionId}, sessionId=${sessionId}, protocol=${protocol}`);
 
+            // 处理从initTerminal.ts直接触发的事件，可能包含terminalInstance和containerElement
+            if (!tabKey && terminalInstance && containerElement && containerElement.id) {
+                console.log('从initTerminal.ts接收到的终端就绪事件，尝试从容器ID提取信息');
+
+                // 从容器ID提取信息
+                const idMatch = containerElement.id.match(/terminal-element-conn-(\d+)-session-(\d+)/);
+                if (idMatch && idMatch.length >= 3) {
+                    const extractedConnId = parseInt(idMatch[1], 10);
+                    const extractedSessId = parseInt(idMatch[2], 10);
+                    const extractedTabKey = `conn-${extractedConnId}-${extractedSessId}-${Date.now()}`;
+
+                    console.log(`从容器ID提取的信息: connId=${extractedConnId}, sessId=${extractedSessId}, tabKey=${extractedTabKey}`);
+
+                    // 查找匹配的标签
+                    const matchedTab = tabs.find(t =>
+                        (t.connectionId === extractedConnId && t.sessionId === extractedSessId) ||
+                        (t.key && t.key.startsWith(`conn-${extractedConnId}-${extractedSessId}`))
+                    );
+
+                    if (matchedTab) {
+                        console.log(`找到匹配的标签: ${matchedTab.key}`);
+                        // 继续使用匹配的标签处理事件
+                        handleTerminalReadyWithTab(matchedTab, extractedConnId, extractedSessId, 'ssh', terminalInstance);
+                        return;
+                    } else {
+                        console.error(`无法找到匹配的标签，connectionId=${extractedConnId}, sessionId=${extractedSessId}`);
+                    }
+                } else {
+                    console.error(`无法从容器ID提取连接信息: ${containerElement.id}`);
+                }
+                return;
+            }
+
             // 查找对应的标签
-            const tab = tabs.find(t => t.key === tabKey);
+            let tab = tabs.find(t => t.key === tabKey);
+
+            // 如果找不到完全匹配的标签，尝试通过connectionId和sessionId查找
+            if (!tab && connectionId && sessionId) {
+                console.log(`未找到完全匹配的标签 ${tabKey}，尝试通过connectionId和sessionId查找`);
+
+                // 尝试找到connectionId和sessionId都匹配的标签
+                tab = tabs.find(t =>
+                    t.connectionId === connectionId &&
+                    t.sessionId === sessionId
+                );
+
+                // 如果还没找到，尝试找到以conn-{connectionId}-{sessionId}开头的标签
+                if (!tab) {
+                    const tabPrefix = `conn-${connectionId}-${sessionId}`;
+                    tab = tabs.find(t => t.key && t.key.startsWith(tabPrefix));
+
+                    if (tab) {
+                        console.log(`找到前缀匹配的标签: ${tab.key}，原始tabKey: ${tabKey}`);
+                    }
+                } else {
+                    console.log(`找到连接ID和会话ID匹配的标签: ${tab.key}，原始tabKey: ${tabKey}`);
+                }
+            }
+
             if (!tab) {
                 console.error(`找不到标签: ${tabKey}`);
                 return;
             }
 
+            // 使用提取的参数处理事件
+            handleTerminalReadyWithTab(
+                tab,
+                connectionId ? (typeof connectionId === 'string' ? parseInt(connectionId, 10) : connectionId) : tab.connectionId,
+                sessionId ? (typeof sessionId === 'string' ? parseInt(sessionId, 10) : sessionId) : tab.sessionId,
+                protocol || tab.protocol || 'ssh',
+                terminalInstance
+            );
+        };
+
+        // 辅助函数：使用标签和参数处理终端就绪事件
+        const handleTerminalReadyWithTab = (
+            tab: TerminalTab,
+            connId: number,
+            sessId: number,
+            proto: string,
+            termInstance?: any
+        ) => {
             // 确保tab对象有必要的属性
-            if (!tab.connectionId && connectionId) {
-                tab.connectionId = typeof connectionId === 'string' ? parseInt(connectionId, 10) : connectionId;
+            if (!tab.connectionId && connId) {
+                tab.connectionId = connId;
             }
-            if (!tab.sessionId && sessionId) {
-                tab.sessionId = typeof sessionId === 'string' ? parseInt(sessionId, 10) : sessionId;
+            if (!tab.sessionId && sessId) {
+                tab.sessionId = sessId;
             }
-            if (!tab.protocol && protocol) {
-                tab.protocol = protocol;
+            if (!tab.protocol && proto) {
+                tab.protocol = proto;
             }
 
             // 检查是否已有活跃的WebSocket连接
             if (tab.webSocketRef?.current &&
                 (tab.webSocketRef.current.readyState === WebSocket.CONNECTING ||
                     tab.webSocketRef.current.readyState === WebSocket.OPEN)) {
-                console.log(`标签 ${tabKey} 已有活跃WebSocket连接，跳过WebSocket创建，直接初始化终端`);
+                console.log(`标签 ${tab.key} 已有活跃WebSocket连接，跳过WebSocket创建，直接初始化终端`);
 
                 // 直接初始化终端
                 if (initTerminal) {
@@ -183,34 +259,26 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
                             return false;
                         }
                     };
-
                     // 初始化终端
                     const terminalInitialized = initTerminal(tab, dataHandler);
-                    console.log(`终端初始化完成: ${terminalInitialized}`);
-
-                    if (tab.xtermRef?.current) {
-                        // 添加欢迎消息
-                        tab.xtermRef.current.writeln('\r\n\x1b[32mSSH连接已建立成功!\x1b[0m');
-                        tab.xtermRef.current.writeln('\r\n输入命令开始操作...\r\n');
-                    }
                 }
                 return;
             }
 
             // 首先创建WebSocket连接，确保连接成功后再初始化终端
-            const connId = tab.connectionId || (connectionId ? (typeof connectionId === 'string' ? parseInt(connectionId, 10) : connectionId) : 0);
-            const sessId = tab.sessionId || (sessionId ? (typeof sessionId === 'string' ? parseInt(sessionId, 10) : sessionId) : 0);
+            const finalConnId = tab.connectionId || connId || 0;
+            const finalSessId = tab.sessionId || sessId || 0;
 
-            if (connId && sessId && typeof createWebSocketConnection === 'function') {
-                console.log(`开始创建WebSocket连接: connId=${connId}, sessId=${sessId}, tabKey=${tabKey}`);
+            if (finalConnId && finalSessId && typeof createWebSocketConnection === 'function') {
+                console.log(`开始创建WebSocket连接: connId=${finalConnId}, sessId=${finalSessId}, tabKey=${tab.key}`);
 
-                createWebSocketConnection(connId, sessId, tabKey);
+                createWebSocketConnection(finalConnId, finalSessId, tab.key);
 
                 // 检查WebSocket连接状态
                 setTimeout(() => {
                     // 确认WebSocket连接建立后再初始化终端
                     if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
-                        console.log(`WebSocket连接已建立, 现在初始化终端实例: ${tabKey}`);
+                        console.log(`WebSocket连接已建立, 现在初始化终端实例: ${tab.key}`);
 
                         // 创建数据处理器函数
                         const dataHandler = (data: string) => {
@@ -233,30 +301,24 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
                         if (initTerminal) {
                             const terminalInitialized = initTerminal(tab, dataHandler);
                             console.log(`终端初始化完成: ${terminalInitialized}`);
-
-                            if (tab.xtermRef?.current) {
-                                // 添加欢迎消息
-                                tab.xtermRef.current.writeln('\r\n\x1b[32mSSH连接已建立成功!\x1b[0m');
-                                tab.xtermRef.current.writeln('\r\n输入命令开始操作...\r\n');
-                            }
                         } else {
                             console.error('初始化终端函数不存在');
                         }
                     } else {
                         console.error(`WebSocket连接未建立: ${tab.webSocketRef?.current?.readyState}`);
                         // 尝试重新连接
-                        createWebSocketConnection(connId, sessId, tabKey);
+                        createWebSocketConnection(finalConnId, finalSessId, tab.key);
 
                         // 延迟重试终端初始化
                         setTimeout(() => {
                             window.dispatchEvent(new CustomEvent('terminal-init-retry', {
-                                detail: { tabKey }
+                                detail: { tabKey: tab.key }
                             }));
                         }, 1500);
                     }
                 }, 1000); // 给WebSocket足够的时间建立连接
             } else {
-                console.error('无法创建WebSocket连接: connId=', connId, 'sessId=', sessId, 'createWebSocketConnection=', !!createWebSocketConnection);
+                console.error('无法创建WebSocket连接: connId=', finalConnId, 'sessId=', finalSessId, 'createWebSocketConnection=', !!createWebSocketConnection);
             }
         };
 
@@ -284,6 +346,71 @@ const TerminalEventManager: FC<PropsWithChildren<TerminalEventManagerProps>> = (
             window.removeEventListener('terminal-tab-close', handleTabClose);
         };
     }, []);
+
+    // 处理终端大小调整事件
+    useEffect(() => {
+        const handleTerminalSizeChanged = (event: Event) => {
+            const customEvent = event as CustomEvent;
+            const { cols, rows, tabKey, connectionId, sessionId } = customEvent.detail;
+
+            console.log(`终端大小调整事件: cols=${cols}, rows=${rows}, tabKey=${tabKey}`);
+
+            // 查找对应的标签
+            let tab = tabs.find(t => t.key === tabKey);
+
+            // 如果找不到完全匹配的标签，尝试通过connectionId和sessionId查找
+            if (!tab && connectionId && sessionId) {
+                console.log(`大小调整: 未找到完全匹配的标签 ${tabKey}，尝试通过connectionId和sessionId查找`);
+
+                // 尝试找到connectionId和sessionId都匹配的标签
+                tab = tabs.find(t =>
+                    t.connectionId === connectionId &&
+                    t.sessionId === sessionId
+                );
+
+                // 如果还没找到，尝试找到以conn-{connectionId}-{sessionId}开头的标签
+                if (!tab) {
+                    const tabPrefix = `conn-${connectionId}-${sessionId}`;
+                    tab = tabs.find(t => t.key && t.key.startsWith(tabPrefix));
+
+                    if (tab) {
+                        console.log(`大小调整: 找到前缀匹配的标签: ${tab.key}，原始tabKey: ${tabKey}`);
+                    }
+                } else {
+                    console.log(`大小调整: 找到连接ID和会话ID匹配的标签: ${tab.key}，原始tabKey: ${tabKey}`);
+                }
+            }
+
+            if (!tab) {
+                console.error(`大小调整: 找不到标签: ${tabKey}`);
+                return;
+            }
+
+            // 如果标签存在WebSocket连接，发送大小调整命令
+            if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
+                try {
+                    // 假设后端期望一个特定格式的大小调整消息
+                    const resizeMessage = JSON.stringify({
+                        type: 'resize',
+                        cols: cols,
+                        rows: rows
+                    });
+
+                    tab.webSocketRef.current.send(resizeMessage);
+                    console.log(`大小调整命令已发送: ${resizeMessage}`);
+                } catch (error) {
+                    console.error('发送大小调整命令失败:', error);
+                }
+            } else {
+                console.warn(`大小调整: WebSocket未连接，无法发送大小调整命令: ${tabKey}`);
+            }
+        };
+
+        window.addEventListener('terminal-size-changed', handleTerminalSizeChanged);
+        return () => {
+            window.removeEventListener('terminal-size-changed', handleTerminalSizeChanged);
+        };
+    }, [tabs]);
 
     // 返回子组件
     return <>{children}</>;

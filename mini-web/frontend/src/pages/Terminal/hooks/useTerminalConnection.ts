@@ -184,12 +184,22 @@ export const useTerminalConnection = () => {
     // 激活标签页时触发初始化
     useEffect(() => {
         if (activeTabKey && !initializedTabs.has(activeTabKey)) {
-            const event = new CustomEvent('terminal-ready', {
-                detail: { tabKey: activeTabKey }
-            });
-            window.dispatchEvent(event);
+            // 查找对应的标签以获取完整信息
+            const activeTab = tabs.find(tab => tab.key === activeTabKey);
+            if (activeTab) {
+                const event = new CustomEvent('terminal-ready', {
+                    detail: {
+                        tabKey: activeTabKey,
+                        connectionId: activeTab.connectionId,
+                        sessionId: activeTab.sessionId,
+                        protocol: activeTab.protocol || 'ssh'
+                    }
+                });
+                window.dispatchEvent(event);
+                console.log(`激活标签: ${activeTabKey}, 准备触发终端就绪事件`);
+            }
         }
-    }, [activeTabKey]);
+    }, [activeTabKey, tabs]);
 
     // 组件卸载时清理资源
     useEffect(() => {
