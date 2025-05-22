@@ -2,19 +2,24 @@
  * @Author: Await
  * @Date: 2025-05-10 22:19:37
  * @LastEditors: Await
- * @LastEditTime: 2025-05-19 19:16:06
+ * @LastEditTime: 2025-05-21 20:23:05
  * @Description: 终端容器管理组件
  */
 import React, { useCallback, useEffect } from 'react';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
+import type { Connection } from '../Terminal.d';
 import GraphicalTerminal from '../../../components/GraphicalTerminal';
 import RdpTerminal from '../../../components/RdpTerminal';
+import SimpleTerminal from '../../../components/SimpleTerminal';
 import { getTabProtocol, isGraphicalProtocol } from '../utils/protocolHandler';
 import styles from '../styles.module.css';
 
 interface TerminalContainersProps {
     tabs: TerminalTab[];
     activeTabKey: string;
+    isConnected?: boolean;
+    connection?: Connection;
+    createWebSocketConnection?: (tab: TerminalTab) => WebSocket | null;
 }
 
 /**
@@ -23,7 +28,8 @@ interface TerminalContainersProps {
  */
 const TerminalContainers: React.FC<TerminalContainersProps> = ({
     tabs,
-    activeTabKey
+    activeTabKey,
+    createWebSocketConnection
 }) => {
     // 处理RDP调整大小
     const handleRdpResize = useCallback((tab: TerminalTab, width: number, height: number) => {
@@ -198,114 +204,30 @@ const TerminalContainers: React.FC<TerminalContainersProps> = ({
                         data-graphical={isGraphical ? 'true' : 'false'}
                         data-connection-id={connectionId}
                         data-session-id={sessionId}
-                        style={{
-                            visibility: isVisible ? 'visible' : 'hidden',
-                            zIndex: isVisible ? 10 : -1,
-                            height: '100%',
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            overflow: 'hidden'
-                        }}
                     >
-                        {isRdp ? (
-                            // RDP终端
-                            <div
-                                id={terminalDomId}
-                                ref={node => {
-                                    if (node && tab.terminalRef) {
-                                        tab.terminalRef.current = node;
-                                    }
-                                }}
-                                className={styles.rdpContainer}
-                                style={{
-                                    height: '100%',
-                                    width: '100%',
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 0,
-                                    overflow: 'hidden'
-                                }}
-                            >
+                        {isGraphical ? (
+                            isRdp ? (
                                 <RdpTerminal
-                                    webSocketRef={tab.webSocketRef}
                                     connectionId={connectionId}
                                     sessionId={sessionId}
+                                    webSocketRef={tab.webSocketRef}
                                     onResize={(width, height) => handleRdpResize(tab, width, height)}
                                     onInput={(data) => handleRdpInput(tab, data)}
                                 />
-                            </div>
-                        ) : isGraphical ? (
-                            // 其他图形终端
-                            <div
-                                id={terminalDomId}
-                                ref={node => {
-                                    if (node && tab.terminalRef) {
-                                        tab.terminalRef.current = node;
-                                    }
-                                }}
-                                className={styles.graphicalTerminalContainer}
-                                style={{
-                                    height: '100%',
-                                    width: '100%',
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 0,
-                                    overflow: 'hidden'
-                                }}
-                            >
+                            ) : (
                                 <GraphicalTerminal
-                                    protocol={protocol || 'unknown'}
-                                    visible={isVisible}
+                                    connectionId={connectionId}
+                                    sessionId={sessionId}
                                     webSocketRef={tab.webSocketRef}
                                 />
-                            </div>
+                            )
                         ) : (
-                            // 非图形终端(xterm)
-                            <div
-                                id={terminalDomId}
-                                ref={node => {
-                                    if (node && tab.terminalRef) {
-                                        tab.terminalRef.current = node;
-                                        console.log(`SSH终端DOM容器已创建 ID=${terminalDomId}`, node);
-                                    }
-                                }}
-                                className={styles.xtermPlaceholder}
-                                style={{
-                                    height: '100%',
-                                    width: '100%',
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 0,
-                                    overflow: 'hidden',
-                                    backgroundColor: '#1e1e1e',
-                                    color: '#ffffff',
-                                    padding: '10px',
-                                    boxSizing: 'border-box',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    zIndex: isVisible ? 1 : -1,
-                                    visibility: isVisible ? 'visible' : 'hidden'
-                                }}
-                            >
-                                <div style={{ fontSize: '14px', color: '#0f0', marginBottom: '10px' }}>
-                                    <strong>正在初始化{protocol}终端...</strong>
-                                    <div>连接信息：</div>
-                                    <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
-                                        <li>协议: {protocol}</li>
-                                        <li>连接ID: {connectionId}</li>
-                                        <li>会话ID: {sessionId}</li>
-                                        <li>标签键: {tab.key}</li>
-                                    </ul>
-                                    <div>
-                                        {tab.connection?.host && <div>主机: {tab.connection.host}</div>}
-                                        {tab.connection?.port && <div>端口: {tab.connection.port}</div>}
-                                        {tab.connection?.username && <div>用户名: {tab.connection.username}</div>}
-                                    </div>
-                                </div>
-                            </div>
+                            <SimpleTerminal
+                                connectionId={connectionId}
+                                sessionId={sessionId}
+                                webSocketRef={tab.webSocketRef}
+                                visible={isVisible}
+                            />
                         )}
                     </div>
                 );

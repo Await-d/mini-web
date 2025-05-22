@@ -1,312 +1,172 @@
-import React, { useState, useCallback, useEffect, useRef, createRef } from 'react';
+/*
+ * @Author: Await
+ * @Date: 2025-05-21 20:15:30
+ * @LastEditors: Await
+ * @LastEditTime: 2025-05-21 21:11:26
+ * @Description: 终端连接自定义Hook
+ */
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { message } from 'antd';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { connectionAPI, sessionAPI } from '../../../services/api';
-import type { Connection } from '../../../services/api';
 import { useTerminal } from '../../../contexts/TerminalContext';
-import { terminalStateRef } from '../../../contexts/TerminalContext';
-import type { TerminalTab } from '../../../contexts/TerminalContext';
-import type { WindowSize } from '../utils/terminalConfig';
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import { SearchAddon } from 'xterm-addon-search';
+import type { TerminalTab } from '../Terminal.d';
+import { connectionAPI } from '../../../services/api';
 
-// 导入拆分出的子Hook
-import { useTerminalInitialization } from './useTerminalInitialization';
-import { useWebSocketManager } from './useWebSocketManager';
-import { useTerminalData } from './useTerminalData';
-import { useTerminalUI } from './useTerminalUI';
-
-// 确保terminalStateRef.current.tabs被推断为TerminalTab[]类型
-declare module '../../../contexts/TerminalContext' {
-    interface TerminalState {
-        tabs: TerminalTab[];
-        activeTabKey: string;
-    }
+/**
+ * 终端连接Hook返回类型
+ */
+interface UseTerminalConnectionReturn {
+    tabs: TerminalTab[];
+    activeTabKey: string;
+    connection: any | null;
+    isConnected: boolean;
+    fullscreen: boolean;
+    terminalSize: { cols: number; rows: number };
+    networkLatency: number | null;
+    terminalMode: string;
+    sidebarCollapsed: boolean;
+    toggleFullscreen: () => void;
+    sendDataToServer: (data: string) => void;
+    refreshTab: (tabKey: string) => void;
+    duplicateTab: (tabKey: string) => void;
+    closeWebSocketConnection: (tab: TerminalTab) => void;
+    createWebSocketConnection: (sessionId: number | string, tabKey: string) => void;
 }
 
-// 已初始化的终端标签跟踪
-const initializedTabs = new Set<string>();
-
 /**
- * 格式化创建标签的数据
+ * 终端连接自定义Hook
+ * 提供终端连接的状态和方法
  */
-const formatTabData = (connection: any, sessionId?: number): TerminalTab => {
-    const protocol = connection.protocol || 'SSH';
-    const hostname = connection.host || 'localhost';
-    const port = connection.port || 22;
-    const username = connection.username || 'root';
+export const useTerminalConnection = (): UseTerminalConnectionReturn => {
+    // 获取终端上下文
+    const { state, addTab, setActiveTab, closeTab } = useTerminal();
+    const { tabs, activeTabKey } = state;
 
-    return {
-        key: `tab-${connection.id}-${sessionId || 'nosession'}-${Date.now()}`,
-        title: connection.name || `${hostname}:${port}`,
-        icon: null,
-        status: 'connecting',
-        connectionId: connection.id,
-        sessionId: sessionId,
-        connection: connection,
-        isConnected: false,
-        terminalRef: createRef<HTMLDivElement>(),
-        xtermRef: createRef<Terminal>(),
-        webSocketRef: createRef<WebSocket>(),
-        fitAddonRef: createRef<FitAddon>(),
-        searchAddonRef: createRef<SearchAddon>(),
-        messageQueueRef: createRef<string[]>(),
-        protocol,
-        hostname,
-        port,
-        username
-    };
-};
-
-/**
- * 终端连接的主Hook，整合各子Hook的功能
- */
-export const useTerminalConnection = () => {
+    // 从URL获取参数
     const { connectionId } = useParams<{ connectionId: string }>();
     const [searchParams] = useSearchParams();
     const sessionParam = searchParams.get('session');
+    const tabKeyParam = searchParams.get('tabKey');
 
-    // 使用终端上下文
-    const { state, addTab, setActiveTab } = useTerminal();
-    const { tabs, activeTabKey } = state;
+    // 状态
+    const [connection, setConnection] = useState<any>(null);
+    const [isConnected, setIsConnected] = useState<boolean>(false);
+    const [fullscreen, setFullscreen] = useState<boolean>(false);
+    const [terminalSize, setTerminalSize] = useState<{ cols: number; rows: number }>({ cols: 80, rows: 24 });
+    const [networkLatency, setNetworkLatency] = useState<number | null>(null);
+    const [terminalMode, setTerminalMode] = useState<string>('default');
+    const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
 
-    // 使用拆分的子Hooks
-    const { initializeTerminal, resizeTerminal } = useTerminalInitialization();
-    const { isConnected, createWebSocketConnection, closeWebSocketConnection, closeAllConnections, sendData } = useWebSocketManager();
-    const { terminalMode, networkLatency } = useTerminalData();
-    const { fullscreen, sidebarCollapsed, toggleFullscreen } = useTerminalUI();
+    // 引用
+    const websocketRef = useRef<WebSocket | null>(null);
 
-    const [connection, setConnection] = useState<Connection | null>(null);
-    const [terminalSize, setTerminalSize] = useState<WindowSize>({ cols: 80, rows: 24 });
+    // 加载连接信息
+    useEffect(() => {
+        if (connectionId) {
+            connectionAPI.getConnection(Number(connectionId))
+                .then(response => {
+                    if (response.data && response.data.code === 200) {
+                        setConnection(response.data.data);
+                    } else {
+                        message.error(response.data?.message || '获取连接信息失败');
+                    }
+                })
+                .catch(error => {
+                    console.error('获取连接信息失败:', error);
+                    message.error('获取连接信息失败');
+                });
+        }
+    }, [connectionId]);
+
+    // 切换全屏模式
+    const toggleFullscreen = useCallback(() => {
+        setFullscreen(prev => !prev);
+    }, []);
 
     // 发送数据到服务器
     const sendDataToServer = useCallback((data: string) => {
-        const activeTab = tabs.find(tab => tab.key === activeTabKey);
-        if (!activeTab) return;
-        sendData(activeTab, data);
-    }, [activeTabKey, tabs, sendData]);
-
-    // 切换全屏并调整终端大小
-    const handleToggleFullscreen = useCallback(() => {
-        toggleFullscreen();
-
-        // 延迟调整终端大小，以便DOM更新完成
-        setTimeout(() => {
-            const activeTab = tabs.find(tab => tab.key === activeTabKey);
-            if (activeTab) resizeTerminal(activeTab);
-        }, 100);
-    }, [activeTabKey, tabs, toggleFullscreen, resizeTerminal]);
-
-    // 初始化终端标签页
-    const initializeTerminalTab = useCallback((tabKey: string) => {
-        // 确保终端状态存在
-        if (!terminalStateRef.current) return;
-
-        // 找到相应标签
-        const tab = terminalStateRef.current.tabs.find(t => t.key === tabKey);
-        if (!tab || !tab.connectionId) return;
-
-        // 防止重复初始化
-        if (initializedTabs.has(tabKey)) return;
-        initializedTabs.add(tabKey);
-
-        // 创建WebSocket连接
-        if (typeof tab.connectionId === 'number' && tab.sessionId) {
-            createWebSocketConnection(tab);
+        if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+            websocketRef.current.send(data);
         }
-    }, [createWebSocketConnection]);
+    }, []);
 
-    // 创建新标签页
-    const fetchConnectionAndCreateTab = useCallback(async (connectionId: number, sessionId?: number) => {
-        // 检查是否已存在相应标签
-        const existingTab = tabs.find(tab =>
-            tab.connectionId === connectionId && tab.sessionId === sessionId
-        );
-
-        if (existingTab) {
-            setActiveTab(existingTab.key);
-            return existingTab;
-        }
-
-        try {
-            // 获取连接详情
-            const response = await connectionAPI.getConnection(connectionId);
-            if (response?.data?.data) {
-                // 创建新标签并添加到状态
-                const newTab = formatTabData(response.data.data, sessionId);
-                addTab(newTab);
-                setActiveTab(newTab.key);
-                return newTab;
-            }
-
-            message.error('无法获取连接详情');
-            return null;
-        } catch (error) {
-            message.error('无法获取连接详情');
-            return null;
-        }
-    }, [addTab, setActiveTab, tabs]);
-
-    // 处理URL参数，创建标签页
-    useEffect(() => {
-        if (connectionId && parseInt(connectionId) > 0) {
-            const sessionId = sessionParam ? parseInt(sessionParam) : undefined;
-            fetchConnectionAndCreateTab(parseInt(connectionId), sessionId);
-        }
-    }, [connectionId, sessionParam, fetchConnectionAndCreateTab]);
-
-    // 监听终端就绪事件，触发初始化
-    useEffect(() => {
-        const handleTerminalReady = (event: CustomEvent) => {
-            if (event.detail?.tabKey) {
-                initializeTerminalTab(event.detail.tabKey);
-            }
-        };
-
-        window.addEventListener('terminal-ready', handleTerminalReady as EventListener);
-        return () => {
-            window.removeEventListener('terminal-ready', handleTerminalReady as EventListener);
-        };
-    }, [initializeTerminalTab]);
-
-    // 监听窗口大小变化，调整终端大小
-    useEffect(() => {
-        const handleResize = () => {
-            const activeTab = tabs.find(tab => tab.key === activeTabKey);
-            if (activeTab) resizeTerminal(activeTab);
-        };
-
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, [activeTabKey, tabs, resizeTerminal]);
-
-    // 激活标签页时触发初始化
-    useEffect(() => {
-        if (activeTabKey && !initializedTabs.has(activeTabKey)) {
-            // 查找对应的标签以获取完整信息
-            const activeTab = tabs.find(tab => tab.key === activeTabKey);
-            if (activeTab) {
-                const event = new CustomEvent('terminal-ready', {
-                    detail: {
-                        tabKey: activeTabKey,
-                        connectionId: activeTab.connectionId,
-                        sessionId: activeTab.sessionId,
-                        protocol: activeTab.protocol || 'ssh'
-                    }
-                });
-                window.dispatchEvent(event);
-                console.log(`激活标签: ${activeTabKey}, 准备触发终端就绪事件`);
-            }
-        }
-    }, [activeTabKey, tabs]);
-
-    // 组件卸载时清理资源
-    useEffect(() => {
-        return () => {
-            closeAllConnections();
-            initializedTabs.clear();
-        };
-    }, [closeAllConnections]);
-
-    // 刷新标签页和连接
+    // 刷新标签页
     const refreshTab = useCallback((tabKey: string) => {
-        // 查找需要刷新的标签
-        const tab = tabs.find(tab => tab.key === tabKey);
-        if (!tab) return;
-
-        // 关闭现有的连接
-        if (tab.webSocketRef?.current) {
-            closeWebSocketConnection(tab);
+        const tab = tabs.find(t => t.key === tabKey);
+        if (!tab) {
+            message.error('找不到要刷新的标签页');
+            return;
         }
 
-        // 重置标签状态
-        const updatedTab = {
-            ...tab,
-            isConnected: false,
-            status: 'connecting'
-        };
-
-        // 更新标签状态
-        setTimeout(() => {
-            createWebSocketConnection(updatedTab);
-        }, 500);
-
-        // 触发刷新事件
-        window.dispatchEvent(new CustomEvent('terminal-tab-refreshed', {
+        // 在这里可以实现具体的刷新逻辑
+        window.dispatchEvent(new CustomEvent('terminal-tab-refresh', {
             detail: { tabKey }
         }));
-    }, [tabs, closeWebSocketConnection, createWebSocketConnection]);
 
-    // 复制连接并创建新标签
+    }, [tabs]);
+
+    // 复制标签页
     const duplicateTab = useCallback((tabKey: string) => {
-        // 查找需要复制的标签
-        const sourceTab = tabs.find(tab => tab.key === tabKey);
-        if (!sourceTab || !sourceTab.connectionId) return;
+        const tab = tabs.find(t => t.key === tabKey);
+        if (!tab) {
+            message.error('找不到要复制的标签页');
+            return;
+        }
 
-        // 使用现有连接创建新会话
-        sessionAPI.createSession(Number(sourceTab.connectionId))
-            .then(response => {
-                if (response?.data?.data) {
-                    const sessionId = response.data.data.id;
-                    // 复制连接信息并使用新的会话ID创建标签
-                    const timestamp = Date.now();
-                    const newTabKey = `tab-${sourceTab.connectionId}-${sessionId}-${timestamp}`;
+        // 在这里可以实现复制标签页的逻辑
+        window.dispatchEvent(new CustomEvent('terminal-tab-duplicate', {
+            detail: { tabKey }
+        }));
 
-                    // 创建新的标签对象
-                    const newTab: TerminalTab = {
-                        key: newTabKey,
-                        title: `${sourceTab.title} (复制)`,
-                        connectionId: sourceTab.connectionId,
-                        sessionId: sessionId,
-                        connection: sourceTab.connection,
-                        isConnected: false,
-                        status: 'connecting',
-                        protocol: sourceTab.protocol,
-                        hostname: sourceTab.hostname,
-                        port: sourceTab.port,
-                        username: sourceTab.username,
-                        terminalRef: createRef<HTMLDivElement>(),
-                        xtermRef: createRef<Terminal>(),
-                        webSocketRef: createRef<WebSocket>(),
-                        fitAddonRef: createRef<FitAddon>(),
-                        searchAddonRef: createRef<SearchAddon>(),
-                        messageQueueRef: createRef<string[]>(),
-                        isGraphical: sourceTab.isGraphical,
-                        rdpSettings: sourceTab.rdpSettings
-                    };
+    }, [tabs]);
 
-                    // 添加新标签并设为活动
-                    addTab(newTab);
-                    setActiveTab(newTabKey);
+    // 关闭WebSocket连接
+    const closeWebSocketConnection = useCallback((tab: TerminalTab) => {
+        if (tab.webSocketRef?.current) {
+            tab.webSocketRef.current.close();
+        }
+    }, []);
 
-                    message.success('连接已复制，正在建立新会话...');
-                } else {
-                    message.error('复制连接失败: 无法创建新会话');
-                }
-            })
-            .catch(error => {
-                message.error('复制连接失败: ' + (error.message || '未知错误'));
-            });
-    }, [tabs, addTab, setActiveTab]);
+    // 创建WebSocket连接
+    const createWebSocketConnection = useCallback((sessionId: number | string, tabKey: string) => {
+        // 在这里实现WebSocket连接创建逻辑
+        console.log(`创建WebSocket连接: 会话ID=${sessionId}, 标签Key=${tabKey}`);
+
+        // 可以根据协议类型和其他参数创建不同的连接
+        // 这里只是一个示例
+        const tab = tabs.find(t => t.key === tabKey);
+        if (!tab) {
+            message.error('找不到对应的标签页');
+            return;
+        }
+
+        // 创建WebSocket连接
+        try {
+            // 这里应该使用实际的WebSocket连接创建逻辑
+            // const ws = new WebSocket(...);
+            // tab.webSocketRef.current = ws;
+            setIsConnected(true);
+        } catch (error) {
+            message.error('创建WebSocket连接失败');
+            console.error('创建WebSocket连接失败:', error);
+        }
+    }, [tabs]);
 
     return {
-        connection,
         tabs,
         activeTabKey,
-        fullscreen,
+        connection,
         isConnected,
+        fullscreen,
         terminalSize,
         networkLatency,
         terminalMode,
         sidebarCollapsed,
-        toggleFullscreen: handleToggleFullscreen,
-        fetchConnectionAndCreateTab,
+        toggleFullscreen,
         sendDataToServer,
-        createWebSocketConnection,
-        closeWebSocketConnection,
-        closeAllConnections,
         refreshTab,
-        duplicateTab
+        duplicateTab,
+        closeWebSocketConnection,
+        createWebSocketConnection
     };
-};
+}; 

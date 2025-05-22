@@ -12,11 +12,8 @@ import { ConfigProvider } from 'antd';
 import zhCN from 'antd/lib/locale/zh_CN';
 import { router } from './router';
 import { TerminalProvider } from './contexts/TerminalContext';
-import { initializeProtocolHandlers } from './pages/Terminal/services/ProtocolHandlers';
 import './index.css';
 
-// 初始化协议处理器，注册所有WebSocket消息处理器
-initializeProtocolHandlers();
 
 const root = ReactDOM.createRoot(document.getElementById('root')!, {
   onUncaughtError: (error, errorInfo) => {

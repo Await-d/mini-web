@@ -5,9 +5,12 @@
  * @LastEditTime: 2025-05-17 18:26:12
  * @Description: 请填写简介
  */
-import { FC, ReactNode } from 'react';
+import { FC, ReactNode, RefObject } from 'react';
 import { TerminalTab } from '../../contexts/TerminalContext';
-import { Connection } from '../../services/api';
+import { Connection as ApiConnection } from '../../services/api';
+
+// 导出Connection类型
+export type Connection = ApiConnection;
 
 // 导出TerminalTab类型，以便其他文件可以直接从这里导入
 export type { TerminalTab };
@@ -48,11 +51,11 @@ export interface ConnectionChildProps {
 
     // 功能方法
     toggleFullscreen?: () => void;
-    sendDataToServer?: (data: string) => void;
+    sendDataToServer?: (data: string) => boolean;
     refreshTab?: (tabKey: string) => void;
     duplicateTab?: (tabKey: string) => void;
     closeWebSocketConnection?: (tab: TerminalTab) => void;
-    createWebSocketConnection?: (tab: TerminalTab) => void;
+    createWebSocketConnection?: (tab: TerminalTab) => WebSocket | null;
 
     // 允许其他属性
     [key: string]: any;
@@ -71,3 +74,86 @@ export interface TerminalSettings {
 // 其他终端相关类型定义
 export type ProtocolType = 'ssh' | 'telnet' | 'rdp' | 'vnc';
 export type TerminalMode = 'normal' | 'fullscreen';
+
+/**
+ * 连接参数类型
+ */
+export interface ConnectionParams {
+    connectionId: number;
+    sessionId: number | string;
+}
+
+/**
+ * 终端标签信息类型
+ */
+export interface TabInfo {
+    key: string;
+    title: string;
+    connectionId: number;
+    sessionId: number | string;
+    connection?: any;
+}
+
+/**
+ * 终端容器组件属性
+ */
+export interface TerminalContainersProps {
+    tabs: TerminalTab[];
+    activeTabKey: string;
+    createWebSocketConnection?: (sessionId: number | string, tabKey: string) => void;
+}
+
+/**
+ * 终端标签页组件属性
+ */
+export interface TerminalTabsProps {
+    tabs: TerminalTab[];
+    activeTabKey: string;
+    onTabChange: (key: string) => void;
+    onTabClose: (key: string) => void;
+    onTabRefresh?: (key: string) => void;
+    onTabDuplicate?: (key: string) => void;
+}
+
+/**
+ * 终端事件管理器组件属性
+ */
+export interface TerminalEventManagerProps {
+    tabs: TerminalTab[];
+    activeTabKey: string;
+    setActiveTab: (key: string) => void;
+    createWebSocketConnection?: (tab: TerminalTab) => WebSocket | null;
+    children: React.ReactNode;
+}
+
+/**
+ * SimpleTerminal组件属性
+ */
+export interface SimpleTerminalProps {
+    connectionId: number;
+    sessionId: string | number;
+    webSocketRef: RefObject<WebSocket | null>;
+    visible?: boolean;
+}
+
+/**
+ * GraphicalTerminal组件属性
+ */
+export interface GraphicalTerminalProps {
+    connectionId: number;
+    sessionId: string | number;
+    webSocketRef: RefObject<WebSocket | null>;
+    visible?: boolean;
+}
+
+/**
+ * RdpTerminal组件属性
+ */
+export interface RdpTerminalProps {
+    connectionId: number;
+    sessionId: string | number;
+    webSocketRef: RefObject<WebSocket | null>;
+    visible?: boolean;
+    onResize?: (width: number, height: number) => void;
+    onInput?: (data: string) => void;
+}

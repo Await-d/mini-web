@@ -86,7 +86,7 @@ go run cmd/server/main.go
    - 支持SSH/RDP/VNC/Telnet协议
 
 3. **终端功能**
-   - SSH终端模拟（基于xterm.js）
+   - SSH终端模拟
 
 ## 技术栈
 
@@ -96,7 +96,6 @@ go run cmd/server/main.go
 - Vite
 - React Router
 - Ant Design 5
-- xterm.js（终端模拟）
 
 ### 后端
 - Go

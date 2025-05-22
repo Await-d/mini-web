@@ -8,7 +8,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
 import { terminalStateRef } from '../../../contexts/TerminalContext';
-import { writeColorText } from '../utils/terminalUtils';
 import { WebSocketService } from '../services/WebSocketService';
 
 // 扩展TerminalTab接口以支持lastActivityTime和isGraphical属性
@@ -47,14 +46,6 @@ export const useWebSocketManager = () => {
     // 保留这些ref用于跟踪状态，与原API兼容
     const connectingRef = useRef<Set<string>>(new Set());
     const reconnectTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
-
-    // 封装writeColorText以处理类型兼容性
-    const writeTerminalText = useCallback((tab: TerminalTab, color: string, text: string) => {
-        if (tab.xtermRef?.current) {
-            writeColorText(tab.xtermRef.current, text, color);
-        }
-    }, []);
-
     /**
      * 创建WebSocket连接
      * 现在是WebSocketService.connect的封装

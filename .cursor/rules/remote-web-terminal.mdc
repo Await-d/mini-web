@@ -43,7 +43,7 @@ alwaysApply: true
 
 #### 2.1.4 Telnet
 - 完整的Telnet协议实现
-- 可配置终端类型(VT100, xterm等)
+- 可配置终端类型(VT100,)
 - 支持自定义端口连接
 - 会话超时控制
 
@@ -91,7 +91,7 @@ alwaysApply: true
 
 - **基础框架**：React或Vue.js，使用TypeScript开发
 - **UI库**：Ant Design或Material-UI
-- **终端模拟**：xterm.js实现SSH和Telnet终端
+- **终端模拟**：js实现SSH和Telnet终端
 - **远程显示**：HTML5 Canvas或WebGL用于RDP/VNC图形渲染
 - **实时通信**：WebSocket和WebRTC用于数据传输
 - **状态管理**：Redux或Vuex

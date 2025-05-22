@@ -7,7 +7,6 @@
  */
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useParams } from 'react-router-dom';
-import ConnectedTerminal from './components/ConnectedTerminal';
 import TerminalNotConnected from './components/TerminalNotConnected';
 import TerminalConnector from './components/TerminalConnectionWrapper';
 import './Terminal.css';
@@ -100,19 +99,15 @@ const Terminal: React.FC = () => {
         }
     }, [connectionId, sessionId]);
 
-    // 检查是否存在连接参数
-    const hasConnectionParams = connectionId || sessionId;
-
     return (
         <div className="terminal-page">
             <TerminalConnector>
-                {({ hasConnection, tabsCount, activeTabKey, isConnected, tabs }) => {
+                {({ hasConnection, tabsCount, activeTabKey, isConnected }) => {
                     // 终端连接组件就绪
 
                     // 判断是否显示已连接终端
                     if (hasConnection || tabsCount > 0 || activeTabKey !== 'no-tabs' || isConnected || isConnectionRestored) {
                         // 使用子组件进行终端DOM初始化，无需手动操作DOM
-                        return <ConnectedTerminal />;
                     }
 
                     // 显示未连接终端组件

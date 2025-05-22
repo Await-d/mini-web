@@ -1,0 +1,111 @@
+/* SimpleTerminal组件样式 */
+
+.simple-terminal-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: #1e1e1e;
+  color: #f0f0f0;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+.terminal-output {
+  flex: 1;
+  padding: 8px;
+  overflow-y: auto;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+.terminal-line {
+  margin: 2px 0;
+  width: 100%;
+}
+
+.error-line {
+  color: #ff6b6b;
+}
+
+.system-line {
+  color: #4dabf7;
+}
+
+.info-line {
+  color: #69db7c;
+}
+
+.command-line {
+  color: #ffd43b;
+  font-weight: bold;
+}
+
+.terminal-input-container {
+  display: flex;
+  padding: 8px;
+  background-color: #252526;
+  border-top: 1px solid #333333;
+}
+
+.prompt {
+  color: #4dabf7;
+  font-weight: bold;
+  margin-right: 4px;
+}
+
+.terminal-input {
+  flex: 1;
+  background-color: transparent;
+  color: #f0f0f0;
+  caret-color: #f0f0f0;
+  border: none;
+  outline: none;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 14px;
+}
+
+/* 定制 Ant Design Input 组件样式 */
+.terminal-input.ant-input {
+  color: #f0f0f0;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.terminal-input.ant-input:focus {
+  border: none;
+  box-shadow: none;
+}
+
+/* 滚动条样式 */
+.terminal-output::-webkit-scrollbar {
+  width: 8px;
+}
+
+.terminal-output::-webkit-scrollbar-track {
+  background: #252526;
+}
+
+.terminal-output::-webkit-scrollbar-thumb {
+  background-color: #555555;
+  border-radius: 4px;
+}
+
+.terminal-output::-webkit-scrollbar-thumb:hover {
+  background-color: #666666;
+}
+
+/* 确保Input组件的antd样式不会影响我们的终端 */
+.terminal-input-container .ant-input {
+  background-color: transparent !important;
+}
+
+.terminal-input-container .ant-input:hover,
+.terminal-input-container .ant-input:focus {
+  border-color: transparent !important;
+  box-shadow: none !important;
+} 

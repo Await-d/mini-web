@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-17 20:14:15
  * @LastEditors: Await
- * @LastEditTime: 2025-05-18 08:43:09
+ * @LastEditTime: 2025-05-22 18:33:54
  * @Description: 根据URL参数处理标签页的自定义hook
  */
 import { useEffect, useCallback, useRef } from 'react';
@@ -288,9 +288,9 @@ export const useTabFromUrl = () => {
     }, [connectionId, sessionParam, tabKeyParam, processTabFromParams]);
 
     return {
-        currentConnectionId: connectionId,
-        currentSessionId: sessionParam,
-        currentTabKey: tabKeyParam || activeTabKey
+        connectionId,
+        sessionParam,
+        tabKeyParam
     };
 };
 

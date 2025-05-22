@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Tabs, Spin, Tooltip, Menu, Modal } from 'antd';
+import { Tabs, Spin, Tooltip, Menu, Modal, Badge, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   CodeOutlined,
@@ -11,9 +11,11 @@ import {
   CopyOutlined,
   CloseOutlined,
   CloseCircleOutlined,
-  ThunderboltOutlined
+  ThunderboltOutlined,
+  MoreOutlined
 } from '@ant-design/icons';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
+import type { TerminalTabsProps } from '../Terminal.d';
 import styles from './TerminalTabs.module.css';
 
 /**
@@ -21,13 +23,12 @@ import styles from './TerminalTabs.module.css';
  */
 export interface TerminalTabsProps {
   tabs: TerminalTab[];
-  activeKey: string;
-  onTabChange: (activeKey: string) => void;
+  activeTabKey: string;
+  onTabChange: (activeTabKey: string) => void;
   onTabEdit: (targetKey: React.MouseEvent | React.KeyboardEvent | string, action: 'add' | 'remove') => void;
   onTabClose: (key: string) => void;
-  onAddTab?: () => void;
-  onRefreshTab?: (key: string) => void;
-  onDuplicateTab?: (key: string) => void;
+  onTabRefresh?: (key: string) => void;
+  onTabDuplicate?: (key: string) => void;
   networkLatency?: number | null; // 添加网络延迟属性
 }
 
@@ -80,97 +81,44 @@ const NetworkLatencyDisplay: React.FC<{ latency: number | null | undefined }> = 
  */
 const TerminalTabs: React.FC<TerminalTabsProps> = ({
   tabs,
-  activeKey,
+  activeTabKey,
   onTabChange,
   onTabEdit,
   onTabClose,
-  onRefreshTab,
-  onDuplicateTab,
+  onTabRefresh,
+  onTabDuplicate,
   networkLatency
 }) => {
-  // 状态：右键菜单相关
+  // 上下文菜单状态
+  const [contextMenuVisible, setContextMenuVisible] = useState(false);
+  const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const [contextMenuTabKey, setContextMenuTabKey] = useState<string | null>(null);
-  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number, y: number } | null>(null);
+  const [showConfirmCloseAll, setShowConfirmCloseAll] = useState(false);
 
   // 处理标签切换
   const handleTabChange = (key: string) => {
     onTabChange(key);
-
-    // 分发标签激活事件
-    window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-      detail: { tabKey: key, isNewTab: false }
-    }));
   };
 
-  // 处理标签右键点击
-  const handleContextMenu = (event: React.MouseEvent, tabKey: string) => {
-    event.preventDefault();
-    event.stopPropagation();
+  // 打开上下文菜单
+  const openContextMenu = (e: React.MouseEvent, tabKey: string) => {
+    e.preventDefault();
+    setContextMenuPosition({ x: e.clientX, y: e.clientY });
     setContextMenuTabKey(tabKey);
-    setContextMenuPosition({
-      x: event.clientX,
-      y: event.clientY
-    });
+    setContextMenuVisible(true);
   };
 
-  // 关闭右键菜单
+  // 关闭上下文菜单
   const closeContextMenu = () => {
-    setContextMenuTabKey(null);
-    setContextMenuPosition(null);
+    setContextMenuVisible(false);
   };
 
-  // 关闭当前标签
-  const handleCloseTab = () => {
-    if (!contextMenuTabKey) return;
-    onTabClose(contextMenuTabKey);
-    closeContextMenu();
-  };
-
-  // 关闭其他标签
-  const handleCloseOtherTabs = () => {
-    if (!contextMenuTabKey) return;
-
-    Modal.confirm({
-      title: '关闭其他标签',
-      content: '确定要关闭除当前标签外的所有标签吗？',
-      onOk: () => {
-        tabs.forEach(tab => {
-          if (tab.key !== contextMenuTabKey) {
-            onTabClose(tab.key);
-          }
-        });
-        closeContextMenu();
-      },
-      onCancel: () => {
-        closeContextMenu();
-      }
-    });
-  };
-
-  // 关闭所有标签
-  const handleCloseAllTabs = () => {
-    Modal.confirm({
-      title: '关闭所有标签',
-      content: '确定要关闭所有标签吗？',
-      onOk: () => {
-        tabs.forEach(tab => {
-          onTabClose(tab.key);
-        });
-        closeContextMenu();
-      },
-      onCancel: () => {
-        closeContextMenu();
-      }
-    });
-  };
-
-  // 刷新标签页
+  // 刷新标签
   const handleRefreshTab = () => {
     if (!contextMenuTabKey) return;
 
-    if (onRefreshTab) {
-      // 使用传入的刷新函数
-      onRefreshTab(contextMenuTabKey);
+    if (onTabRefresh) {
+      onTabRefresh(contextMenuTabKey);
     } else {
       // 触发标签刷新事件，由具体的终端容器处理刷新逻辑
       window.dispatchEvent(new CustomEvent('terminal-tab-refresh', {
@@ -180,157 +128,191 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
     closeContextMenu();
   };
 
-  // 复制连接
+  // 复制标签
   const handleDuplicateTab = () => {
     if (!contextMenuTabKey) return;
 
-    if (onDuplicateTab) {
-      onDuplicateTab(contextMenuTabKey);
+    if (onTabDuplicate) {
+      onTabDuplicate(contextMenuTabKey);
     }
     closeContextMenu();
   };
 
-  // 右键菜单项
-  const contextMenuItems: ContextMenuItem[] = [
+  // 关闭标签
+  const handleCloseTab = () => {
+    if (!contextMenuTabKey) return;
+    onTabClose(contextMenuTabKey);
+    closeContextMenu();
+  };
+
+  // 上下文菜单项
+  const contextMenuItems = [
     {
       key: 'refresh',
-      label: '刷新',
+      label: '刷新连接',
       icon: <ReloadOutlined />,
-      onClick: handleRefreshTab
+      onClick: handleRefreshTab,
     },
     {
       key: 'duplicate',
-      label: '复制连接',
+      label: '复制标签页',
       icon: <CopyOutlined />,
-      onClick: handleDuplicateTab
+      onClick: handleDuplicateTab,
     },
     {
-      key: 'divider',
-      type: 'divider'
+      key: 'divider1',
+      type: 'divider',
     },
     {
       key: 'close',
       label: '关闭标签页',
       icon: <CloseOutlined />,
-      onClick: handleCloseTab
-    },
-    {
-      key: 'closeOthers',
-      label: '关闭其他标签页',
-      icon: <CloseCircleOutlined />,
-      onClick: handleCloseOtherTabs
-    },
-    {
-      key: 'closeAll',
-      label: '关闭所有标签页',
-      icon: <CloseCircleOutlined />,
+      onClick: handleCloseTab,
       danger: true,
-      onClick: handleCloseAllTabs
-    }
+    },
   ];
 
-  // 菜单点击处理
-  const handleMenuClick: MenuProps['onClick'] = (e) => {
-    const item = contextMenuItems.find(item => item.key === e.key);
-    if (item && item.onClick) {
-      item.onClick();
-    }
-  };
-
-  // 根据连接类型获取适当的图标
-  const getProtocolIcon = (protocol?: string) => {
-    switch (protocol?.toLowerCase()) {
-      case 'ssh':
-        return <CloudServerOutlined className={styles.ssh} />;
-      case 'rdp':
-        return <DesktopOutlined className={styles.rdp} />;
-      case 'vnc':
-        return <DatabaseOutlined className={styles.vnc} />;
-      case 'telnet':
-        return <ApiOutlined className={styles.telnet} />;
+  // 处理菜单项点击
+  const handleMenuClick = (e: any) => {
+    const key = e.key;
+    switch (key) {
+      case 'refresh':
+        handleRefreshTab();
+        break;
+      case 'duplicate':
+        handleDuplicateTab();
+        break;
+      case 'close':
+        handleCloseTab();
+        break;
       default:
-        return <CodeOutlined />;
+        break;
     }
   };
 
-  // 使用useMemo构建标签项目以避免不必要的重新计算
-  const items = useMemo(() =>
-    tabs.map((tab) => ({
-      key: tab.key,
-      label: (
-        <Tooltip title={tab.title} mouseEnterDelay={0.8}>
-          <span
-            className={styles.tabLabel}
-            onContextMenu={(e) => handleContextMenu(e, tab.key)}
-          >
-            <span className={styles.tabIcon}>
-              {tab.icon || getProtocolIcon(tab.protocol)}
-            </span>
-            <span className={styles.tabTitle}>{tab.title}</span>
-            {tab.status === 'connecting' || !tab.isConnected ? (
-              <Spin size="small" style={{ marginLeft: 4 }} />
-            ) : null}
-          </span>
-        </Tooltip>
-      ),
-      closable: true,
-      children: null // 标签页内容在主容器中渲染
-    })),
-    [tabs]
-  );
+  // 渲染标签标题
+  const renderTabTitle = (tab: TerminalTab) => {
+    const isConnected = tab.isConnected;
+    const statusColor = isConnected ? 'green' : 'red';
+
+    return (
+      <div className={styles.tabTitleContainer}>
+        <Badge color={statusColor} />
+        <span className={styles.tabTitle}>
+          {tab.title}
+        </span>
+        <Dropdown
+          overlay={
+            <Menu>
+              <Menu.Item
+                key="refresh"
+                icon={<ReloadOutlined />}
+                onClick={(e) => {
+                  e.domEvent.stopPropagation();
+                  onTabRefresh?.(tab.key);
+                }}
+              >
+                刷新连接
+              </Menu.Item>
+              <Menu.Item
+                key="duplicate"
+                icon={<CopyOutlined />}
+                onClick={(e) => {
+                  e.domEvent.stopPropagation();
+                  onTabDuplicate?.(tab.key);
+                }}
+              >
+                复制标签页
+              </Menu.Item>
+              <Menu.Divider />
+              <Menu.Item
+                key="close"
+                icon={<CloseOutlined />}
+                onClick={(e) => {
+                  e.domEvent.stopPropagation();
+                  onTabClose(tab.key);
+                }}
+              >
+                关闭标签页
+              </Menu.Item>
+            </Menu>
+          }
+          trigger={['click']}
+          placement="bottomRight"
+        >
+          <MoreOutlined
+            className={styles.tabMoreIcon}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </Dropdown>
+      </div>
+    );
+  };
 
   return (
     <div className={styles.terminalTabsContainer} onClick={closeContextMenu}>
       <Tabs
-        activeKey={activeKey}
-        type="editable-card"
-        hideAdd={true}
-        onChange={handleTabChange}
-        onEdit={onTabEdit}
+        type="card"
         className={styles.terminalTabs}
-        tabBarStyle={{ margin: 0, borderBottom: 0 }}
-        items={items}
-        size="small"
-        tabPosition="top"
-        animated={{ inkBar: true, tabPane: false }}
-        moreIcon={<span style={{ color: '#1677ff', fontSize: '14px' }}>···</span>}
-      />
+        activeKey={activeTabKey}
+        onChange={handleTabChange}
+        onEdit={(targetKey, action) => {
+          if (action === 'remove' && typeof targetKey === 'string') {
+            onTabClose(targetKey);
+          }
+        }}
+        hideAdd
+      >
+        {tabs.map(tab => (
+          <Tabs.TabPane
+            key={tab.key}
+            tab={renderTabTitle(tab)}
+            closable={true}
+          />
+        ))}
+      </Tabs>
 
-      {/* 网络延迟信息显示 */}
-      <NetworkLatencyDisplay latency={networkLatency} />
-
-      {/* 标签右键菜单 */}
-      {contextMenuPosition && contextMenuTabKey && (
+      {/* 上下文菜单 */}
+      {contextMenuVisible && (
         <div
+          className={styles.contextMenu}
           style={{
-            position: 'fixed',
-            zIndex: 1000,
             left: contextMenuPosition.x,
             top: contextMenuPosition.y,
-            backgroundColor: 'white',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            borderRadius: '6px',
-            padding: '8px 0'
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <Menu onClick={handleMenuClick} mode="vertical" style={{ border: 'none' }}>
-            {contextMenuItems.map(item =>
-              item.type === 'divider' ? (
-                <Menu.Divider key={item.key} />
-              ) : (
-                <Menu.Item
-                  key={item.key}
-                  icon={item.icon}
-                  danger={item.danger}
-                >
-                  {item.label}
-                </Menu.Item>
-              )
-            )}
-          </Menu>
+          {contextMenuItems.map(item =>
+            item.type === 'divider' ? (
+              <div key={item.key} className={styles.divider} />
+            ) : (
+              <div
+                key={item.key}
+                className={`${styles.menuItem} ${item.danger ? styles.danger : ''}`}
+                onClick={item.onClick}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </div>
+            )
+          )}
         </div>
       )}
+
+      {/* 确认关闭所有标签的对话框 */}
+      <Modal
+        title="确认关闭"
+        open={showConfirmCloseAll}
+        onOk={() => {
+          tabs.forEach(tab => onTabClose(tab.key));
+          setShowConfirmCloseAll(false);
+        }}
+        onCancel={() => setShowConfirmCloseAll(false)}
+        okText="关闭所有"
+        cancelText="取消"
+      >
+        <p>确定要关闭所有标签页吗？这将终止所有活动连接。</p>
+      </Modal>
     </div>
   );
 };

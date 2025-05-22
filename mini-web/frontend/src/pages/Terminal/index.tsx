@@ -2,23 +2,22 @@
  * @Author: Await
  * @Date: 2025-05-10 21:34:58
  * @LastEditors: Await
- * @LastEditTime: 2025-05-19 19:46:25
+ * @LastEditTime: 2025-05-21 20:02:00
  * @Description: 终端页面组件
  */
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, createRef } from 'react';
 import { Layout, message } from 'antd';
 import { useTerminal } from '../../contexts/TerminalContext';
 import TerminalTabs from './components/TerminalTabs';
 import TerminalContainers from './components/TerminalContainers';
 import TerminalConnectionWrapper from './components/TerminalConnectionWrapper';
-import TerminalEventManager from './components/TerminalEventManager';
 import EmptyTerminalGuide from './components/EmptyTerminalGuide';
+import TerminalEventManager from './components/TerminalEventManager';
 import type { ConnectionChildProps } from './components/TerminalConnectionWrapper';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { terminalStateRef } from '../../contexts/TerminalContext';
 import { connectionAPI, sessionAPI } from '../../services/api';
 import useTabFromUrl from './hooks/useTabFromUrl';
-import { useTerminalInitialization } from './hooks/useTerminalInitialization';
 import styles from './styles.module.css';
 
 const { Content } = Layout;
@@ -41,15 +40,11 @@ const Terminal: React.FC = () => {
   const navigate = useNavigate();
 
   // 使用终端上下文
-  const { state, setActiveTab, closeTab } = useTerminal();
-  const { tabs, activeTabKey } = state;
-
-  // 获取终端初始化函数
-  const { initializeTerminal } = useTerminalInitialization();
+  const { tabs, activeTabKey, addTab, updateTab, closeTab, setActiveTab, clearTabs } = useTerminal();
 
   // 使用标签页URL参数处理
   // 这个hook会根据URL参数创建或激活标签页
-  useTabFromUrl();
+  const urlParams = useTabFromUrl();
 
   // 标签页切换处理
   const handleTabChange = useCallback((activeKey: string) => {
@@ -138,129 +133,106 @@ const Terminal: React.FC = () => {
     }
   }, [handleTabClose]);
 
-  // 刷新标签页
-  const handleRefreshTab = useCallback((tabKey: string) => {
-    const tab = tabs.find(t => t.key === tabKey);
-    if (!tab) {
-      message.error('找不到要刷新的标签页');
+  // 处理刷新标签页
+  const refreshTab = useCallback((tabKey: string) => {
+    console.log(`刷新标签: ${tabKey}`);
+    // 触发刷新标签事件
+    window.dispatchEvent(new CustomEvent('terminal-tab-refresh', { detail: { tabKey } }));
+  }, []);
+
+  // 处理复制标签页
+  const duplicateTab = useCallback((tabKey: string) => {
+    console.log(`复制标签: ${tabKey}`);
+
+    // 查找要复制的标签
+    const sourceTab = tabs.find(tab => tab.key === tabKey);
+    if (!sourceTab) {
+      console.error(`无法找到要复制的标签: ${tabKey}`);
+      message.error('无法找到要复制的标签');
       return;
     }
-    // 触发刷新事件
-    window.dispatchEvent(new CustomEvent('terminal-tab-refresh', {
-      detail: { tabKey }
-    }));
 
-    message.info(`正在刷新标签页: ${tab.title}`);
-  }, [tabs]);
+    // 复制标签的基本信息
+    const { connectionId, connection, protocol, isGraphical } = sourceTab;
 
-  // 复制标签页
-  const handleDuplicateTab = useCallback((tabKey: string) => {
-    const tab = tabs.find(t => t.key === tabKey);
-    if (!tab || !tab.connectionId) {
-      message.error('找不到要复制的标签页或连接信息不完整');
-      return;
-    }
-    // 创建新会话
-    sessionAPI.createSession(tab.connectionId)
-      .then(response => {
-        if (response.data && response.data.code === 200) {
-          const sessionId = response.data.data.id;
-          const timestamp = Date.now();
-          // 使用统一的标签页键格式
-          const newTabKey = `conn-${tab.connectionId}-session-${sessionId}-${timestamp}`;
+    // 创建会话并添加新标签
+    if (connectionId) {
+      sessionAPI.createSession(connectionId)
+        .then(response => {
+          if (response.data.code === 200) {
+            const sessionData = response.data.data;
+            const newSessionId = sessionData.id;
 
-          // 复制原有连接信息，但使用新的会话ID
-          // 确保connectionId存在
-          if (tab.connectionId) {
-            connectionAPI.getConnection(tab.connectionId)
-              .then(connResponse => {
-                if (connResponse.data && connResponse.data.code === 200) {
-                  const connData = connResponse.data.data;
+            // 生成新标签的key
+            const newTabKey = `conn-${connectionId}-${newSessionId}-${Date.now()}`;
 
-                  // 移除所有关闭标志
-                  localStorage.removeItem('all_tabs_closed');
-                  localStorage.removeItem('force_closing_last_tab');
-                  localStorage.removeItem('recently_closed_tab');
+            // 准备新标签
+            addTab({
+              key: newTabKey,
+              title: `${connection?.name} 会话${newSessionId}`,
+              connectionId,
+              sessionId: newSessionId,
+              connection,
+              protocol,
+              isConnected: false,
+              isGraphical,
+              terminalRef: createRef<HTMLDivElement>(),
+              webSocketRef: createRef<WebSocket>(),
+              messageQueueRef: createRef<any[]>(),
+            });
 
-                  // 派发事件通知TerminalContext创建新标签页
-                  window.dispatchEvent(new CustomEvent('open-terminal-tab', {
-                    detail: {
-                      connectionId: tab.connectionId,
-                      sessionId: sessionId,
-                      tabKey: newTabKey,
-                      connectionName: connData.name,
-                      connectionProtocol: connData.protocol,
-                      host: connData.host,
-                      port: connData.port,
-                      username: connData.username,
-                      timestamp: timestamp,
-                      fromDuplicate: true
-                    }
-                  }));
-
-                  // 导航到新标签
-                  navigate(`/terminal/${tab.connectionId}?session=${sessionId}&tabKey=${newTabKey}`);
-                }
-              })
-              .catch(error => {
-                message.error('获取连接信息失败');
-                console.error('获取连接信息失败:', error);
-              });
+            message.success('已创建复制终端标签');
+          } else {
+            message.error(response.data.message || '创建会话失败');
           }
-        } else {
-          message.error(response.data?.message || '创建会话失败');
-        }
-      })
-      .catch(error => {
-        message.error('创建会话失败');
-        console.error('创建会话失败:', error);
-      });
-  }, [tabs, navigate]);
+        })
+        .catch(error => {
+          console.error('创建会话出错:', error);
+          message.error('创建会话出错');
+        });
+    }
+  }, [tabs, addTab]);
 
   // 渲染组件
   return (
     <Layout className={styles.terminalLayout}>
-      {/* 主内容区 */}
+      {/* 主内容区域 */}
       <Content className={styles.terminalContent}>
-        {/* 终端连接包装器 */}
-        <TerminalConnectionWrapper>
-          {(props: ConnectionChildProps) => (
+        <TerminalConnectionWrapper
+          connectionParams={{
+            connectionId: urlParams.connectionId ? Number(urlParams.connectionId) : undefined,
+            sessionId: urlParams.sessionParam ? Number(urlParams.sessionParam) : undefined
+          }}
+        >
+          {(connectionProps) => (
             <>
-              {/* 终端事件管理器 - 处理所有终端相关事件 */}
-              <TerminalEventManager
-                tabs={props.tabs}
-                activeTabKey={props.activeTabKey}
-                setActiveTab={setActiveTab}
-                createWebSocketConnection={props.createWebSocketConnection}
-                initTerminal={initializeTerminal}
-              >
-                {props.tabs && props.tabs.length > 0 ? (
-                  <>
-                    {/* 标签页 */}
-                    <TerminalTabs
-                      tabs={props.tabs}
-                      activeKey={props.activeTabKey}
-                      onTabChange={handleTabChange}
-                      onTabEdit={handleTabEdit}
-                      onTabClose={handleTabClose}
-                      onRefreshTab={handleRefreshTab}
-                      onDuplicateTab={handleDuplicateTab}
-                      networkLatency={props.networkLatency}
-                    />
+              {/* 标签页集合 */}
+              <TerminalTabs
+                tabs={connectionProps.tabs || []}
+                activeTabKey={connectionProps.activeTabKey}
+                onTabEdit={handleTabEdit}
+                onTabChange={handleTabChange}
+              />
 
-                    {/* 终端容器 */}
-                    <div className={styles.terminalContainerBox}>
-                      <TerminalContainers
-                        tabs={props.tabs}
-                        activeTabKey={props.activeTabKey}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  /* 空状态指南组件 */
-                  <EmptyTerminalGuide />
-                )}
-              </TerminalEventManager>
+              {/* 终端容器盒子 */}
+              <div className={styles.terminalContainerBox}>
+                {/* 终端事件管理器 */}
+                <TerminalEventManager
+                  tabs={connectionProps.tabs || []}
+                  activeTabKey={connectionProps.activeTabKey}
+                  setActiveTab={handleTabChange}
+                  createWebSocketConnection={connectionProps.createWebSocketConnection}
+                >
+                  {/* 终端容器组件 */}
+                  <TerminalContainers
+                    tabs={connectionProps.tabs || []}
+                    activeTabKey={connectionProps.activeTabKey}
+                    isConnected={connectionProps.isConnected}
+                    connection={connectionProps.connection}
+                    createWebSocketConnection={connectionProps.createWebSocketConnection}
+                  />
+                </TerminalEventManager>
+              </div>
             </>
           )}
         </TerminalConnectionWrapper>

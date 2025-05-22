@@ -2,27 +2,19 @@
  * @Author: Await
  * @Date: 2025-05-08 18:19:21
  * @LastEditors: Await
- * @LastEditTime: 2025-05-11 10:44:12
+ * @LastEditTime: 2025-05-21 19:30:32
  * @Description: 请填写简介
  */
-// 终端工具函数索引文件
-
-// 导出所有工具函数和常量
-export * from './terminalConfig';
-export * from './terminalInit';
-
 // 导入并导出WebSocket相关函数
 import { connectWebSocket, handleWebSocketMessage } from './websocket';
 // 导出WebSocket函数
 export { connectWebSocket, handleWebSocketMessage };
 
 // 导出终端工具函数
-export * from './terminalUtils';
 export * from './networkUtils';
 
 import { sessionAPI } from '../../../services/api';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
-import terminalInit, { initTerminal, refreshTerminal, clearTerminal, writeWelcomeMessage } from './initTerminal';
 
 /**
  * 关闭所有会话
@@ -86,16 +78,4 @@ export const createNewSession = async (connectionId: number): Promise<number | n
     console.error('创建会话API调用失败:', error);
     return null;
   }
-};
-
-/**
- * 导出所有终端相关工具函数
- */
-export {
-  // 终端初始化工具
-  initTerminal,
-  refreshTerminal,
-  clearTerminal,
-  writeWelcomeMessage,
-  terminalInit as default
 };

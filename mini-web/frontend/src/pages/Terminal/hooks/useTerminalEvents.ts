@@ -1,294 +1,144 @@
-import { useCallback } from 'react';
-import { Modal, message } from 'antd';
-import { useNavigate } from 'react-router-dom';
-import { useTerminal } from '../../../contexts/TerminalContext';
-import { sessionAPI } from '../../../services/api';
-import { closeAllSessions } from '../utils';
-import type { TerminalTab } from '../../../contexts/TerminalContext';
-import { createRef } from 'react';
-import type { Connection } from '../../../services/api';
+/*
+ * @Author: Await
+ * @Date: 2025-05-21 20:20:30
+ * @LastEditors: Await
+ * @LastEditTime: 2025-05-21 20:20:30
+ * @Description: 终端事件处理钩子
+ */
+import { useEffect, useCallback } from 'react';
+import { message } from 'antd';
+import type { TerminalTab } from '../Terminal.d';
 
 /**
- * 终端事件处理Hook - 处理所有终端相关的用户交互
+ * 终端事件处理钩子返回类型
  */
-export const useTerminalEvents = () => {
-    const navigate = useNavigate();
-    const { state, closeTab, addTab, setActiveTab } = useTerminal();
-    const { tabs, activeTabKey } = state;
+interface UseTerminalEventsReturn {
+    addEventListeners: () => void;
+    removeEventListeners: () => void;
+}
 
-    // 获取活动标签页
-    const getActiveTab = useCallback((): TerminalTab | undefined => {
-        return tabs.find(tab => tab.key === activeTabKey);
-    }, [activeTabKey, tabs]);
+/**
+ * 终端事件处理钩子参数类型
+ */
+interface UseTerminalEventsParams {
+    tabs: TerminalTab[];
+    activeTabKey: string;
+    refreshTab?: (tabKey: string) => void;
+    duplicateTab?: (tabKey: string) => void;
+    setActiveTab?: (tabKey: string) => void;
+    closeTab?: (tabKey: string) => void;
+}
 
-    // 关闭会话
-    const handleCloseSession = useCallback(() => {
-        const activeTab = getActiveTab();
-        if (!activeTab) {
-            message.warning('没有可关闭的会话');
+/**
+ * 终端事件处理钩子
+ * 用于统一管理终端相关事件的监听和处理
+ */
+export const useTerminalEvents = ({
+    tabs,
+    activeTabKey,
+    refreshTab,
+    duplicateTab,
+    setActiveTab,
+    closeTab
+}: UseTerminalEventsParams): UseTerminalEventsReturn => {
+
+    // 处理标签刷新事件
+    const handleTabRefresh = useCallback((event: Event) => {
+        const customEvent = event as CustomEvent;
+        const tabKey = customEvent.detail?.tabKey;
+        if (!tabKey) return;
+
+        // 尝试找到对应标签
+        const tab = tabs.find(tab => tab.key === tabKey);
+        if (!tab) {
+            message.error(`无法找到标签: ${tabKey}`);
             return;
         }
 
-        Modal.confirm({
-            title: '确认关闭',
-            content: '确定要关闭此会话吗？',
-            okText: '关闭',
-            okType: 'danger',
-            cancelText: '取消',
-            onOk: async () => {
-                // 关闭WebSocket连接
-                if (activeTab.webSocketRef?.current) {
-                    try {
-                        activeTab.webSocketRef.current.close();
-                    } catch (e) {
-                        console.error('关闭WebSocket连接失败:', e);
-                    }
-                }
+        message.info(`正在刷新标签: ${tab.title}`);
 
-                closeTab(activeTab.key);
-                message.success('会话已关闭');
-            },
-        });
-    }, [closeTab, getActiveTab]);
+        // 如果存在刷新函数则调用
+        if (refreshTab) {
+            refreshTab(tabKey);
+        }
+    }, [tabs, refreshTab]);
 
-    // 关闭所有会话
-    const handleCloseAllSessions = useCallback(() => {
-        Modal.confirm({
-            title: '确认关闭',
-            content: '确定要关闭所有会话并返回连接列表吗？',
-            okText: '关闭',
-            okType: 'danger',
-            cancelText: '取消',
-            onOk: async () => {
-                const result = await closeAllSessions(tabs);
-                if (result) {
-                    message.success('所有会话已关闭');
-                    navigate('/connections');
-                } else {
-                    message.error('关闭会话失败，请稍后再试');
-                }
-            },
-        });
-    }, [navigate, tabs]);
+    // 处理标签复制事件
+    const handleTabDuplicate = useCallback((event: Event) => {
+        const customEvent = event as CustomEvent;
+        const tabKey = customEvent.detail?.tabKey;
+        if (!tabKey) return;
 
-    // 复制终端内容
-    const handleCopyContent = useCallback(() => {
-        const activeTab = getActiveTab();
-        if (!activeTab || !activeTab.xtermRef?.current) {
-            message.info('没有可复制的内容');
+        // 尝试找到对应标签
+        const tab = tabs.find(tab => tab.key === tabKey);
+        if (!tab) {
+            message.error(`无法找到标签: ${tabKey}`);
             return;
         }
 
-        try {
-            const selection = activeTab.xtermRef.current.getSelection();
-            if (selection) {
-                navigator.clipboard.writeText(selection)
-                    .then(() => message.success('内容已复制到剪贴板'))
-                    .catch(err => {
-                        console.error('复制到剪贴板失败:', err);
-                        message.error('复制失败，请手动选择并复制');
-                    });
-            } else {
-                message.info('请先在终端中选择要复制的内容');
-            }
-        } catch (e) {
-            console.error('复制终端内容出错:', e);
-            message.error('复制出错，请手动选择并复制');
-        }
-    }, [getActiveTab]);
+        message.info(`正在复制标签: ${tab.title}`);
 
-    // 下载日志功能
-    const handleDownloadLog = useCallback(() => {
-        const activeTab = getActiveTab();
-        if (!activeTab || !activeTab.xtermRef?.current) {
-            message.info('没有可下载的内容');
+        // 如果存在复制函数则调用
+        if (duplicateTab) {
+            duplicateTab(tabKey);
+        }
+    }, [tabs, duplicateTab]);
+
+    // 处理标签激活事件
+    const handleTabActivate = useCallback((event: Event) => {
+        const customEvent = event as CustomEvent;
+        const tabKey = customEvent.detail?.tabKey;
+        if (!tabKey || tabKey === activeTabKey) return;
+
+        // 激活指定标签
+        if (setActiveTab) {
+            setActiveTab(tabKey);
+        }
+    }, [activeTabKey, setActiveTab]);
+
+    // 处理标签关闭事件
+    const handleTabClose = useCallback((event: Event) => {
+        const customEvent = event as CustomEvent;
+        const tabKey = customEvent.detail?.tabKey;
+        if (!tabKey) return;
+
+        // 尝试找到对应标签
+        const tab = tabs.find(tab => tab.key === tabKey);
+        if (!tab) {
+            message.error(`无法找到标签: ${tabKey}`);
             return;
         }
 
-        try {
-            const term = activeTab.xtermRef.current;
-            const buffer = term.buffer.active;
-            const lineCount = buffer.length;
-            let logContent = '';
-
-            for (let i = 0; i < lineCount; i++) {
-                const line = buffer.getLine(i);
-                if (line) {
-                    logContent += line.translateToString() + '\n';
-                }
-            }
-
-            if (!logContent) {
-                message.info('没有可下载的内容');
-                return;
-            }
-
-            // 创建下载链接
-            const blob = new Blob([logContent], { type: 'text/plain;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `terminal_log_${activeTab.sessionId || 'session'}_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
-            document.body.appendChild(a);
-            a.click();
-
-            // 清理
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }, 100);
-
-            message.success('日志已下载');
-        } catch (e) {
-            console.error('下载日志出错:', e);
-            message.error('下载日志失败');
+        // 如果存在关闭函数则调用
+        if (closeTab) {
+            closeTab(tabKey);
         }
-    }, [getActiveTab]);
+    }, [tabs, closeTab]);
 
-    // 添加新标签
-    const handleAddNewTab = useCallback(() => {
-        const activeTab = getActiveTab();
-        if (!activeTab || !activeTab.connection) {
-            message.error('无法创建新标签：未找到当前连接信息');
-            return;
-        }
+    // 添加事件监听
+    const addEventListeners = useCallback(() => {
+        window.addEventListener('terminal-tab-refresh', handleTabRefresh);
+        window.addEventListener('terminal-tab-duplicate', handleTabDuplicate);
+        window.addEventListener('terminal-tab-activate', handleTabActivate);
+        window.addEventListener('terminal-tab-close', handleTabClose);
+    }, [handleTabRefresh, handleTabDuplicate, handleTabActivate, handleTabClose]);
 
-        const connection = activeTab.connection;
+    // 移除事件监听
+    const removeEventListeners = useCallback(() => {
+        window.removeEventListener('terminal-tab-refresh', handleTabRefresh);
+        window.removeEventListener('terminal-tab-duplicate', handleTabDuplicate);
+        window.removeEventListener('terminal-tab-activate', handleTabActivate);
+        window.removeEventListener('terminal-tab-close', handleTabClose);
+    }, [handleTabRefresh, handleTabDuplicate, handleTabActivate, handleTabClose]);
 
-        // 使用当前连接创建新会话
-        sessionAPI.createSession(connection.id)
-            .then(response => {
-                if (response.data && response.data.code === 200) {
-                    const session = response.data.data;
-                    // 使用上下文管理器添加标签
-                    const now = Date.now();
-                    const tabKey = `tab-${connection.id}-${session.id}-${now}`;
-
-                    // 创建完整的标签对象
-                    const newTab: TerminalTab = {
-                        key: tabKey,
-                        title: connection.name || `${connection.host}:${connection.port}`,
-                        protocol: connection.protocol,
-                        status: 'connecting',
-                        connectionId: connection.id,
-                        sessionId: session.id,
-                        connection,
-                        isConnected: false,
-                        // 创建所需的引用
-                        terminalRef: createRef<HTMLDivElement>(),
-                        xtermRef: createRef(),
-                        webSocketRef: createRef<WebSocket>(),
-                        fitAddonRef: createRef(),
-                        searchAddonRef: createRef(),
-                        messageQueueRef: createRef<string[]>(),
-                        // 添加额外的属性
-                        hostname: connection.host,
-                        port: connection.port,
-                        username: connection.username
-                    };
-
-                    addTab(newTab);
-                } else {
-                    message.error('创建会话失败');
-                }
-            })
-            .catch(error => {
-                console.error('创建会话失败:', error);
-                message.error('创建会话失败，请稍后再试');
-            });
-    }, [addTab, getActiveTab]);
-
-    // 搜索终端内容
-    const handleSearch = useCallback(() => {
-        const activeTab = getActiveTab();
-        if (!activeTab || !activeTab.searchAddonRef?.current) {
-            message.error('搜索功能不可用');
-            return;
-        }
-
-        const searchText = prompt('请输入搜索内容:');
-        if (searchText) {
-            activeTab.searchAddonRef.current.findNext(searchText);
-        }
-    }, [getActiveTab]);
-
-    // 标签页变更处理
-    const handleTabChange = useCallback((newActiveKey: string) => {
-        setActiveTab(newActiveKey);
-
-        // 触发标签激活事件
-        window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-            detail: { tabKey: newActiveKey }
-        }));
-
-        // 确保更新本地存储的会话信息
-        const activeTab = tabs.find(tab => tab.key === newActiveKey);
-        if (activeTab) {
-            localStorage.setItem('terminal_active_tab', newActiveKey);
-            localStorage.setItem('current_terminal_session', JSON.stringify({
-                connectionId: activeTab.connectionId,
-                sessionId: activeTab.sessionId,
-                tabKey: activeTab.key,
-                connectionProtocol: activeTab.connection?.protocol,
-                connectionName: activeTab.connection?.name,
-                isConnected: activeTab.isConnected,
-                timestamp: Date.now()
-            }));
-        }
-    }, [setActiveTab, tabs]);
-
-    // 标签编辑处理（添加/删除标签）
-    const handleTabEdit = useCallback((
-        targetKey: React.MouseEvent<Element, MouseEvent> | React.KeyboardEvent<Element> | string,
-        action: 'add' | 'remove'
-    ) => {
-        if (action === 'add') {
-            handleAddNewTab();
-        } else if (action === 'remove') {
-            // 确保targetKey是字符串
-            const tabKey = typeof targetKey === 'string' ? targetKey : '';
-            if (tabKey) {
-                // 找到要关闭的标签页
-                const tabToClose = tabs.find(tab => tab.key === tabKey);
-                if (!tabToClose) return;
-
-                // 关闭前检查WebSocket连接
-                if (tabToClose.webSocketRef?.current) {
-                    try {
-                        tabToClose.webSocketRef.current.close();
-                    } catch (e) {
-                        console.error(`关闭WebSocket连接出错:`, e);
-                    }
-                }
-
-                // 如果是最后一个标签且它是当前会话，清除localStorage中的会话信息
-                if (tabs.length === 1) {
-                    localStorage.removeItem('current_terminal_session');
-                }
-
-                closeTab(tabKey);
-            }
-        }
-    }, [closeTab, handleAddNewTab, tabs]);
-
-    // 切换侧边栏
-    const handleToggleSidebar = useCallback(() => {
-        // 创建并分发自定义事件
-        window.dispatchEvent(new CustomEvent('toggle-operation-sidebar', { detail: {} }));
-    }, []);
+    // 自动添加和移除事件监听
+    useEffect(() => {
+        addEventListeners();
+        return removeEventListeners;
+    }, [addEventListeners, removeEventListeners]);
 
     return {
-        handleCloseSession,
-        handleCloseAllSessions,
-        handleCopyContent,
-        handleDownloadLog,
-        handleAddNewTab,
-        handleSearch,
-        handleTabChange,
-        handleTabEdit,
-        handleToggleSidebar,
-        getActiveTab
+        addEventListeners,
+        removeEventListeners
     };
-};
-
-export default useTerminalEvents; 
+}; 

@@ -8,7 +8,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
 import { WebSocketService } from '../services/WebSocketService';
-import { writeColorText } from '../utils/terminalUtils';
 
 /**
  * WebSocket连接Hook
@@ -136,20 +135,12 @@ export const useWebSocketConnection = (
     WebSocketService.refreshConnection(tab);
   }, [tab]);
 
-  // 写入终端文本的辅助函数
-  const writeTerminalText = useCallback((color: string, text: string) => {
-    if (tab?.xtermRef?.current) {
-      writeColorText(tab.xtermRef.current, text, color);
-    }
-  }, [tab?.xtermRef]);
-
   // 返回接口
   return {
     isConnected,
     latestActivityTime,
     sendData,
-    reconnect,
-    writeTerminalText
+    reconnect
   };
 };
 

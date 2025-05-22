@@ -15,7 +15,7 @@ alwaysApply: true
 当用户点击左侧树形结构中的连接时，系统会执行以下步骤：
 
 1. **树节点选择处理**：
-   - 在[OperationLayout.tsx](/home/await/project/mini-web/mini-web/frontend/src/layouts/OperationLayout.tsx)中的`handleSelect`函数捕获点击事件
+   - 在[OperationLayout.tsx](mdc:home/await/project/mini-web/mini-web/frontend/src/layouts/OperationLayout.tsx)中的`handleSelect`函数捕获点击事件
    - 如果点击的是叶子节点（连接），则调用`handleConnect`函数
 
 2. **连接处理**：
@@ -24,7 +24,7 @@ alwaysApply: true
    - 导航到终端页面：`navigate(`/terminal/${connection.id}?session=${sessionId}`)`
 
 3. **终端页面加载**：
-   - [Terminal.tsx](/home/await/project/mini-web/mini-web/frontend/src/pages/Terminal/index.tsx)组件从URL参数中获取`connectionId`和`session`
+   - [Terminal.tsx](mdc:home/await/project/mini-web/mini-web/frontend/src/pages/Terminal/index.tsx)组件从URL参数中获取`connectionId`和`session`
    - 使用这些参数初始化`TerminalConnectionWrapper`组件
 
 ## 2. 标签页创建流程
@@ -80,7 +80,6 @@ alwaysApply: true
 3. **引用处理**：
    - 每个标签需要多个引用以正确运行：
      - `terminalRef`: DOM容器引用
-     - `xtermRef`: xterm.js终端实例引用
      - `webSocketRef`: WebSocket连接引用
      - 等其他功能性引用
    

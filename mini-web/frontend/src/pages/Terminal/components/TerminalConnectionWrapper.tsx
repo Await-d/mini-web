@@ -2,142 +2,162 @@
  * @Author: Await
  * @Date: 2025-05-09 18:05:28
  * @LastEditors: Await
- * @LastEditTime: 2025-05-17 21:10:30
+ * @LastEditTime: 2025-05-22 18:45:16
  * @Description: 终端连接包装器组件
  */
-import React, { useEffect, useCallback } from 'react';
-import { useTerminalConnection } from '../hooks/useTerminalConnection';
-import { terminalStateRef } from '../../../contexts/TerminalContext';
+import React, { useEffect, useState, useRef } from 'react';
+import { useTerminal } from '../../../contexts/TerminalContext';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
+import type { TerminalConnectionWrapperProps, ConnectionChildProps, Connection } from '../Terminal.d';
+import { connectionAPI, sessionAPI } from '../../../services/api';
+import { terminalStateRef } from '../../../contexts/TerminalContext';
 import { message } from 'antd';
-import styles from '../styles.module.css';
-
-/**
- * 连接子组件所需的Props类型
- */
-export interface ConnectionChildProps {
-  hasConnection: boolean;
-  tabsCount: number;
-  activeTabKey: string;
-  isConnected: boolean;
-  tabs: TerminalTab[];
-  connection: any;
-  fullscreen?: boolean;
-  terminalSize?: { cols: number; rows: number };
-  networkLatency?: number | null;
-  terminalMode?: string;
-  sidebarCollapsed?: boolean;
-  toggleFullscreen?: () => void;
-  sendDataToServer?: (data: string) => void;
-  refreshTab?: (tabKey: string) => void;
-  duplicateTab?: (tabKey: string) => void;
-  // 允许传递任何额外属性
-  [key: string]: any;
-}
-
-/**
- * 终端连接包装器组件属性
- */
-export interface TerminalConnectionWrapperProps {
-  children: (props: ConnectionChildProps) => React.ReactNode;
-}
+import { useNavigate } from 'react-router-dom';
 
 /**
  * 终端连接包装器组件
- * 负责维护终端连接的状态，并将其传递给子组件
+ * 
+ * 负责连接管理和状态维护，将所有连接状态和操作传递给子组件
  */
-const TerminalConnectionWrapperComponent = ({ children }: TerminalConnectionWrapperProps) => {
-  // 获取连接相关属性
-  const connectionProps = useTerminalConnection();
+const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
+  children,
+  connectionParams
+}) => {
+  const navigate = useNavigate();
+  const { state, addTab, updateTab, closeTab, setActiveTab, createWebSocketConnection } = useTerminal();
+  const { tabs, activeTabKey } = state;
+  const [connection, setConnection] = useState<Connection | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [terminalSize, setTerminalSize] = useState({ cols: 80, rows: 24 });
+  const [networkLatency, setNetworkLatency] = useState<number | null>(null);
+  const [terminalMode, setTerminalMode] = useState('normal');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 确保终端状态引用更新
-  useEffect(() => {
-    if (terminalStateRef.current) {
-      terminalStateRef.current.tabs = connectionProps.tabs || [];
-      terminalStateRef.current.activeTabKey = connectionProps.activeTabKey || '';
-    }
-  }, [connectionProps.tabs, connectionProps.activeTabKey]);
+  // 连接状态跟踪
+  const connectionState = useRef({
+    connecting: false,
+    connected: false,
+    connectionId: null as number | null,
+    sessionId: null as number | null,
+    fetchingConnection: false
+  });
 
-  // 处理标签刷新事件
-  const handleTabRefresh = useCallback((event: CustomEvent) => {
-    const tabKey = event.detail?.tabKey;
-    if (!tabKey) return;
+  // 从connectionParams中获取连接ID和会话ID
+  const connectionId = connectionParams?.connectionId;
+  const sessionId = connectionParams?.sessionId;
 
-    // 尝试找到对应标签
-    const tab = connectionProps.tabs?.find(tab => tab.key === tabKey);
-    if (!tab) {
-      message.error(`无法找到标签: ${tabKey}`);
+  // 处理全屏切换
+  const toggleFullscreen = () => {
+    setFullscreen(prev => !prev);
+  };
+
+  // 获取连接信息
+  const fetchConnection = async (connId: number) => {
+    // 避免重复获取
+    if (connectionState.current.fetchingConnection) {
       return;
     }
 
-    message.info(`正在刷新连接: ${tab.title}`);
+    // 标记为正在获取
+    connectionState.current.fetchingConnection = true;
 
-    // 如果已有处理函数则使用
-    if (connectionProps.refreshTab) {
-      connectionProps.refreshTab(tabKey);
-    } else {
-      // 备用方案: 关闭连接后重新创建
-      try {
-        // 关闭旧连接，如果有的话
-        if (tab.webSocketRef?.current) {
-          if (connectionProps.closeWebSocketConnection) {
-            connectionProps.closeWebSocketConnection(tab);
-          } else {
-            tab.webSocketRef.current.close();
-          }
-        }
-
-        // 重新创建连接
-        setTimeout(() => {
-          if (connectionProps.createWebSocketConnection) {
-            connectionProps.createWebSocketConnection(tab);
-          } else {
-            message.warning('无法重新创建连接，刷新功能尚未完全实现');
-          }
-        }, 500);
-      } catch (error) {
-        message.error(`刷新连接失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    try {
+      const response = await connectionAPI.getConnection(connId);
+      if (response.data.code === 200) {
+        const connData = response.data.data;
+        setConnection(connData);
+        return connData;
+      } else {
+        message.error(response.data.message || '获取连接信息失败');
+        return null;
       }
+    } catch (error) {
+      console.error('获取连接信息出错:', error);
+      message.error('获取连接信息出错');
+      return null;
+    } finally {
+      // 标记为已完成获取
+      connectionState.current.fetchingConnection = false;
     }
-  }, [connectionProps.tabs, connectionProps.refreshTab, connectionProps.closeWebSocketConnection, connectionProps.createWebSocketConnection]);
-
-  // 添加标签刷新事件监听
-  useEffect(() => {
-    window.addEventListener('terminal-tab-refresh', handleTabRefresh as EventListener);
-    return () => {
-      window.removeEventListener('terminal-tab-refresh', handleTabRefresh as EventListener);
-    };
-  }, [handleTabRefresh]);
-
-  // 传递给子组件的属性
-  const childProps: ConnectionChildProps = {
-    hasConnection: !!connectionProps.connection,
-    tabsCount: connectionProps.tabs?.length || 0,
-    activeTabKey: connectionProps.activeTabKey || 'no-tabs',
-    isConnected: connectionProps.isConnected || false,
-    // 完整传递所有属性
-    tabs: connectionProps.tabs || terminalStateRef.current?.tabs || [],
-    connection: connectionProps.connection,
-    fullscreen: connectionProps.fullscreen,
-    terminalSize: connectionProps.terminalSize,
-    networkLatency: connectionProps.networkLatency,
-    terminalMode: connectionProps.terminalMode,
-    sidebarCollapsed: connectionProps.sidebarCollapsed,
-    toggleFullscreen: connectionProps.toggleFullscreen,
-    sendDataToServer: connectionProps.sendDataToServer,
-    refreshTab: connectionProps.refreshTab,
-    duplicateTab: connectionProps.duplicateTab,
-    // 添加可能存在的连接管理相关属性
-    closeWebSocketConnection: connectionProps.closeWebSocketConnection,
-    createWebSocketConnection: connectionProps.createWebSocketConnection
   };
 
-  return (
-    <div className={styles.terminalConnectionWrapper}>
-      {children(childProps)}
-    </div>
-  );
-}
+  // 创建WebSocket连接
+  const createWsConnection = (tab: TerminalTab): WebSocket | null => {
+    if (!tab.sessionId) {
+      console.error('无法创建WebSocket连接: 缺少sessionId');
+      return null;
+    }
 
-// 导出组件
-export default TerminalConnectionWrapperComponent;
+    // 调用上下文中的createWebSocketConnection方法
+    if (createWebSocketConnection) {
+      try {
+        // 转换为需要的参数格式
+        return createWebSocketConnection(tab.sessionId, tab.key);
+      } catch (error) {
+        console.error('创建WebSocket连接失败:', error);
+        return null;
+      }
+    }
+
+    return null;
+  };
+
+  // 向服务器发送数据
+  const sendDataToServer = (data: string): boolean => {
+    const activeTab = tabs.find(tab => tab.key === activeTabKey);
+    if (!activeTab || !activeTab.webSocketRef || !activeTab.webSocketRef.current) {
+      console.error('无法发送数据: WebSocket未连接或标签不存在');
+      return false;
+    }
+
+    try {
+      activeTab.webSocketRef.current.send(data);
+      return true;
+    } catch (error) {
+      console.error('发送数据失败:', error);
+      return false;
+    }
+  };
+
+  // 组件卸载时清理
+  useEffect(() => {
+    return () => {
+      // 清除定时器
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  // 准备传递给子组件的props
+  const connectionProps: ConnectionChildProps = {
+    // 基本连接状态
+    hasConnection: !!connection,
+    tabsCount: tabs.length,
+    activeTabKey,
+    isConnected,
+
+    // 核心数据
+    tabs,
+    connection,
+
+    // UI状态
+    fullscreen,
+    terminalSize,
+    networkLatency,
+    terminalMode,
+    sidebarCollapsed,
+
+    // 功能方法
+    toggleFullscreen,
+    sendDataToServer,
+    createWebSocketConnection: createWsConnection
+  };
+
+  // 渲染子组件
+  return children(connectionProps);
+};
+
+export default TerminalConnectionWrapper;

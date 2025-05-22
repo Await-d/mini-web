@@ -22,9 +22,6 @@ interface Tab {
     status?: string;
     isConnected?: boolean;
     sessionId?: number;
-    xtermRef: RefObject<any>;
-    fitAddonRef: RefObject<any>;
-    searchAddonRef: RefObject<any>;
     messageQueueRef: RefObject<any[]>;
     webSocketRef: RefObject<WebSocket>;
 }
@@ -128,30 +125,17 @@ export const useWebSocketManager = () => {
                         if (data.type === 'connected') {
                             console.log('【WebSocket】与服务器建立连接');
 
-                            // 更新状态
-                            if (tab.xtermRef?.current) {
-                                tab.xtermRef.current.writeln('\r\n\x1b[32m已成功连接到服务器！\x1b[0m');
-                            }
-
-                            // 通知连接成功
+                                                     // 通知连接成功
                             if (onConnect) {
                                 onConnect();
                             }
                         }
                         else if (data.type === 'data') {
-                            // 处理终端数据
-                            if (tab.xtermRef?.current && data.content) {
-                                tab.xtermRef.current.write(data.content);
-                            }
-                        }
+                                                   }
                         else if (data.type === 'error') {
                             console.error(`【WebSocket】错误: ${data.message}`);
 
-                            if (tab.xtermRef?.current) {
-                                tab.xtermRef.current.writeln(`\r\n\x1b[31m错误: ${data.message}\x1b[0m`);
-                            }
-
-                            // 调用错误回调
+                                                     // 调用错误回调
                             if (onConnectionFailed) {
                                 onConnectionFailed();
                             }
@@ -160,18 +144,11 @@ export const useWebSocketManager = () => {
                         // 处理非JSON格式消息
                         console.log('【WebSocket】收到非JSON格式消息');
 
-                        // 尝试直接写入数据
-                        if (tab.xtermRef?.current && typeof event.data === 'string') {
-                            tab.xtermRef.current.write(event.data);
-                        }
+
                     }
                 } catch (error) {
                     console.error('【WebSocket】处理消息错误:', error);
 
-                    // 尝试直接写入数据
-                    if (tab.xtermRef?.current && typeof event.data === 'string') {
-                        tab.xtermRef.current.write(event.data);
-                    }
                 }
             };
 
@@ -179,9 +156,6 @@ export const useWebSocketManager = () => {
             ws.onerror = (error) => {
                 console.error('【WebSocket】RDP WebSocket连接错误:', error);
 
-                if (tab.xtermRef?.current) {
-                    tab.xtermRef.current.writeln('\r\n\x1b[31m连接错误，请稍后重试\x1b[0m');
-                }
 
                 // 调用错误回调
                 if (onConnectionFailed) {
@@ -192,12 +166,7 @@ export const useWebSocketManager = () => {
             // 处理关闭
             ws.onclose = () => {
                 console.log('【WebSocket】RDP WebSocket连接关闭');
-
-                if (tab.xtermRef?.current) {
-                    tab.xtermRef.current.writeln('\r\n\x1b[33m连接已关闭，按R键重新连接\x1b[0m');
-                }
-
-                // 调用重试回调
+                                // 调用重试回调
                 if (onRetryNeeded) {
                     onRetryNeeded();
                 }
@@ -207,9 +176,6 @@ export const useWebSocketManager = () => {
         } catch (error) {
             console.error('【WebSocket】创建连接失败:', error);
 
-            if (tab.xtermRef?.current) {
-                tab.xtermRef.current.writeln('\r\n\x1b[31m创建连接失败，请检查网络连接\x1b[0m');
-            }
 
             // 调用错误回调
             if (onConnectionFailed) {

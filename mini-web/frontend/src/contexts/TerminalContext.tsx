@@ -1,10 +1,5 @@
-import React, { createContext, useContext, useReducer, useRef, useEffect, createRef, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, createRef, useCallback } from 'react';
 import type { ReactNode, RefObject } from 'react';
-// 移除未使用的导入
-import { message } from 'antd';
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import { SearchAddon } from 'xterm-addon-search';
 import { type Connection, sessionAPI } from '../services/api';
 
 // 跟踪已关闭或正在关闭的会话，避免重复关闭请求
@@ -100,11 +95,9 @@ export interface TerminalTab {
   connection?: Connection;
   isConnected: boolean;
   terminalRef: RefObject<HTMLDivElement | null>;
-  xtermRef: RefObject<Terminal | null>;
   webSocketRef: RefObject<WebSocket | null>;
-  fitAddonRef: RefObject<FitAddon | null>;
-  searchAddonRef: RefObject<SearchAddon | null>;
-  messageQueueRef: RefObject<string[] | null>;
+  messageQueueRef: RefObject<Array<{ type: string; data: string | number[]; timestamp: number }> | null>;
+  queueProcessorTimer?: NodeJS.Timeout; // 消息队列处理定时器
   cleanupRef?: RefObject<(() => void) | null>; // 添加清理函数引用
   protocol?: string; // 添加协议类型
   hostname?: string; // 添加主机名
@@ -177,6 +170,7 @@ interface TerminalContextType {
   closeTab: (key: string) => void;
   setActiveTab: (key: string) => void;
   clearTabs: () => void;
+  createWebSocketConnection: (sessionId: number | string, tabKey: string) => WebSocket | null;
 }
 
 // 创建上下文
@@ -363,10 +357,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
             title: action.payload.title || state.tabs[existingTabIndex].title, // 确保标题更新
             isConnected: action.payload.isConnected !== undefined ? action.payload.isConnected : state.tabs[existingTabIndex].isConnected,
             terminalRef: action.payload.terminalRef || state.tabs[existingTabIndex].terminalRef,
-            xtermRef: action.payload.xtermRef || state.tabs[existingTabIndex].xtermRef,
             webSocketRef: action.payload.webSocketRef || state.tabs[existingTabIndex].webSocketRef,
-            fitAddonRef: action.payload.fitAddonRef || state.tabs[existingTabIndex].fitAddonRef,
-            searchAddonRef: action.payload.searchAddonRef || state.tabs[existingTabIndex].searchAddonRef,
             messageQueueRef: action.payload.messageQueueRef || state.tabs[existingTabIndex].messageQueueRef,
           };
           newTabs[existingTabIndex] = updatedTab;
@@ -379,10 +370,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           const newTabPayload = {
             ...action.payload,
             terminalRef: action.payload.terminalRef || createRef<HTMLDivElement>(),
-            xtermRef: action.payload.xtermRef || createRef<Terminal>(),
             webSocketRef: action.payload.webSocketRef || createRef<WebSocket | null>(),
-            fitAddonRef: action.payload.fitAddonRef || createRef<FitAddon>(),
-            searchAddonRef: action.payload.searchAddonRef || createRef<SearchAddon>(),
             messageQueueRef: action.payload.messageQueueRef || createRef<string[] | null>(),
             isConnected: action.payload.isConnected !== undefined ? action.payload.isConnected : false, // 初始连接状态为false
             // 确保其他从payload传递的属性被正确设置
@@ -456,7 +444,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         // 记录正在关闭的标签信息
         localStorage.setItem('recently_closed_tab', action.payload);
 
-        // 清理 WebSocket, xterm 等资源
+        // 清理 WebSocket 等资源
         try {
           // 立即清理WebSocket连接
           if (closedTab.webSocketRef?.current) {
@@ -490,27 +478,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
               window.WebSocketService.closeConnection(action.payload);
             }
           }
-
-          // 清理终端实例
-          if (closedTab.xtermRef?.current) {
-            console.log(`清理终端实例: ${action.payload}`);
-
-            // 清理终端插件
-            if (closedTab.fitAddonRef?.current) {
-              closedTab.fitAddonRef.current.dispose();
-              closedTab.fitAddonRef.current = null;
-            }
-
-            if (closedTab.searchAddonRef?.current) {
-              closedTab.searchAddonRef.current.dispose();
-              closedTab.searchAddonRef.current = null;
-            }
-
-            // 清理终端实例
-            closedTab.xtermRef.current.dispose();
-            closedTab.xtermRef.current = null;
-          }
-
           // 执行任何自定义清理函数
           if (closedTab.cleanupRef?.current) {
             console.log(`执行自定义清理函数: ${action.payload}`);
@@ -623,12 +590,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           try {
             if (tab.webSocketRef?.current) {
               safelyCloseWebSocket(tab.webSocketRef.current, tab.sessionId);
-            }
-
-            if (tab.xtermRef?.current) {
-              tab.fitAddonRef?.current?.dispose();
-              tab.searchAddonRef?.current?.dispose();
-              tab.xtermRef.current.dispose();
             }
           } catch (e) {
             console.error(`清理所有标签资源时出错:`, e);
@@ -747,11 +708,8 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         sessionId: tabData.sessionId,
         isConnected: false, // 初始设为未连接，连接成功后更新
         terminalRef: createRef<HTMLDivElement | null>(),
-        xtermRef: createRef<Terminal | null>(),
         webSocketRef: createRef<WebSocket | null>(), // WebSocket连接将在此之后建立
-        fitAddonRef: createRef<FitAddon | null>(),
-        searchAddonRef: createRef<SearchAddon | null>(),
-        messageQueueRef: createRef<string[] | null>(),
+        messageQueueRef: createRef<Array<{ type: string; data: string | number[]; timestamp: number }> | null>(),
         protocol: tabData.connectionProtocol,
         hostname: tabData.host,
         port: tabData.port,
@@ -856,10 +814,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
               sessionId: tabInfo.sessionId,
               isConnected: false, // 恢复时总是先设为未连接
               terminalRef: createRef<HTMLDivElement | null>(),
-              xtermRef: createRef<Terminal | null>(),
               webSocketRef: createRef<WebSocket | null>(),
-              fitAddonRef: createRef<FitAddon | null>(),
-              searchAddonRef: createRef<SearchAddon | null>(),
               messageQueueRef: createRef<string[] | null>(),
               protocol: tabInfo.protocol,
               hostname: tabInfo.hostname,
@@ -976,7 +931,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     // 记录正在关闭的标签信息
     localStorage.setItem('recently_closed_tab', key);
 
-    // 清理 WebSocket, xterm 等资源
+    // 清理 WebSocket 等资源
     try {
       // 立即清理WebSocket连接
       if (tabToClose.webSocketRef?.current) {
@@ -1010,27 +965,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           window.WebSocketService.closeConnection(key);
         }
       }
-
-      // 清理终端实例
-      if (tabToClose.xtermRef?.current) {
-        console.log(`清理终端实例: ${key}`);
-
-        // 清理终端插件
-        if (tabToClose.fitAddonRef?.current) {
-          tabToClose.fitAddonRef.current.dispose();
-          tabToClose.fitAddonRef.current = null;
-        }
-
-        if (tabToClose.searchAddonRef?.current) {
-          tabToClose.searchAddonRef.current.dispose();
-          tabToClose.searchAddonRef.current = null;
-        }
-
-        // 清理终端实例
-        tabToClose.xtermRef.current.dispose();
-        tabToClose.xtermRef.current = null;
-      }
-
       // 执行任何自定义清理函数
       if (tabToClose.cleanupRef?.current) {
         console.log(`执行自定义清理函数: ${key}`);
@@ -1078,12 +1012,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         if (tab.webSocketRef?.current) {
           safelyCloseWebSocket(tab.webSocketRef.current, tab.sessionId);
         }
-
-        if (tab.xtermRef?.current) {
-          tab.fitAddonRef?.current?.dispose();
-          tab.searchAddonRef?.current?.dispose();
-          tab.xtermRef.current.dispose();
-        }
       } catch (e) {
         console.error(`清理所有标签资源时出错:`, e);
       }
@@ -1127,6 +1055,72 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     dispatch({ type: 'CLEAR_TABS' });
   };
 
+  // 在addTab方法之后添加WebSocket连接创建方法
+  const createWebSocketConnection = (sessionId: number | string, tabKey: string): WebSocket | null => {
+    console.log(`创建WebSocket连接: 会话ID=${sessionId}, 标签Key=${tabKey}`);
+
+    // 查找对应的标签
+    const tab = state.tabs.find(t => t.key === tabKey);
+    if (!tab) {
+      console.error(`无法找到标签: ${tabKey}`);
+      return null;
+    }
+
+    // 检查是否已经有连接
+    if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
+      console.log(`标签 ${tabKey} 已有打开的WebSocket连接，返回现有连接`);
+      return tab.webSocketRef.current;
+    }
+
+    // 创建WebSocket连接
+    try {
+      // 获取后端WebSocket URL
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      const wsUrl = `${protocol}//${host}/api/ws/terminal/${sessionId}`;
+
+      console.log(`连接WebSocket: ${wsUrl}`);
+
+      // 创建WebSocket
+      const ws = new WebSocket(wsUrl);
+
+      // 保存WebSocket引用
+      if (tab.webSocketRef) {
+        tab.webSocketRef.current = ws;
+      }
+
+      // 初始化WebSocket事件处理
+      ws.onopen = () => {
+        console.log(`WebSocket连接已打开: ${tabKey}`);
+        // 发送初始化数据
+        const initData = {
+          type: 'init',
+          connectionId: tab.connectionId,
+          sessionId: tab.sessionId,
+          protocol: tab.protocol || 'ssh'
+        };
+        ws.send(JSON.stringify(initData));
+
+        // 更新标签状态
+        updateTab(tabKey, { isConnected: true });
+      };
+
+      ws.onerror = (error) => {
+        console.error(`WebSocket错误: ${tabKey}`, error);
+      };
+
+      ws.onclose = () => {
+        console.log(`WebSocket连接已关闭: ${tabKey}`);
+        updateTab(tabKey, { isConnected: false });
+      };
+
+      return ws;
+    } catch (error) {
+      console.error(`创建WebSocket连接失败: ${tabKey}`, error);
+      return null;
+    }
+  };
+
   const contextValue = {
     state,
     addTab, // 保持addTab接口，但内部调用新的处理函数
@@ -1134,7 +1128,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     closeTab,
     setActiveTab,
     clearTabs,
-    // 可以考虑暴露 openOrActivateTab 如果外部也需要这种精细控制
+    createWebSocketConnection
   };
 
   return (
@@ -1165,9 +1159,6 @@ export interface Tab {
   status: string;
   isConnected: boolean;
   // 终端引用，使用RefObject以便与DOM交互
-  xtermRef: RefObject<any>;
-  fitAddonRef: RefObject<any>;
-  searchAddonRef: RefObject<any>;
   messageQueueRef: RefObject<any[]>;
   webSocketRef: RefObject<WebSocket>;
 }

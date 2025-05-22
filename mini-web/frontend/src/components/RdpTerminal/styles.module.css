@@ -388,12 +388,6 @@
   position: relative;
 }
 
-.xtermPlaceholder {
-  width: 100%;
-  height: 100%;
-  position: relative;
-}
-
 /* 终端包装器样式 */
 .terminalConnectionWrapper {
   width: 100%;
