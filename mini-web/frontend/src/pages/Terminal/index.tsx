@@ -13,7 +13,7 @@ import TerminalContainers from './components/TerminalContainers';
 import TerminalConnectionWrapper from './components/TerminalConnectionWrapper';
 import EmptyTerminalGuide from './components/EmptyTerminalGuide';
 import TerminalEventManager from './components/TerminalEventManager';
-import type { ConnectionChildProps } from './components/TerminalConnectionWrapper';
+import type { ConnectionChildProps } from './Terminal.d';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { terminalStateRef } from '../../contexts/TerminalContext';
 import { connectionAPI, sessionAPI } from '../../services/api';
@@ -40,7 +40,8 @@ const Terminal: React.FC = () => {
   const navigate = useNavigate();
 
   // 使用终端上下文
-  const { tabs, activeTabKey, addTab, updateTab, closeTab, setActiveTab, clearTabs } = useTerminal();
+  const { state, addTab, updateTab, closeTab, setActiveTab, clearTabs } = useTerminal();
+  const { tabs, activeTabKey } = state;
 
   // 使用标签页URL参数处理
   // 这个hook会根据URL参数创建或激活标签页
@@ -164,12 +165,12 @@ const Terminal: React.FC = () => {
             const newSessionId = sessionData.id;
 
             // 生成新标签的key
-            const newTabKey = `conn-${connectionId}-${newSessionId}-${Date.now()}`;
+            const newTabKey = `conn-${connectionId}-session-${newSessionId}-${Date.now()}`;
 
             // 准备新标签
             addTab({
               key: newTabKey,
-              title: `${connection?.name} 会话${newSessionId}`,
+              title: `${connection?.name || 'Terminal'} 会话${newSessionId}`,
               connectionId,
               sessionId: newSessionId,
               connection,
@@ -178,7 +179,7 @@ const Terminal: React.FC = () => {
               isGraphical,
               terminalRef: createRef<HTMLDivElement>(),
               webSocketRef: createRef<WebSocket>(),
-              messageQueueRef: createRef<any[]>(),
+              messageQueueRef: createRef<Array<{ type: string; data: string | number[]; timestamp: number }>>(),
             });
 
             message.success('已创建复制终端标签');
@@ -200,8 +201,8 @@ const Terminal: React.FC = () => {
       <Content className={styles.terminalContent}>
         <TerminalConnectionWrapper
           connectionParams={{
-            connectionId: urlParams.connectionId ? Number(urlParams.connectionId) : undefined,
-            sessionId: urlParams.sessionParam ? Number(urlParams.sessionParam) : undefined
+            connectionId: urlParams.connectionId ? Number(urlParams.connectionId) : 0,
+            sessionId: urlParams.sessionParam ? Number(urlParams.sessionParam) : 0
           }}
         >
           {(connectionProps) => (
@@ -212,6 +213,9 @@ const Terminal: React.FC = () => {
                 activeTabKey={connectionProps.activeTabKey}
                 onTabEdit={handleTabEdit}
                 onTabChange={handleTabChange}
+                onTabClose={handleTabClose}
+                onTabRefresh={refreshTab}
+                onTabDuplicate={duplicateTab}
               />
 
               {/* 终端容器盒子 */}
@@ -228,7 +232,7 @@ const Terminal: React.FC = () => {
                     tabs={connectionProps.tabs || []}
                     activeTabKey={connectionProps.activeTabKey}
                     isConnected={connectionProps.isConnected}
-                    connection={connectionProps.connection}
+                    connection={connectionProps.connection || undefined}
                     createWebSocketConnection={connectionProps.createWebSocketConnection}
                   />
                 </TerminalEventManager>

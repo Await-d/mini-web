@@ -1,0 +1,103 @@
+/*
+ * @Author: Await
+ * @Date: 2025-05-22 15:31:39
+ * @LastEditors: Await
+ * @LastEditTime: 2025-05-23 08:01:22
+ * @Description: 终端容器组件样式
+ */
+
+/* 终端容器区域样式 */
+.terminalContainers {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background-color: #000;
+  color: #fff;
+}
+
+/* 单个终端容器样式 */
+.terminalContainer {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background-color: #1e1e1e;
+}
+
+/* 可见和隐藏状态 */
+.visible {
+  display: flex;
+  z-index: 1;
+}
+
+.hidden {
+  display: none;
+  z-index: 0;
+}
+
+/* 终端内容区域 */
+.terminalContent {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 图形终端样式 */
+.graphicalTerminal {
+  width: 100%;
+  height: 100%;
+  background-color: #000;
+}
+
+/* 命令行终端样式 */
+.commandTerminal {
+  width: 100%;
+  height: 100%;
+  background-color: #000;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+/* 终端加载状态 */
+.terminalLoading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.7);
+  padding: 20px;
+  border-radius: 5px;
+  z-index: 2;
+}
+
+/* 终端错误状态 */
+.terminalError {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #ff4d4f;
+  background-color: rgba(0, 0, 0, 0.7);
+  padding: 20px;
+  border-radius: 5px;
+  z-index: 2;
+}
+
+/* 终端警告状态 */
+.terminalWarning {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background-color: rgba(250, 173, 20, 0.2);
+  color: #faad14;
+  padding: 8px 12px;
+  font-size: 12px;
+  text-align: center;
+  z-index: 3;
+} 

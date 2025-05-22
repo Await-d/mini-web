@@ -3,27 +3,86 @@
 .simple-terminal-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
   width: 100%;
-  background-color: #1e1e1e;
-  color: #f0f0f0;
+  height: 100%;
+  background-color: #000;
+  color: #c7c7c7;
   font-family: 'Consolas', 'Courier New', monospace;
   font-size: 14px;
-  line-height: 1.5;
-  overflow: hidden;
+  position: relative;
 }
 
-.terminal-output {
+.simple-terminal-output {
   flex: 1;
-  padding: 8px;
   overflow-y: auto;
-  word-wrap: break-word;
+  padding: 10px;
   white-space: pre-wrap;
+  word-break: break-all;
 }
 
-.terminal-line {
-  margin: 2px 0;
+.simple-terminal-line {
+  line-height: 1.3;
+  margin-bottom: 2px;
+}
+
+.simple-terminal-input-container {
+  display: flex;
+  padding: 5px 10px;
+  background-color: #1a1a1a;
+  border-top: 1px solid #333;
+}
+
+.simple-terminal-input {
+  background-color: transparent !important;
+  color: #fff !important;
+  border: none !important;
+  box-shadow: none !important;
   width: 100%;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 14px;
+}
+
+.simple-terminal-input:focus {
+  outline: none !important;
+}
+
+/* 加载状态样式 */
+.simple-terminal-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 10;
+  color: #fff;
+}
+
+/* Spin组件占位内容样式 */
+.spin-content-placeholder {
+  padding: 50px;
+  background: transparent;
+  min-height: 100px;
+  min-width: 100px;
+}
+
+/* 欢迎消息样式 */
+.simple-terminal-welcome {
+  color: #3aa6ff;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid #333;
+  background-color: rgba(58, 166, 255, 0.1);
+  border-radius: 4px;
+}
+
+/* 特殊行样式 */
+.command-line {
+  color: #3aa6ff;
+  font-weight: bold;
 }
 
 .error-line {
@@ -31,81 +90,28 @@
 }
 
 .system-line {
-  color: #4dabf7;
+  color: #ffaa00;
+  font-style: italic;
 }
 
 .info-line {
-  color: #69db7c;
-}
-
-.command-line {
-  color: #ffd43b;
-  font-weight: bold;
-}
-
-.terminal-input-container {
-  display: flex;
-  padding: 8px;
-  background-color: #252526;
-  border-top: 1px solid #333333;
-}
-
-.prompt {
-  color: #4dabf7;
-  font-weight: bold;
-  margin-right: 4px;
-}
-
-.terminal-input {
-  flex: 1;
-  background-color: transparent;
-  color: #f0f0f0;
-  caret-color: #f0f0f0;
-  border: none;
-  outline: none;
-  font-family: 'Consolas', 'Courier New', monospace;
-  font-size: 14px;
-}
-
-/* 定制 Ant Design Input 组件样式 */
-.terminal-input.ant-input {
-  color: #f0f0f0;
-  background-color: transparent;
-  border: none;
-  box-shadow: none;
-  padding: 0;
-}
-
-.terminal-input.ant-input:focus {
-  border: none;
-  box-shadow: none;
+  color: #6bff6b;
 }
 
 /* 滚动条样式 */
-.terminal-output::-webkit-scrollbar {
+.simple-terminal-output::-webkit-scrollbar {
   width: 8px;
 }
 
-.terminal-output::-webkit-scrollbar-track {
-  background: #252526;
+.simple-terminal-output::-webkit-scrollbar-track {
+  background: #1a1a1a;
 }
 
-.terminal-output::-webkit-scrollbar-thumb {
-  background-color: #555555;
+.simple-terminal-output::-webkit-scrollbar-thumb {
+  background: #444;
   border-radius: 4px;
 }
 
-.terminal-output::-webkit-scrollbar-thumb:hover {
-  background-color: #666666;
-}
-
-/* 确保Input组件的antd样式不会影响我们的终端 */
-.terminal-input-container .ant-input {
-  background-color: transparent !important;
-}
-
-.terminal-input-container .ant-input:hover,
-.terminal-input-container .ant-input:focus {
-  border-color: transparent !important;
-  box-shadow: none !important;
+.simple-terminal-output::-webkit-scrollbar-thumb:hover {
+  background: #555;
 } 

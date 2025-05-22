@@ -15,7 +15,7 @@ import {
   MoreOutlined
 } from '@ant-design/icons';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
-import type { TerminalTabsProps } from '../Terminal.d';
+import type { TerminalTabsComponentProps } from '../Terminal.d'; // 重命名导入的类型
 import styles from './TerminalTabs.module.css';
 
 /**
@@ -89,6 +89,9 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
   onTabDuplicate,
   networkLatency
 }) => {
+  // 确保tabs是一个数组
+  const safeTabs = Array.isArray(tabs) ? tabs : [];
+
   // 上下文菜单状态
   const [contextMenuVisible, setContextMenuVisible] = useState(false);
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
@@ -202,41 +205,40 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
           {tab.title}
         </span>
         <Dropdown
-          overlay={
-            <Menu>
-              <Menu.Item
-                key="refresh"
-                icon={<ReloadOutlined />}
-                onClick={(e) => {
+          menu={{
+            items: [
+              {
+                key: "refresh",
+                icon: <ReloadOutlined />,
+                label: "刷新连接",
+                onClick: (e) => {
                   e.domEvent.stopPropagation();
                   onTabRefresh?.(tab.key);
-                }}
-              >
-                刷新连接
-              </Menu.Item>
-              <Menu.Item
-                key="duplicate"
-                icon={<CopyOutlined />}
-                onClick={(e) => {
+                }
+              },
+              {
+                key: "duplicate",
+                icon: <CopyOutlined />,
+                label: "复制标签页",
+                onClick: (e) => {
                   e.domEvent.stopPropagation();
                   onTabDuplicate?.(tab.key);
-                }}
-              >
-                复制标签页
-              </Menu.Item>
-              <Menu.Divider />
-              <Menu.Item
-                key="close"
-                icon={<CloseOutlined />}
-                onClick={(e) => {
+                }
+              },
+              {
+                type: "divider"
+              },
+              {
+                key: "close",
+                icon: <CloseOutlined />,
+                label: "关闭标签页",
+                onClick: (e) => {
                   e.domEvent.stopPropagation();
                   onTabClose(tab.key);
-                }}
-              >
-                关闭标签页
-              </Menu.Item>
-            </Menu>
-          }
+                }
+              }
+            ]
+          }}
           trigger={['click']}
           placement="bottomRight"
         >
@@ -249,69 +251,83 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
     );
   };
 
-  return (
-    <div className={styles.terminalTabsContainer} onClick={closeContextMenu}>
-      <Tabs
-        type="card"
-        className={styles.terminalTabs}
-        activeKey={activeTabKey}
-        onChange={handleTabChange}
-        onEdit={(targetKey, action) => {
-          if (action === 'remove' && typeof targetKey === 'string') {
-            onTabClose(targetKey);
-          }
-        }}
-        hideAdd
-      >
-        {tabs.map(tab => (
-          <Tabs.TabPane
-            key={tab.key}
-            tab={renderTabTitle(tab)}
-            closable={true}
-          />
-        ))}
-      </Tabs>
+  // 关闭所有标签
+  const handleCloseAll = () => {
+    setShowConfirmCloseAll(false);
+    // 关闭所有标签
+    safeTabs.forEach(tab => {
+      onTabClose(tab.key);
+    });
+  };
 
-      {/* 上下文菜单 */}
+  // 构建标签页配置
+  const tabItems = useMemo(() => {
+    return safeTabs.map(tab => ({
+      key: tab.key,
+      label: renderTabTitle(tab),
+      closable: true,
+      children: null, // 内容在TerminalContainers组件中渲染
+    }));
+  }, [safeTabs]);
+
+  // 如果没有标签，返回空内容
+  if (safeTabs.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={styles.terminalTabsContainer} onContextMenu={(e) => e.preventDefault()}>
+      <div className={styles.tabsWrapper}>
+        <Tabs
+          type="editable-card"
+          activeKey={activeTabKey}
+          onChange={handleTabChange}
+          onEdit={onTabEdit}
+          items={tabItems}
+          className={styles.tabs}
+          animated={false}
+          hideAdd
+          tabBarExtraContent={
+            <NetworkLatencyDisplay latency={networkLatency} />
+          }
+        />
+      </div>
+
+      {/* 标签右键菜单 */}
       {contextMenuVisible && (
         <div
           className={styles.contextMenu}
           style={{
-            left: contextMenuPosition.x,
-            top: contextMenuPosition.y,
+            left: `${contextMenuPosition.x}px`,
+            top: `${contextMenuPosition.y}px`,
           }}
-          onClick={(e) => e.stopPropagation()}
         >
-          {contextMenuItems.map(item =>
-            item.type === 'divider' ? (
-              <div key={item.key} className={styles.divider} />
-            ) : (
-              <div
-                key={item.key}
-                className={`${styles.menuItem} ${item.danger ? styles.danger : ''}`}
-                onClick={item.onClick}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </div>
-            )
-          )}
+          <Menu
+            items={contextMenuItems}
+            onClick={handleMenuClick}
+            style={{ minWidth: '150px' }}
+          />
         </div>
       )}
 
-      {/* 确认关闭所有标签的对话框 */}
+      {/* 遮罩层 - 用于捕获全局点击关闭上下文菜单 */}
+      {contextMenuVisible && (
+        <div
+          className={styles.contextMenuOverlay}
+          onClick={closeContextMenu}
+        />
+      )}
+
+      {/* 关闭所有标签确认对话框 */}
       <Modal
-        title="确认关闭"
+        title="关闭所有标签"
         open={showConfirmCloseAll}
-        onOk={() => {
-          tabs.forEach(tab => onTabClose(tab.key));
-          setShowConfirmCloseAll(false);
-        }}
+        onOk={handleCloseAll}
         onCancel={() => setShowConfirmCloseAll(false)}
-        okText="关闭所有"
+        okText="确认"
         cancelText="取消"
       >
-        <p>确定要关闭所有标签页吗？这将终止所有活动连接。</p>
+        <p>确定要关闭所有终端标签吗？这将断开所有连接。</p>
       </Modal>
     </div>
   );

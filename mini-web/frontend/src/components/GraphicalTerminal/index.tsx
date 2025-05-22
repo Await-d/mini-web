@@ -4,21 +4,21 @@ import { FullscreenOutlined, FullscreenExitOutlined, ReloadOutlined } from '@ant
 import styles from './styles.module.css';
 
 interface GraphicalTerminalProps {
-  protocol: 'rdp' | 'vnc' | string;
-  webSocketRef?: React.RefObject<WebSocket | null>;
-  terminalRef?: React.RefObject<HTMLDivElement>;
-  visible?: boolean;
+  connectionId: number;
+  sessionId: string | number;
+  webSocketRef: React.RefObject<WebSocket | null>;
+  protocol: string;
   onResize?: (width: number, height: number) => void;
-  onInput?: (data: any) => void;
+  visible?: boolean;
 }
 
 const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
-  protocol,
+  connectionId,
+  sessionId,
   webSocketRef,
-  terminalRef,
-  visible,
+  protocol = 'vnc',
   onResize,
-  onInput
+  visible
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);

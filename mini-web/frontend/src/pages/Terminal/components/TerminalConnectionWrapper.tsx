@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-09 18:05:28
  * @LastEditors: Await
- * @LastEditTime: 2025-05-22 18:45:16
+ * @LastEditTime: 2025-05-22 19:37:54
  * @Description: 终端连接包装器组件
  */
 import React, { useEffect, useState, useRef } from 'react';
@@ -87,6 +87,7 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
   const createWsConnection = (tab: TerminalTab): WebSocket | null => {
     if (!tab.sessionId) {
       console.error('无法创建WebSocket连接: 缺少sessionId');
+      message.error('终端连接失败：会话ID不存在');
       return null;
     }
 
@@ -94,14 +95,32 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
     if (createWebSocketConnection) {
       try {
         // 转换为需要的参数格式
-        return createWebSocketConnection(tab.sessionId, tab.key);
+        const ws = createWebSocketConnection(tab.sessionId, tab.key);
+
+        if (!ws) {
+          console.error(`WebSocket连接创建失败: sessionId=${tab.sessionId}, tabKey=${tab.key}`);
+          message.error('终端连接创建失败，请重试');
+          return null;
+        }
+
+        // 添加错误处理
+        ws.addEventListener('error', (e) => {
+          console.error('WebSocket连接错误:', e);
+          message.error('终端连接出错，请刷新页面重试');
+          updateTab(tab.key, { isConnected: false });
+        });
+
+        return ws;
       } catch (error) {
         console.error('创建WebSocket连接失败:', error);
+        message.error('终端连接创建失败，请重试');
         return null;
       }
+    } else {
+      console.error('createWebSocketConnection函数未定义');
+      message.error('终端服务不可用，请稍后重试');
+      return null;
     }
-
-    return null;
   };
 
   // 向服务器发送数据

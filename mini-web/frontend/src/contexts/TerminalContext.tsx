@@ -433,16 +433,18 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           localStorage.setItem('all_tabs_closed', 'true');
           // 记录关闭时间，用于自动超时
           localStorage.setItem('last_tab_close_time', Date.now().toString());
-          // 设置标志过期时间 - 10秒后自动失效
-          localStorage.setItem('closing_flags_expiry', (Date.now() + 10000).toString());
+          // 设置标志过期时间 - 5秒后自动失效，而不是10秒
+          localStorage.setItem('closing_flags_expiry', (Date.now() + 5000).toString());
 
           // 立即清除标签数据，防止重新创建
           localStorage.removeItem('terminal_tabs');
           localStorage.removeItem('terminal_active_tab');
+        } else {
+          // 如果不是最后一个标签，只记录当前标签正在关闭
+          localStorage.setItem('recently_closed_tab', action.payload);
+          // 设置较短的过期时间 - 3秒后自动失效
+          localStorage.setItem('closing_flags_expiry', (Date.now() + 3000).toString());
         }
-
-        // 记录正在关闭的标签信息
-        localStorage.setItem('recently_closed_tab', action.payload);
 
         // 清理 WebSocket 等资源
         try {
@@ -920,16 +922,18 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       localStorage.setItem('all_tabs_closed', 'true');
       // 记录关闭时间，用于自动超时
       localStorage.setItem('last_tab_close_time', Date.now().toString());
-      // 设置标志过期时间 - 10秒后自动失效
-      localStorage.setItem('closing_flags_expiry', (Date.now() + 10000).toString());
+      // 设置标志过期时间 - 5秒后自动失效，而不是10秒
+      localStorage.setItem('closing_flags_expiry', (Date.now() + 5000).toString());
 
       // 立即清除标签数据，防止重新创建
       localStorage.removeItem('terminal_tabs');
       localStorage.removeItem('terminal_active_tab');
+    } else {
+      // 如果不是最后一个标签，只记录当前标签正在关闭
+      localStorage.setItem('recently_closed_tab', key);
+      // 设置较短的过期时间 - 3秒后自动失效
+      localStorage.setItem('closing_flags_expiry', (Date.now() + 3000).toString());
     }
-
-    // 记录正在关闭的标签信息
-    localStorage.setItem('recently_closed_tab', key);
 
     // 清理 WebSocket 等资源
     try {
@@ -983,6 +987,14 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     } catch (e) {
       console.error(`关闭标签资源时出错 ${key}:`, e);
     }
+
+    // 延迟清理标签关闭标志，确保有足够时间处理URL变化
+    setTimeout(() => {
+      // 如果不是最后一个标签，清除标签关闭标志
+      if (!isLastTab) {
+        localStorage.removeItem('recently_closed_tab');
+      }
+    }, 1000);
 
     dispatch({ type: 'CLOSE_TAB', payload: key });
   };
@@ -1099,24 +1111,54 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           sessionId: tab.sessionId,
           protocol: tab.protocol || 'ssh'
         };
-        ws.send(JSON.stringify(initData));
+        try {
+          ws.send(JSON.stringify(initData));
+        } catch (error) {
+          console.error('发送初始化数据失败:', error);
+        }
 
         // 更新标签状态
         updateTab(tabKey, { isConnected: true });
+
+        // 触发连接事件，通知其他组件
+        window.dispatchEvent(new CustomEvent('terminal-connected', {
+          detail: { tabKey, sessionId, connectionId: tab.connectionId }
+        }));
       };
 
       ws.onerror = (error) => {
         console.error(`WebSocket错误: ${tabKey}`, error);
+
+        // 更新标签状态
+        updateTab(tabKey, { isConnected: false });
+
+        // 触发错误事件
+        window.dispatchEvent(new CustomEvent('terminal-error', {
+          detail: { tabKey, error: 'WebSocket连接错误' }
+        }));
       };
 
       ws.onclose = () => {
         console.log(`WebSocket连接已关闭: ${tabKey}`);
+
+        // 更新标签状态
         updateTab(tabKey, { isConnected: false });
+
+        // 触发关闭事件
+        window.dispatchEvent(new CustomEvent('terminal-disconnected', {
+          detail: { tabKey }
+        }));
       };
 
       return ws;
     } catch (error) {
       console.error(`创建WebSocket连接失败: ${tabKey}`, error);
+
+      // 触发错误事件
+      window.dispatchEvent(new CustomEvent('terminal-error', {
+        detail: { tabKey, error: '创建WebSocket连接失败' }
+      }));
+
       return null;
     }
   };

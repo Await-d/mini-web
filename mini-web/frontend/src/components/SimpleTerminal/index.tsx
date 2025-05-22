@@ -2,18 +2,18 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-21 21:01:53
+ * @LastEditTime: 2025-05-23 11:50:27
  * @Description: 简易终端组件，不使用xterm.js
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Input } from 'antd';
+import { Input, Alert, Spin } from 'antd';
 import './styles.css';
 
 interface SimpleTerminalProps {
     connectionId: number;
     sessionId: string | number;
-    webSocketRef: React.RefObject<WebSocket>;
-    visible: boolean;
+    webSocketRef: React.RefObject<WebSocket | null>;
+    visible?: boolean;
 }
 
 const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
@@ -24,197 +24,227 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
 }) => {
     const [output, setOutput] = useState<string[]>([]);
     const [input, setInput] = useState('');
+    const [error, setError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
     const outputRef = useRef<HTMLDivElement>(null);
     const terminalContainerRef = useRef<HTMLDivElement>(null);
 
     // 处理WebSocket消息
     useEffect(() => {
-        if (!webSocketRef.current) {
+        let reconnectTimer: number | null = null;
+
+        // 检查WebSocket引用是否存在
+        if (!webSocketRef || !webSocketRef.current) {
             console.error('WebSocket引用为空');
-            return;
+            setError('终端连接未初始化，正在尝试重新连接...');
+            setConnectionStatus('error');
+
+            // 5秒后自动重试
+            reconnectTimer = window.setTimeout(() => {
+                // 触发重新连接事件
+                window.dispatchEvent(new CustomEvent('terminal-reconnect', {
+                    detail: { connectionId, sessionId }
+                }));
+            }, 5000);
+
+            return () => {
+                if (reconnectTimer) clearTimeout(reconnectTimer);
+            };
         }
 
-        const handleMessage = (event: MessageEvent) => {
-            try {
-                // 首先尝试解析为JSON
-                try {
-                    const jsonData = JSON.parse(event.data);
-                    // 处理各种类型的JSON消息
-                    if (jsonData.type === 'data') {
-                        appendOutput(jsonData.data);
-                    } else if (jsonData.type === 'error') {
-                        appendOutput(`错误: ${jsonData.message}`, 'error');
-                    } else if (jsonData.type === 'connected') {
-                        appendOutput(`已连接到 ${jsonData.host}:${jsonData.port}`, 'system');
-                    } else if (jsonData.type === 'disconnected') {
-                        appendOutput('连接已断开', 'system');
-                    } else {
-                        // 其他JSON消息
-                        appendOutput(`收到消息: ${JSON.stringify(jsonData)}`, 'info');
-                    }
-                } catch (e) {
-                    // 不是JSON，当作普通文本处理
-                    appendOutput(event.data);
-                }
-            } catch (error) {
-                console.error('处理WebSocket消息时出错:', error);
-                appendOutput(`处理消息出错: ${error instanceof Error ? error.message : String(error)}`, 'error');
-            }
-        };
+        const ws = webSocketRef.current;
 
+        // 根据WebSocket状态设置连接状态
+        switch (ws.readyState) {
+            case WebSocket.CONNECTING:
+                setConnectionStatus('connecting');
+                setLoading(true);
+                break;
+            case WebSocket.OPEN:
+                setConnectionStatus('connected');
+                setLoading(false);
+                setError(null);
+                break;
+            case WebSocket.CLOSING:
+            case WebSocket.CLOSED:
+                setConnectionStatus('disconnected');
+                setError('终端连接已关闭，请重新连接');
+                break;
+        }
+
+        // 添加事件监听器
         const handleOpen = () => {
-            appendOutput('WebSocket连接已建立', 'system');
-            // 发送初始化数据
-            const initData = {
-                type: 'init',
-                connectionId,
-                sessionId,
-                terminalType: 'simple'
-            };
-            webSocketRef.current?.send(JSON.stringify(initData));
+            console.log('WebSocket已连接');
+            setConnectionStatus('connected');
+            setLoading(false);
+            setError(null);
+
+            // 发送初始化消息
+            if (ws.readyState === WebSocket.OPEN) {
+                try {
+                    ws.send(JSON.stringify({
+                        type: 'init',
+                        connectionId,
+                        sessionId
+                    }));
+                } catch (e) {
+                    console.error('发送初始化消息失败:', e);
+                }
+            }
         };
 
         const handleClose = () => {
-            appendOutput('WebSocket连接已关闭', 'system');
+            console.log('WebSocket已关闭');
+            setConnectionStatus('disconnected');
+            setError('终端连接已关闭，请重新连接');
         };
 
-        const handleError = (error: Event) => {
-            appendOutput(`WebSocket错误: ${error instanceof Error ? error.message : '未知错误'}`, 'error');
+        const handleError = (e: Event) => {
+            console.error('WebSocket错误:', e);
+            setConnectionStatus('error');
+            setError('终端连接出错，请尝试重新连接');
+        };
+
+        // 定义消息处理函数
+        const handleMessage = (event: MessageEvent) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'data' && data.data) {
+                    setOutput(prev => [...prev, data.data]);
+                    // 滚动到底部
+                    if (outputRef.current) {
+                        outputRef.current.scrollTop = outputRef.current.scrollHeight;
+                    }
+                } else if (data.type === 'error') {
+                    setError(`服务器错误: ${data.message || '未知错误'}`);
+                } else if (data.type === 'connected') {
+                    setOutput(prev => [...prev, '连接成功，终端已就绪']);
+                    setConnectionStatus('connected');
+                    setLoading(false);
+                }
+            } catch (e) {
+                console.error('处理WebSocket消息时出错:', e);
+            }
         };
 
         // 添加事件监听器
-        webSocketRef.current.addEventListener('message', handleMessage);
-        webSocketRef.current.addEventListener('open', handleOpen);
-        webSocketRef.current.addEventListener('close', handleClose);
-        webSocketRef.current.addEventListener('error', handleError);
+        ws.addEventListener('open', handleOpen);
+        ws.addEventListener('message', handleMessage);
+        ws.addEventListener('close', handleClose);
+        ws.addEventListener('error', handleError);
+
+        // 如果WebSocket已经打开，发送初始化消息
+        if (ws.readyState === WebSocket.OPEN) {
+            handleOpen();
+        }
 
         // 清理函数
         return () => {
-            webSocketRef.current?.removeEventListener('message', handleMessage);
-            webSocketRef.current?.removeEventListener('open', handleOpen);
-            webSocketRef.current?.removeEventListener('close', handleClose);
-            webSocketRef.current?.removeEventListener('error', handleError);
+            if (ws) {
+                ws.removeEventListener('open', handleOpen);
+                ws.removeEventListener('message', handleMessage);
+                ws.removeEventListener('close', handleClose);
+                ws.removeEventListener('error', handleError);
+            }
+            if (reconnectTimer) clearTimeout(reconnectTimer);
         };
-    }, [connectionId, sessionId, webSocketRef]);
+    }, [webSocketRef, connectionId, sessionId]);
 
-    // 处理输入提交
-    const handleInputSubmit = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
+    // 处理命令输入
+    const handleSendCommand = () => {
+        if (!input.trim()) return;
 
-            if (input.trim()) {
-                // 显示用户输入
-                appendOutput(`$ ${input}`, 'command');
-
-                // 发送到WebSocket
-                if (webSocketRef.current && webSocketRef.current.readyState === WebSocket.OPEN) {
-                    webSocketRef.current.send(input + '\n');
-                } else {
-                    appendOutput('错误: WebSocket连接未打开', 'error');
-                }
-
-                // 清空输入
-                setInput('');
-            }
-        }
-    };
-
-    // 添加输出文本
-    const appendOutput = (text: string, type: 'normal' | 'error' | 'system' | 'command' | 'info' = 'normal') => {
-        // 根据类型添加前缀
-        let formattedText = text;
-        if (type === 'error') {
-            formattedText = `[错误] ${text}`;
-        } else if (type === 'system') {
-            formattedText = `[系统] ${text}`;
-        } else if (type === 'info') {
-            formattedText = `[信息] ${text}`;
+        // 检查WebSocket引用是否存在
+        if (!webSocketRef?.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            setError('终端连接已断开，无法发送命令');
+            return;
         }
 
-        // 处理换行符，分割成多行
-        const lines = formattedText.split('\n');
+        try {
+            const command = {
+                type: 'command',
+                data: input
+            };
 
-        setOutput(prev => {
-            // 保留最多1000行输出
-            const newOutput = [...prev, ...lines.filter(line => line !== '')];
-            if (newOutput.length > 1000) {
-                return newOutput.slice(newOutput.length - 1000);
-            }
-            return newOutput;
-        });
+            webSocketRef.current.send(JSON.stringify(command));
+            setOutput(prev => [...prev, `$ ${input}`]);
+            setInput('');
 
-        // 滚动到底部
-        setTimeout(() => {
+            // 滚动到底部
             if (outputRef.current) {
                 outputRef.current.scrollTop = outputRef.current.scrollHeight;
             }
-        }, 0);
-    };
-
-    // 处理特殊按键
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        // 处理Tab键
-        if (e.key === 'Tab') {
-            e.preventDefault();
-            setInput(prev => prev + '    '); // 插入4个空格
-        }
-
-        // Ctrl+C发送中断
-        if (e.key === 'c' && e.ctrlKey) {
-            if (webSocketRef.current && webSocketRef.current.readyState === WebSocket.OPEN) {
-                webSocketRef.current.send('\x03'); // CTRL+C的ASCII码
-                appendOutput('^C', 'command');
-            }
-        }
-
-        // Ctrl+L清屏
-        if (e.key === 'l' && e.ctrlKey) {
-            e.preventDefault();
-            setOutput([]);
+        } catch (e) {
+            console.error('发送命令时出错:', e);
+            setError('发送命令失败，请检查连接状态');
         }
     };
 
-    // 焦点管理
-    useEffect(() => {
-        if (visible && terminalContainerRef.current) {
-            const inputElement = terminalContainerRef.current.querySelector('input');
-            if (inputElement) {
-                inputElement.focus();
-            }
+    // 断开连接提示文本
+    const getConnectionStatusText = () => {
+        switch (connectionStatus) {
+            case 'connecting':
+                return '正在连接终端...';
+            case 'connected':
+                return '终端已连接';
+            case 'disconnected':
+                return '终端连接已断开';
+            case 'error':
+                return '终端连接出错';
+            default:
+                return '终端状态未知';
         }
-    }, [visible]);
+    };
 
-    // 渲染
     return (
         <div
             className="simple-terminal-container"
             ref={terminalContainerRef}
             style={{ display: visible ? 'flex' : 'none' }}
         >
-            <div className="terminal-output" ref={outputRef}>
+            {error && (
+                <Alert
+                    message="连接错误"
+                    description={error}
+                    type="error"
+                    showIcon
+                    closable
+                    style={{ marginBottom: 10 }}
+                />
+            )}
+
+            {loading && (
+                <div className="simple-terminal-loading">
+                    <Spin tip={getConnectionStatusText()} size="large">
+                        <div className="spin-content-placeholder" />
+                    </Spin>
+                </div>
+            )}
+
+            <div className="simple-terminal-output" ref={outputRef}>
+                {output.length === 0 && !loading && (
+                    <div className="simple-terminal-welcome">
+                        <div>终端已准备就绪</div>
+                        <div>连接ID: {connectionId}, 会话ID: {sessionId}</div>
+                    </div>
+                )}
                 {output.map((line, index) => (
-                    <div
-                        key={index}
-                        className={`terminal-line ${line.startsWith('[错误]') ? 'error-line' :
-                            line.startsWith('[系统]') ? 'system-line' :
-                                line.startsWith('[信息]') ? 'info-line' :
-                                    line.startsWith('$') ? 'command-line' : ''
-                            }`}
-                    >
+                    <div key={index} className="simple-terminal-line">
                         {line}
                     </div>
                 ))}
             </div>
-            <div className="terminal-input-container">
-                <span className="prompt">$&nbsp;</span>
+
+            <div className="simple-terminal-input-container">
                 <Input
-                    className="terminal-input"
+                    variant="borderless"
                     value={input}
-                    onChange={e => setInput(e.target.value)}
-                    onKeyPress={handleInputSubmit}
-                    onKeyDown={handleKeyDown}
-                    autoFocus
-                    bordered={false}
+                    onChange={(e) => setInput(e.target.value)}
+                    onPressEnter={handleSendCommand}
+                    placeholder="输入命令..."
+                    disabled={!webSocketRef?.current || webSocketRef.current.readyState !== WebSocket.OPEN}
+                    className="simple-terminal-input"
                 />
             </div>
         </div>

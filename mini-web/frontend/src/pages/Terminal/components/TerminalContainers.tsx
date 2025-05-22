@@ -1,237 +1,197 @@
 /*
  * @Author: Await
- * @Date: 2025-05-10 22:19:37
+ * @Date: 2025-05-21 15:31:39
  * @LastEditors: Await
- * @LastEditTime: 2025-05-21 20:23:05
- * @Description: 终端容器管理组件
+ * @LastEditTime: 2025-05-23 15:30:25
+ * @Description: 终端容器组件，负责渲染适当的终端类型
  */
-import React, { useCallback, useEffect } from 'react';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
+import './TerminalContainers.module.css';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
 import type { Connection } from '../Terminal.d';
-import GraphicalTerminal from '../../../components/GraphicalTerminal';
-import RdpTerminal from '../../../components/RdpTerminal';
 import SimpleTerminal from '../../../components/SimpleTerminal';
-import { getTabProtocol, isGraphicalProtocol } from '../utils/protocolHandler';
-import styles from '../styles.module.css';
+import RdpTerminal from '../../../components/RdpTerminal';
 
+// 判断是否为图形化协议
+const isGraphicalProtocol = (protocol?: string): boolean => {
+    return protocol === 'rdp' || protocol === 'vnc';
+};
+
+// 获取标签的协议类型
+const getTabProtocol = (tab: TerminalTab): string => {
+    // 从连接或标签中获取协议
+    return tab.protocol || 'ssh';
+};
+
+// 终端容器组件属性
 interface TerminalContainersProps {
     tabs: TerminalTab[];
     activeTabKey: string;
     isConnected?: boolean;
     connection?: Connection;
-    createWebSocketConnection?: (tab: TerminalTab) => WebSocket | null;
+    createWebSocketConnection?: (sessionId: number | string, tabKey: string) => WebSocket | null;
 }
 
 /**
- * 终端容器管理组件
- * 负责管理多个终端容器的渲染和切换显示
+ * 终端容器组件
+ * 根据标签的协议类型，创建和管理不同类型的终端容器
  */
 const TerminalContainers: React.FC<TerminalContainersProps> = ({
     tabs,
     activeTabKey,
+    isConnected,
+    connection,
     createWebSocketConnection
 }) => {
-    // 处理RDP调整大小
-    const handleRdpResize = useCallback((tab: TerminalTab, width: number, height: number) => {
-        if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
-            try {
-                const resizeCommand = JSON.stringify({
-                    type: 'resize',
-                    width,
-                    height
-                });
-                tab.webSocketRef.current.send(resizeCommand);
-            } catch (error) {
-                console.error('发送RDP调整大小命令失败:', error);
+    // 确保tabs是一个数组
+    const safeTabs = Array.isArray(tabs) ? tabs : [];
+
+    // 终端容器引用的集合，用于跟踪已创建的DOM容器
+    const containerRefsMap = useRef<Map<string, boolean>>(new Map());
+
+    // 触发终端就绪事件
+    const triggerTerminalReady = (tab: TerminalTab) => {
+        if (!tab) return;
+
+        window.dispatchEvent(new CustomEvent('terminal-ready', {
+            detail: {
+                tabKey: tab.key,
+                connectionId: tab.connectionId,
+                sessionId: tab.sessionId,
+                protocol: getTabProtocol(tab)
             }
-        }
-    }, []);
+        }));
+    };
 
-    // 处理输入数据发送
-    const handleRdpInput = useCallback((tab: TerminalTab, data: string) => {
-        if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
+    // 处理特定标签的终端初始化
+    const initializeTerminalForTab = useCallback((tabKey: string) => {
+        console.log(`初始化标签的终端: ${tabKey}`);
+
+        // 创建WebSocket连接
+        const tab = safeTabs.find(t => t.key === tabKey);
+        if (tab && tab.sessionId && createWebSocketConnection && (!tab.webSocketRef?.current || tab.webSocketRef.current.readyState !== WebSocket.OPEN)) {
+            // 创建WebSocket连接
+            console.log(`为标签 ${tabKey} 创建WebSocket连接`);
             try {
-                tab.webSocketRef.current.send(data);
-            } catch (error) {
-                console.error('发送RDP输入数据失败:', error);
-            }
-        }
-    }, []);
+                const newWs = createWebSocketConnection(tab.sessionId, tabKey);
 
-    // 当激活标签变化时触发终端就绪事件
-    useEffect(() => {
-        if (!activeTabKey) {
-            console.log('没有激活的标签键');
-            return;
-        }
+                // 更新WebSocket引用
+                if (tab.webSocketRef && newWs) {
+                    tab.webSocketRef.current = newWs;
 
-        // 查找激活的标签
-        const activeTab = tabs.find(tab => tab.key === activeTabKey);
-        if (!activeTab) {
-            console.error(`在标签列表(${tabs.length}个标签)中找不到激活的标签: ${activeTabKey}`);
-
-            // 记录所有标签键以便调试
-            const tabKeys = tabs.map(t => t.key).join(', ');
-            console.log(`可用标签键: [${tabKeys}]`);
-
-            // 可以考虑在合适的时机重新激活一个有效的标签
-            if (tabs.length > 0) {
-                console.log('将在1秒后尝试激活第一个可用标签');
-                setTimeout(() => {
-                    if (tabs.length > 0 && activeTabKey !== tabs[0].key) {
-                        const event = new CustomEvent('terminal-tab-activated', {
-                            detail: { tabKey: tabs[0].key }
+                    // 等待连接建立后触发终端就绪事件
+                    if (newWs.readyState === WebSocket.OPEN) {
+                        triggerTerminalReady(tab);
+                    } else {
+                        newWs.addEventListener('open', () => {
+                            triggerTerminalReady(tab);
                         });
-                        window.dispatchEvent(event);
+
+                        // 添加错误处理
+                        newWs.addEventListener('error', (e) => {
+                            console.error(`WebSocket连接错误: ${e}`);
+                        });
                     }
-                }, 1000);
-            }
-            return;
-        }
-
-        console.log(`激活标签: ${activeTabKey}, 准备触发终端就绪事件`);
-
-        // 检查是否有DOM容器
-        if (!activeTab.terminalRef?.current) {
-            console.error(`标签 ${activeTabKey} 没有创建DOM容器`);
-            return;
-        }
-
-        // 验证连接ID和会话ID
-        let connectionId = activeTab.connectionId || (activeTab.connection ? activeTab.connection.id : null);
-        let sessionId = activeTab.sessionId;
-        let protocol = activeTab.protocol || (activeTab.connection ? activeTab.connection.protocol : null);
-
-        if (!connectionId) {
-            console.error(`标签 ${activeTabKey} 没有有效的连接ID`);
-            // 尝试从标签键中提取连接ID
-            const match = activeTab.key.match(/conn-(\d+)/);
-            if (match && match[1]) {
-                connectionId = parseInt(match[1], 10);
-                console.log(`从标签键中提取的连接ID: ${connectionId}`);
-            }
-        }
-
-        if (!sessionId) {
-            console.error(`标签 ${activeTabKey} 没有有效的会话ID`);
-            // 尝试从标签键中提取会话ID
-            const match = activeTab.key.match(/session-(\d+)/);
-            if (match && match[1]) {
-                sessionId = parseInt(match[1], 10);
-                console.log(`从标签键中提取的会话ID: ${sessionId}`);
-            }
-        }
-
-        // 检查DOM容器是否已创建
-        // 仅当有标签、标签有DOM容器、标签有连接ID和会话ID时，触发终端就绪事件
-        if (connectionId && sessionId) {
-            // 检查标签页是否已有WebSocket连接
-            if (activeTab.webSocketRef?.current) {
-                const readyState = activeTab.webSocketRef.current.readyState;
-                if (readyState === WebSocket.OPEN) {
-                    console.log(`标签 ${activeTabKey} 已有打开的WebSocket连接，跳过创建`);
-                } else if (readyState === WebSocket.CONNECTING) {
-                    console.log(`标签 ${activeTabKey} 的WebSocket连接正在建立中，跳过创建`);
-                } else {
-                    // 连接已关闭或正在关闭，需要重新创建
-                    console.log(`标签 ${activeTabKey} 的WebSocket连接状态异常(${readyState})，将触发重新连接`);
-                    console.log(`触发终端就绪事件: tabKey=${activeTabKey}, connectionId=${connectionId}, sessionId=${sessionId}, protocol=${protocol}`);
-
-                    // 触发终端就绪事件
-                    window.dispatchEvent(new CustomEvent('terminal-ready', {
-                        detail: {
-                            tabKey: activeTabKey,
-                            connectionId: connectionId,
-                            sessionId: sessionId,
-                            protocol: protocol
-                        }
-                    }));
                 }
-            } else {
-                // 没有WebSocket连接，需要创建
-                console.log(`触发终端就绪事件: tabKey=${activeTabKey}, connectionId=${connectionId}, sessionId=${sessionId}, protocol=${protocol}`);
-
-                // 触发终端就绪事件
-                window.dispatchEvent(new CustomEvent('terminal-ready', {
-                    detail: {
-                        tabKey: activeTabKey,
-                        connectionId: connectionId,
-                        sessionId: sessionId,
-                        protocol: protocol
-                    }
-                }));
+            } catch (error) {
+                console.error(`为标签 ${tabKey} 创建WebSocket连接失败:`, error);
             }
-        } else {
-            console.error(`无法触发终端就绪事件: 缺少connectionId(${connectionId})或sessionId(${sessionId})`);
-            console.log('标签信息:', {
-                key: activeTab.key,
-                connectionId: activeTab.connectionId,
-                sessionId: activeTab.sessionId,
-                hasConnection: !!activeTab.connection,
-                connectionInfo: activeTab.connection ? {
-                    id: activeTab.connection.id,
-                    protocol: activeTab.connection.protocol
-                } : null
-            });
+        } else if (tab) {
+            // WebSocket已存在，直接触发终端就绪事件
+            triggerTerminalReady(tab);
         }
-    }, [activeTabKey, tabs]);
+    }, [safeTabs, createWebSocketConnection]);
+
+    // 初始化已激活标签的终端
+    useEffect(() => {
+        if (activeTabKey && safeTabs.some(tab => tab.key === activeTabKey)) {
+            initializeTerminalForTab(activeTabKey);
+        }
+    }, [activeTabKey, initializeTerminalForTab, safeTabs]);
+
+    // 确保所有标签都有DOM容器
+    useEffect(() => {
+        // 创建所有标签的DOM容器
+        safeTabs.forEach(tab => {
+            const containerId = `terminal-container-${tab.key}`;
+            const containerElement = document.getElementById(containerId);
+
+            if (!containerElement) {
+                console.error(`找不到终端容器元素: ${containerId}`);
+            } else if (!containerRefsMap.current.has(tab.key)) {
+                // 记录容器已创建
+                containerRefsMap.current.set(tab.key, true);
+                console.log(`终端容器已创建: ${containerId}`);
+
+                // 如果是活动标签，初始化终端
+                if (tab.key === activeTabKey) {
+                    initializeTerminalForTab(tab.key);
+                }
+            }
+        });
+    }, [safeTabs, activeTabKey, initializeTerminalForTab]);
+
+    // 处理终端容器可见性
+    const getContainerStyle = (tabKey: string) => {
+        return {
+            display: tabKey === activeTabKey ? 'flex' : 'none',
+            width: '100%',
+            height: '100%',
+            position: 'relative' as const,
+        };
+    };
+
+    // 渲染特定标签的终端组件
+    const renderTerminalForTab = (tab: TerminalTab) => {
+        // 确定协议类型
+        const protocol = getTabProtocol(tab);
+        const isGraphical = isGraphicalProtocol(protocol);
+
+        // 根据协议类型选择终端组件
+        if (isGraphical) {
+            return (
+                <RdpTerminal
+                    key={`rdp-${tab.key}`}
+                    connectionId={tab.connectionId || 0}
+                    sessionId={tab.sessionId || 0}
+                    webSocketRef={tab.webSocketRef}
+                    visible={tab.key === activeTabKey}
+                />
+            );
+        } else {
+            return (
+                <SimpleTerminal
+                    key={`simple-${tab.key}`}
+                    connectionId={tab.connectionId || 0}
+                    sessionId={tab.sessionId || 0}
+                    webSocketRef={tab.webSocketRef}
+                    visible={tab.key === activeTabKey}
+                />
+            );
+        }
+    };
 
     return (
-        <div className={styles.terminalContainers}>
-            {tabs.map(tab => {
-                // 获取标签协议
-                const protocol = getTabProtocol(tab);
-                const isGraphical = protocol ? isGraphicalProtocol(protocol) : false;
-                const isRdp = protocol === 'rdp';
-                const isVisible = tab.key === activeTabKey;
+        <div className="terminal-containers-wrapper" style={{ width: '100%', height: '100%', position: 'relative' }}>
+            {/* 为每个标签创建容器 */}
+            {safeTabs.map(tab => (
+                <div
+                    key={tab.key}
+                    id={`terminal-container-${tab.key}`}
+                    className="terminal-container"
+                    style={getContainerStyle(tab.key)}
+                    ref={tab.terminalRef}
+                >
+                    {renderTerminalForTab(tab)}
+                </div>
+            ))}
 
-                // 提取connection信息
-                const connectionId = tab.connectionId || 0;
-                const sessionId = tab.sessionId || '';
-
-                // 创建一个唯一id，用于标识DOM元素
-                const terminalDomId = `terminal-element-conn-${connectionId}-session-${sessionId}`;
-
-                // 根据可见性设置CSS类名
-                const visibilityClass = isVisible ? styles.visible : styles.hidden;
-
-                return (
-                    <div
-                        key={tab.key}
-                        className={`${styles.terminalContainer} ${visibilityClass}`}
-                        data-key={tab.key}
-                        data-protocol={protocol || 'unknown'}
-                        data-graphical={isGraphical ? 'true' : 'false'}
-                        data-connection-id={connectionId}
-                        data-session-id={sessionId}
-                    >
-                        {isGraphical ? (
-                            isRdp ? (
-                                <RdpTerminal
-                                    connectionId={connectionId}
-                                    sessionId={sessionId}
-                                    webSocketRef={tab.webSocketRef}
-                                    onResize={(width, height) => handleRdpResize(tab, width, height)}
-                                    onInput={(data) => handleRdpInput(tab, data)}
-                                />
-                            ) : (
-                                <GraphicalTerminal
-                                    connectionId={connectionId}
-                                    sessionId={sessionId}
-                                    webSocketRef={tab.webSocketRef}
-                                />
-                            )
-                        ) : (
-                            <SimpleTerminal
-                                connectionId={connectionId}
-                                sessionId={sessionId}
-                                webSocketRef={tab.webSocketRef}
-                                visible={isVisible}
-                            />
-                        )}
-                    </div>
-                );
-            })}
+            {/* 当没有标签时显示提示 */}
+            {safeTabs.length === 0 && (
+                <div className="no-terminal-message" style={{ padding: '20px', textAlign: 'center' }}>
+                    请从左侧菜单选择一个连接
+                </div>
+            )}
         </div>
     );
 };
