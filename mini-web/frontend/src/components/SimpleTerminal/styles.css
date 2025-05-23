@@ -5,10 +5,13 @@
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background-color: #000;
-  color: #c7c7c7;
-  font-family: 'Consolas', 'Courier New', monospace;
+  min-height: 100%;
+  background-color: #1e1e1e;
+  color: #ffffff;
+  font-family: 'Courier New', monospace;
   font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
   position: relative;
 }
 
@@ -51,14 +54,41 @@
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
-  bottom: 0;
+  width: 100%;
+  height: 100%;
   display: flex;
-  align-items: center;
   justify-content: center;
+  align-items: center;
   background-color: rgba(0, 0, 0, 0.7);
   z-index: 10;
-  color: #fff;
+}
+
+.simple-terminal-error {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 10;
+  padding: 20px;
+  text-align: center;
+}
+
+.simple-terminal-error-title {
+  font-size: 18px;
+  color: #ff4d4f;
+  margin-bottom: 10px;
+}
+
+.simple-terminal-error-description {
+  font-size: 14px;
+  color: #ffffff;
+  margin-bottom: 20px;
 }
 
 /* Spin组件占位内容样式 */
@@ -114,4 +144,50 @@
 
 .simple-terminal-output::-webkit-scrollbar-thumb:hover {
   background: #555;
+}
+
+.simple-terminal-reconnect-button {
+    background-color: #1677ff;
+    color: #ffffff;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.3s;
+}
+
+.simple-terminal-reconnect-button:hover {
+    background-color: #4096ff;
+}
+
+.simple-terminal-reconnect-button:active {
+    background-color: #0958d9;
+}
+
+.simple-terminal-reconnect-status {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.simple-terminal-reconnect-now-button {
+    background-color: #ff7875;
+    color: #ffffff;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.3s;
+}
+
+.simple-terminal-reconnect-now-button:hover {
+    background-color: #ff4d4f;
+}
+
+.simple-terminal-reconnect-now-button:active {
+    background-color: #cf1322;
 } 

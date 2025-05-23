@@ -2,13 +2,14 @@
  * @Author: Await
  * @Date: 2025-05-21 15:32:12
  * @LastEditors: Await
- * @LastEditTime: 2025-05-22 21:05:44
+ * @LastEditTime: 2025-05-23 20:01:11
  * @Description: 终端事件管理器组件
  */
 import React, { useEffect } from 'react';
 import { useTerminal } from '../../../contexts/TerminalContext';
 import type { TerminalEventManagerProps } from '../Terminal.d';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
+import './TerminalEventManager.css'; // 引入CSS文件
 
 /**
  * 终端事件管理器组件
@@ -61,8 +62,30 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
                 t.sessionId === sessionId
             );
 
+            if (!tab) {
+                console.error(`未找到匹配的标签: connectionId=${connectionId}, sessionId=${sessionId}`);
+                return;
+            }
+
             if (tab && createWebSocketConnection) {
                 console.log(`为标签 ${tab.key} 重新创建WebSocket连接`);
+
+                // 首先关闭现有的WebSocket连接（如果有）
+                if (tab.webSocketRef?.current) {
+                    try {
+                        tab.webSocketRef.current.close();
+                    } catch (e) {
+                        console.error(`关闭WebSocket时出错: ${e}`);
+                    }
+                    tab.webSocketRef.current = null;
+                }
+
+                // 标记为正在重连
+                updateTab(tab.key, {
+                    isConnected: false,
+                    status: 'reconnecting'
+                });
+
                 // 确保sessionId不为undefined
                 if (tab.sessionId) {
                     // 创建WebSocket连接时需要传递会话ID和标签Key
@@ -71,15 +94,17 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
                     if (ws && tab.webSocketRef) {
                         tab.webSocketRef.current = ws;
 
-                        // 更新标签状态
-                        updateTab(tab.key, {
-                            isConnected: false // 初始设置为未连接，等待连接建立
-                        });
-
                         // 监听WebSocket打开事件
                         ws.addEventListener('open', () => {
                             console.log(`WebSocket连接已打开: tabKey=${tab.key}`);
-                            updateTab(tab.key, { isConnected: true });
+                            updateTab(tab.key, {
+                                isConnected: true,
+                                status: 'connected',
+                                lastReconnectTime: new Date().toISOString()
+                            });
+
+                            // 记录重连成功信息
+                            console.log(`标签 ${tab.key} 重连成功, 时间: ${new Date().toISOString()}`);
 
                             // 触发终端就绪事件
                             window.dispatchEvent(new CustomEvent('terminal-ready', {
@@ -87,7 +112,8 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
                                     tabKey: tab.key,
                                     connectionId: tab.connectionId,
                                     sessionId: tab.sessionId,
-                                    protocol: tab.protocol || 'ssh'
+                                    protocol: tab.protocol || 'ssh',
+                                    reconnected: true
                                 }
                             }));
                         });
@@ -95,16 +121,44 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
                         // 监听WebSocket关闭事件
                         ws.addEventListener('close', () => {
                             console.log(`WebSocket连接已关闭: tabKey=${tab.key}`);
-                            updateTab(tab.key, { isConnected: false });
+                            updateTab(tab.key, {
+                                isConnected: false,
+                                status: 'disconnected'
+                            });
                         });
 
                         // 监听WebSocket错误事件
                         ws.addEventListener('error', (e) => {
                             console.error(`WebSocket连接错误: tabKey=${tab.key}`, e);
-                            updateTab(tab.key, { isConnected: false });
+                            updateTab(tab.key, {
+                                isConnected: false,
+                                status: 'error',
+                                error: '连接出错，请尝试刷新'
+                            });
+                        });
+                    } else {
+                        console.error(`WebSocket创建失败: tabKey=${tab.key}`);
+                        updateTab(tab.key, {
+                            isConnected: false,
+                            status: 'error',
+                            error: 'WebSocket创建失败'
                         });
                     }
+                } else {
+                    console.error(`会话ID为空: tabKey=${tab.key}`);
+                    updateTab(tab.key, {
+                        isConnected: false,
+                        status: 'error',
+                        error: '会话ID无效'
+                    });
                 }
+            } else if (!createWebSocketConnection) {
+                console.error('createWebSocketConnection函数未定义');
+                updateTab(tab.key, {
+                    isConnected: false,
+                    status: 'error',
+                    error: '终端服务不可用'
+                });
             }
         };
 

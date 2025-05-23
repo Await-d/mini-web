@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-09 18:05:28
  * @LastEditors: Await
- * @LastEditTime: 2025-05-22 19:37:54
+ * @LastEditTime: 2025-05-23 20:00:45
  * @Description: 终端连接包装器组件
  */
 import React, { useEffect, useState, useRef } from 'react';
@@ -84,8 +84,8 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
   };
 
   // 创建WebSocket连接
-  const createWsConnection = (tab: TerminalTab): WebSocket | null => {
-    if (!tab.sessionId) {
+  const createWsConnection = (sessionId: number | string, tabKey: string): WebSocket | null => {
+    if (!sessionId) {
       console.error('无法创建WebSocket连接: 缺少sessionId');
       message.error('终端连接失败：会话ID不存在');
       return null;
@@ -94,11 +94,11 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
     // 调用上下文中的createWebSocketConnection方法
     if (createWebSocketConnection) {
       try {
-        // 转换为需要的参数格式
-        const ws = createWebSocketConnection(tab.sessionId, tab.key);
+        // 直接调用context中的方法
+        const ws = createWebSocketConnection(sessionId, tabKey);
 
         if (!ws) {
-          console.error(`WebSocket连接创建失败: sessionId=${tab.sessionId}, tabKey=${tab.key}`);
+          console.error(`WebSocket连接创建失败: sessionId=${sessionId}, tabKey=${tabKey}`);
           message.error('终端连接创建失败，请重试');
           return null;
         }
@@ -107,7 +107,7 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
         ws.addEventListener('error', (e) => {
           console.error('WebSocket连接错误:', e);
           message.error('终端连接出错，请刷新页面重试');
-          updateTab(tab.key, { isConnected: false });
+          updateTab(tabKey, { isConnected: false });
         });
 
         return ws;
@@ -160,7 +160,7 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
 
     // 核心数据
     tabs,
-    connection,
+    connection: connection || undefined,
 
     // UI状态
     fullscreen,
@@ -174,23 +174,6 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
     sendDataToServer,
     createWebSocketConnection: createWsConnection
   };
-
-  // 添加调试信息，确保数据正确传递
-  useEffect(() => {
-    if (tabs.length > 0) {
-      console.log(`TerminalConnectionWrapper 准备传递给子组件的数据:`, {
-        tabsCount: tabs.length,
-        activeTabKey,
-        firstTabInfo: tabs[0] ? {
-          key: tabs[0].key,
-          connectionId: tabs[0].connectionId,
-          sessionId: tabs[0].sessionId,
-          hasWebSocketRef: !!tabs[0].webSocketRef
-        } : null,
-        hasCreateWebSocketConnection: !!createWsConnection
-      });
-    }
-  }, [tabs, activeTabKey, createWsConnection]);
 
   // 渲染子组件
   return children(connectionProps);

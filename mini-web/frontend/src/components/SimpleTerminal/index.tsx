@@ -2,8 +2,8 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-23 11:50:27
- * @Description: 简易终端组件，不使用xterm.js
+ * @LastEditTime: 2025-05-23 20:33:42
+ * @Description: 简易终端组件，不使用xterm.js，只处理WebSocket数据
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Input, Alert, Spin } from 'antd';
@@ -14,13 +14,15 @@ interface SimpleTerminalProps {
     sessionId: string | number;
     webSocketRef: React.RefObject<WebSocket | null>;
     visible?: boolean;
+    onReconnectRequest?: (connectionId: number, sessionId: string | number) => void;
 }
 
 const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     connectionId,
     sessionId,
     webSocketRef,
-    visible
+    visible,
+    onReconnectRequest
 }) => {
     const [output, setOutput] = useState<string[]>([]);
     const [input, setInput] = useState('');
@@ -30,43 +32,13 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     const outputRef = useRef<HTMLDivElement>(null);
     const terminalContainerRef = useRef<HTMLDivElement>(null);
 
-    // 处理WebSocket消息
+    // 处理WebSocket消息，只关注数据处理，不处理连接
     useEffect(() => {
-        let reconnectTimer: number | null = null;
-
         // 检查WebSocket引用是否存在
         if (!webSocketRef || !webSocketRef.current) {
-            console.warn(`SimpleTerminal WebSocket引用为空:`, {
-                connectionId,
-                sessionId,
-                hasWebSocketRef: !!webSocketRef,
-                webSocketRefCurrent: webSocketRef?.current
-            });
-
-            setError('终端连接正在初始化...');
-            setConnectionStatus('connecting');
-
-            // 等待WebSocket引用初始化，延迟检查
-            const checkTimer = window.setTimeout(() => {
-                if (!webSocketRef?.current) {
-                    console.error('WebSocket引用初始化超时，尝试重新连接');
-                    setError('终端连接未初始化，正在尝试重新连接...');
-                    setConnectionStatus('error');
-
-                    // 5秒后自动重试
-                    reconnectTimer = window.setTimeout(() => {
-                        // 触发重新连接事件
-                        window.dispatchEvent(new CustomEvent('terminal-reconnect', {
-                            detail: { connectionId, sessionId }
-                        }));
-                    }, 5000);
-                }
-            }, 2000); // 等待2秒让WebSocket引用初始化
-
-            return () => {
-                if (reconnectTimer) clearTimeout(reconnectTimer);
-                if (checkTimer) clearTimeout(checkTimer);
-            };
+            setConnectionStatus('error');
+            setError('终端连接未初始化');
+            return;
         }
 
         const ws = webSocketRef.current;
@@ -76,6 +48,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             case WebSocket.CONNECTING:
                 setConnectionStatus('connecting');
                 setLoading(true);
+                setError(null);
                 break;
             case WebSocket.OPEN:
                 setConnectionStatus('connected');
@@ -85,7 +58,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             case WebSocket.CLOSING:
             case WebSocket.CLOSED:
                 setConnectionStatus('disconnected');
-                setError('终端连接已关闭，请重新连接');
+                setError('终端连接已关闭');
                 break;
         }
 
@@ -95,31 +68,18 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             setConnectionStatus('connected');
             setLoading(false);
             setError(null);
-
-            // 发送初始化消息
-            if (ws.readyState === WebSocket.OPEN) {
-                try {
-                    ws.send(JSON.stringify({
-                        type: 'init',
-                        connectionId,
-                        sessionId
-                    }));
-                } catch (e) {
-                    console.error('发送初始化消息失败:', e);
-                }
-            }
         };
 
         const handleClose = () => {
             console.log('WebSocket已关闭');
             setConnectionStatus('disconnected');
-            setError('终端连接已关闭，请重新连接');
+            setError('终端连接已关闭');
         };
 
         const handleError = (e: Event) => {
             console.error('WebSocket错误:', e);
             setConnectionStatus('error');
-            setError('终端连接出错，请尝试重新连接');
+            setError('终端连接出错');
         };
 
         // 定义消息处理函数
@@ -138,6 +98,9 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     setOutput(prev => [...prev, '连接成功，终端已就绪']);
                     setConnectionStatus('connected');
                     setLoading(false);
+                } else if (data.type === 'heartbeat_response') {
+                    // 心跳响应，可以用来更新连接状态或计算网络延迟
+                    console.log('收到心跳响应');
                 }
             } catch (e) {
                 console.error('处理WebSocket消息时出错:', e);
@@ -150,11 +113,6 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         ws.addEventListener('close', handleClose);
         ws.addEventListener('error', handleError);
 
-        // 如果WebSocket已经打开，发送初始化消息
-        if (ws.readyState === WebSocket.OPEN) {
-            handleOpen();
-        }
-
         // 清理函数
         return () => {
             if (ws) {
@@ -163,9 +121,8 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 ws.removeEventListener('close', handleClose);
                 ws.removeEventListener('error', handleError);
             }
-            if (reconnectTimer) clearTimeout(reconnectTimer);
         };
-    }, [webSocketRef, connectionId, sessionId]);
+    }, [webSocketRef]);
 
     // 处理命令输入
     const handleSendCommand = () => {
@@ -213,6 +170,13 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         }
     };
 
+    // 处理重连请求
+    const handleReconnectRequest = () => {
+        if (onReconnectRequest) {
+            onReconnectRequest(connectionId, sessionId);
+        }
+    };
+
     return (
         <div
             className="simple-terminal-container"
@@ -220,17 +184,19 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             style={{ display: visible ? 'flex' : 'none' }}
         >
             {error && (
-                <Alert
-                    message="连接错误"
-                    description={error}
-                    type="error"
-                    showIcon
-                    closable
-                    style={{ marginBottom: 10 }}
-                />
+                <div className="simple-terminal-error">
+                    <div className="simple-terminal-error-title">连接错误</div>
+                    <div className="simple-terminal-error-description">{error}</div>
+                    <button
+                        className="simple-terminal-reconnect-button"
+                        onClick={handleReconnectRequest}
+                    >
+                        重新连接
+                    </button>
+                </div>
             )}
 
-            {loading && (
+            {loading && !error && (
                 <div className="simple-terminal-loading">
                     <Spin tip={getConnectionStatusText()} size="large">
                         <div className="spin-content-placeholder" />

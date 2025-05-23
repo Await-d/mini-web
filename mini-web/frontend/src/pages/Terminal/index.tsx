@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-10 21:34:58
  * @LastEditors: Await
- * @LastEditTime: 2025-05-21 20:02:00
+ * @LastEditTime: 2025-05-23 19:54:51
  * @Description: 终端页面组件
  */
 import React, { useCallback, useEffect, createRef } from 'react';
@@ -13,6 +13,8 @@ import TerminalContainers from './components/TerminalContainers';
 import TerminalConnectionWrapper from './components/TerminalConnectionWrapper';
 import EmptyTerminalGuide from './components/EmptyTerminalGuide';
 import TerminalEventManager from './components/TerminalEventManager';
+import WebSocketManager from './components/WebSocketManager';
+import useWebSocketAdapter from './hooks/useWebSocketAdapter';
 import type { ConnectionChildProps } from './Terminal.d';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { terminalStateRef } from '../../contexts/TerminalContext';
@@ -42,6 +44,9 @@ const Terminal: React.FC = () => {
   // 使用终端上下文
   const { state, addTab, updateTab, closeTab, setActiveTab, clearTabs } = useTerminal();
   const { tabs, activeTabKey } = state;
+
+  // 使用WebSocket适配器
+  const { adaptContextToManagerWebSocket } = useWebSocketAdapter();
 
   // 使用标签页URL参数处理
   // 这个hook会根据URL参数创建或激活标签页
@@ -216,6 +221,7 @@ const Terminal: React.FC = () => {
                 onTabClose={handleTabClose}
                 onTabRefresh={refreshTab}
                 onTabDuplicate={duplicateTab}
+                networkLatency={connectionProps.networkLatency}
               />
 
               {/* 终端容器盒子 */}
@@ -232,11 +238,17 @@ const Terminal: React.FC = () => {
                     tabs={connectionProps.tabs || []}
                     activeTabKey={connectionProps.activeTabKey}
                     isConnected={connectionProps.isConnected}
-                    connection={connectionProps.connection || undefined}
+                    connection={connectionProps.connection}
                     createWebSocketConnection={connectionProps.createWebSocketConnection}
                   />
                 </TerminalEventManager>
               </div>
+
+              {/* WebSocket连接管理器 */}
+              <WebSocketManager
+                tabs={connectionProps.tabs || []}
+                onCreateWebSocket={adaptContextToManagerWebSocket(connectionProps.createWebSocketConnection)}
+              />
             </>
           )}
         </TerminalConnectionWrapper>

@@ -50,7 +50,7 @@ export interface ConnectionChildProps {
     tabsCount: number;
     activeTabKey: string;
     isConnected: boolean;
-    tabs?: any[];
+    tabs?: TerminalTab[];
     connection?: Connection;
     fullscreen?: boolean;
     terminalSize?: { cols: number; rows: number };
@@ -59,7 +59,7 @@ export interface ConnectionChildProps {
     sidebarCollapsed?: boolean;
     toggleFullscreen?: () => void;
     sendDataToServer?: (data: any) => boolean;
-    createWebSocketConnection?: (tab: TerminalTab) => WebSocket | null;
+    createWebSocketConnection?: (sessionId: number | string, tabKey: string) => WebSocket | null;
 }
 
 // 窗口大小类型

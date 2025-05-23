@@ -89,7 +89,8 @@ export interface TerminalTab {
   key: string;
   title: string;
   icon?: React.ReactNode; // 添加可选的图标属性
-  status?: string; // 添加可选的状态属性
+  status?: 'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting'; // 标签状态
+  error?: string; // 错误信息
   connectionId?: number;
   sessionId?: number;
   connection?: Connection;
@@ -108,6 +109,10 @@ export interface TerminalTab {
   terminalMode?: string; // 添加终端模式属性
   isGraphical?: boolean; // 添加是否图形化属性
   forceCreate?: boolean; // 添加强制创建标志
+  lastReconnectTime?: string; // 最后重连时间
+  reconnectCount?: number; // 重连次数
+  lastError?: string; // 最后一次错误
+  errorTime?: string; // 错误发生时间
   // RDP特有属性
   rdpWidth?: number; // RDP窗口宽度
   rdpHeight?: number; // RDP窗口高度
@@ -147,21 +152,6 @@ export type TerminalAction =
   | { type: 'SET_ACTIVE_TAB'; payload: string }
   | { type: 'CLEAR_TABS' };
 
-// 声明WebSocketService全局变量
-declare global {
-  interface Window {
-    WebSocketService?: {
-      closeConnection: (tabKey: string) => void;
-      closeAllConnections: () => void;
-    };
-    _webSocketCallbacks?: Map<string, {
-      onOpen?: () => void;
-      onMessage?: (event: MessageEvent) => void;
-      onClose?: () => void;
-    }>;
-  }
-}
-
 // 定义上下文类型
 interface TerminalContextType {
   state: TerminalContextState;
@@ -170,7 +160,6 @@ interface TerminalContextType {
   closeTab: (key: string) => void;
   setActiveTab: (key: string) => void;
   clearTabs: () => void;
-  createWebSocketConnection: (sessionId: number | string, tabKey: string) => WebSocket | null;
 }
 
 // 创建上下文
@@ -452,32 +441,15 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
           if (closedTab.webSocketRef?.current) {
             console.log(`立即关闭WebSocket连接: ${action.payload} (状态: ${closedTab.webSocketRef.current.readyState})`);
 
-            // 无论WebSocket当前状态如何，都尝试关闭
+            // 无论WebSocket当前状态如何，都尝试安全关闭
             try {
-              // 如果WebSocket打开，尝试发送终止消息
-              if (closedTab.webSocketRef.current.readyState === WebSocket.OPEN) {
-                closedTab.webSocketRef.current.send(JSON.stringify({
-                  type: 'terminate',
-                  sessionId: closedTab.sessionId
-                }));
-              }
-
-              // 强制关闭WebSocket连接
-              closedTab.webSocketRef.current.close();
-              closedTab.webSocketRef.current.onopen = null;
-              closedTab.webSocketRef.current.onclose = null;
-              closedTab.webSocketRef.current.onerror = null;
-              closedTab.webSocketRef.current.onmessage = null;
+              // 调用安全关闭WebSocket辅助函数
+              safelyCloseWebSocket(closedTab.webSocketRef.current, closedTab.sessionId);
 
               // 清除WebSocket引用
               closedTab.webSocketRef.current = null;
             } catch (wsError) {
               console.error(`关闭WebSocket连接时出错:`, wsError);
-            }
-
-            // 调用WebSocketService关闭连接
-            if (window.WebSocketService) {
-              window.WebSocketService.closeConnection(action.payload);
             }
           }
           // 执行任何自定义清理函数
@@ -817,13 +789,14 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
               isConnected: false, // 恢复时总是先设为未连接
               terminalRef: createRef<HTMLDivElement | null>(),
               webSocketRef: createRef<WebSocket | null>(),
-              messageQueueRef: createRef<string[] | null>(),
+              messageQueueRef: createRef<Array<{ type: string; data: string | number[]; timestamp: number }> | null>(),
               protocol: tabInfo.protocol,
               hostname: tabInfo.hostname,
               port: tabInfo.port,
               username: tabInfo.username,
               connection: tabInfo.connection, // 恢复完整的connection对象
               isGraphical: tabInfo.protocol === 'rdp' || tabInfo.protocol === 'vnc',
+              status: 'disconnected' // 恢复时的初始状态
             };
           });
 
@@ -941,32 +914,15 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       if (tabToClose.webSocketRef?.current) {
         console.log(`立即关闭WebSocket连接: ${key} (状态: ${tabToClose.webSocketRef.current.readyState})`);
 
-        // 无论WebSocket当前状态如何，都尝试关闭
+        // 无论WebSocket当前状态如何，都尝试安全关闭
         try {
-          // 如果WebSocket打开，尝试发送终止消息
-          if (tabToClose.webSocketRef.current.readyState === WebSocket.OPEN) {
-            tabToClose.webSocketRef.current.send(JSON.stringify({
-              type: 'terminate',
-              sessionId: tabToClose.sessionId
-            }));
-          }
-
-          // 强制关闭WebSocket连接
-          tabToClose.webSocketRef.current.close();
-          tabToClose.webSocketRef.current.onopen = null;
-          tabToClose.webSocketRef.current.onclose = null;
-          tabToClose.webSocketRef.current.onerror = null;
-          tabToClose.webSocketRef.current.onmessage = null;
+          // 调用安全关闭WebSocket辅助函数
+          safelyCloseWebSocket(tabToClose.webSocketRef.current, tabToClose.sessionId);
 
           // 清除WebSocket引用
           tabToClose.webSocketRef.current = null;
         } catch (wsError) {
           console.error(`关闭WebSocket连接时出错:`, wsError);
-        }
-
-        // 调用WebSocketService关闭连接
-        if (window.WebSocketService) {
-          window.WebSocketService.closeConnection(key);
         }
       }
       // 执行任何自定义清理函数
@@ -1067,102 +1023,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     dispatch({ type: 'CLEAR_TABS' });
   };
 
-  // 在addTab方法之后添加WebSocket连接创建方法
-  const createWebSocketConnection = (sessionId: number | string, tabKey: string): WebSocket | null => {
-    console.log(`创建WebSocket连接: 会话ID=${sessionId}, 标签Key=${tabKey}`);
-
-    // 查找对应的标签
-    const tab = state.tabs.find(t => t.key === tabKey);
-    if (!tab) {
-      console.error(`无法找到标签: ${tabKey}`);
-      return null;
-    }
-
-    // 检查是否已经有连接
-    if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
-      console.log(`标签 ${tabKey} 已有打开的WebSocket连接，返回现有连接`);
-      return tab.webSocketRef.current;
-    }
-
-    // 创建WebSocket连接
-    try {
-      // 获取后端WebSocket URL
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
-      const wsUrl = `${protocol}//${host}/api/ws/terminal/${sessionId}`;
-
-      console.log(`连接WebSocket: ${wsUrl}`);
-
-      // 创建WebSocket
-      const ws = new WebSocket(wsUrl);
-
-      // 保存WebSocket引用
-      if (tab.webSocketRef) {
-        tab.webSocketRef.current = ws;
-      }
-
-      // 初始化WebSocket事件处理
-      ws.onopen = () => {
-        console.log(`WebSocket连接已打开: ${tabKey}`);
-        // 发送初始化数据
-        const initData = {
-          type: 'init',
-          connectionId: tab.connectionId,
-          sessionId: tab.sessionId,
-          protocol: tab.protocol || 'ssh'
-        };
-        try {
-          ws.send(JSON.stringify(initData));
-        } catch (error) {
-          console.error('发送初始化数据失败:', error);
-        }
-
-        // 更新标签状态
-        updateTab(tabKey, { isConnected: true });
-
-        // 触发连接事件，通知其他组件
-        window.dispatchEvent(new CustomEvent('terminal-connected', {
-          detail: { tabKey, sessionId, connectionId: tab.connectionId }
-        }));
-      };
-
-      ws.onerror = (error) => {
-        console.error(`WebSocket错误: ${tabKey}`, error);
-
-        // 更新标签状态
-        updateTab(tabKey, { isConnected: false });
-
-        // 触发错误事件
-        window.dispatchEvent(new CustomEvent('terminal-error', {
-          detail: { tabKey, error: 'WebSocket连接错误' }
-        }));
-      };
-
-      ws.onclose = () => {
-        console.log(`WebSocket连接已关闭: ${tabKey}`);
-
-        // 更新标签状态
-        updateTab(tabKey, { isConnected: false });
-
-        // 触发关闭事件
-        window.dispatchEvent(new CustomEvent('terminal-disconnected', {
-          detail: { tabKey }
-        }));
-      };
-
-      return ws;
-    } catch (error) {
-      console.error(`创建WebSocket连接失败: ${tabKey}`, error);
-
-      // 触发错误事件
-      window.dispatchEvent(new CustomEvent('terminal-error', {
-        detail: { tabKey, error: '创建WebSocket连接失败' }
-      }));
-
-      return null;
-    }
-  };
-
   const contextValue = {
     state,
     addTab, // 保持addTab接口，但内部调用新的处理函数
@@ -1170,7 +1030,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     closeTab,
     setActiveTab,
     clearTabs,
-    createWebSocketConnection
   };
 
   return (
