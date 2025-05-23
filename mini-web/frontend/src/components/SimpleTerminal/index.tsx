@@ -36,20 +36,36 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
 
         // 检查WebSocket引用是否存在
         if (!webSocketRef || !webSocketRef.current) {
-            console.error('WebSocket引用为空');
-            setError('终端连接未初始化，正在尝试重新连接...');
-            setConnectionStatus('error');
+            console.warn(`SimpleTerminal WebSocket引用为空:`, {
+                connectionId,
+                sessionId,
+                hasWebSocketRef: !!webSocketRef,
+                webSocketRefCurrent: webSocketRef?.current
+            });
 
-            // 5秒后自动重试
-            reconnectTimer = window.setTimeout(() => {
-                // 触发重新连接事件
-                window.dispatchEvent(new CustomEvent('terminal-reconnect', {
-                    detail: { connectionId, sessionId }
-                }));
-            }, 5000);
+            setError('终端连接正在初始化...');
+            setConnectionStatus('connecting');
+
+            // 等待WebSocket引用初始化，延迟检查
+            const checkTimer = window.setTimeout(() => {
+                if (!webSocketRef?.current) {
+                    console.error('WebSocket引用初始化超时，尝试重新连接');
+                    setError('终端连接未初始化，正在尝试重新连接...');
+                    setConnectionStatus('error');
+
+                    // 5秒后自动重试
+                    reconnectTimer = window.setTimeout(() => {
+                        // 触发重新连接事件
+                        window.dispatchEvent(new CustomEvent('terminal-reconnect', {
+                            detail: { connectionId, sessionId }
+                        }));
+                    }, 5000);
+                }
+            }, 2000); // 等待2秒让WebSocket引用初始化
 
             return () => {
                 if (reconnectTimer) clearTimeout(reconnectTimer);
+                if (checkTimer) clearTimeout(checkTimer);
             };
         }
 

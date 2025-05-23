@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 15:31:39
  * @LastEditors: Await
- * @LastEditTime: 2025-05-23 15:30:25
+ * @LastEditTime: 2025-05-23 19:34:00
  * @Description: 终端容器组件，负责渲染适当的终端类型
  */
 import React, { useEffect, useCallback, useRef, useState } from 'react';
@@ -69,36 +69,66 @@ const TerminalContainers: React.FC<TerminalContainersProps> = ({
 
         // 创建WebSocket连接
         const tab = safeTabs.find(t => t.key === tabKey);
-        if (tab && tab.sessionId && createWebSocketConnection && (!tab.webSocketRef?.current || tab.webSocketRef.current.readyState !== WebSocket.OPEN)) {
-            // 创建WebSocket连接
-            console.log(`为标签 ${tabKey} 创建WebSocket连接`);
-            try {
-                const newWs = createWebSocketConnection(tab.sessionId, tabKey);
 
-                // 更新WebSocket引用
-                if (tab.webSocketRef && newWs) {
-                    tab.webSocketRef.current = newWs;
+        // 添加更详细的调试信息
+        if (!tab) {
+            console.error(`无法找到标签: ${tabKey}, 可用标签: ${safeTabs.map(t => t.key).join(', ')}`);
+            return;
+        }
 
-                    // 等待连接建立后触发终端就绪事件
-                    if (newWs.readyState === WebSocket.OPEN) {
-                        triggerTerminalReady(tab);
-                    } else {
-                        newWs.addEventListener('open', () => {
-                            triggerTerminalReady(tab);
-                        });
+        console.log(`标签 ${tabKey} 信息:`, {
+            key: tab.key,
+            connectionId: tab.connectionId,
+            sessionId: tab.sessionId,
+            hasWebSocketRef: !!tab.webSocketRef,
+            webSocketState: tab.webSocketRef?.current?.readyState,
+            hasCreateWebSocketConnection: !!createWebSocketConnection
+        });
 
-                        // 添加错误处理
-                        newWs.addEventListener('error', (e) => {
-                            console.error(`WebSocket连接错误: ${e}`);
-                        });
-                    }
-                }
-            } catch (error) {
-                console.error(`为标签 ${tabKey} 创建WebSocket连接失败:`, error);
-            }
-        } else if (tab) {
-            // WebSocket已存在，直接触发终端就绪事件
+        if (!tab.sessionId) {
+            console.error(`无法创建WebSocket连接: 标签 ${tabKey} 缺少sessionId`);
+            console.log(`标签完整信息:`, tab);
+            return;
+        }
+
+        if (!createWebSocketConnection) {
+            console.error(`无法创建WebSocket连接: createWebSocketConnection函数未提供`);
+            return;
+        }
+
+        if (tab.webSocketRef?.current && tab.webSocketRef.current.readyState === WebSocket.OPEN) {
+            console.log(`标签 ${tabKey} 已有活跃的WebSocket连接，跳过创建`);
             triggerTerminalReady(tab);
+            return;
+        }
+
+        // 创建WebSocket连接
+        console.log(`为标签 ${tabKey} 创建WebSocket连接，sessionId: ${tab.sessionId}`);
+        try {
+            const newWs = createWebSocketConnection(tab.sessionId, tabKey);
+
+            // 更新WebSocket引用
+            if (tab.webSocketRef && newWs) {
+                tab.webSocketRef.current = newWs;
+
+                // 等待连接建立后触发终端就绪事件
+                if (newWs.readyState === WebSocket.OPEN) {
+                    triggerTerminalReady(tab);
+                } else {
+                    newWs.addEventListener('open', () => {
+                        triggerTerminalReady(tab);
+                    });
+
+                    // 添加错误处理
+                    newWs.addEventListener('error', (e) => {
+                        console.error(`WebSocket连接错误: ${e}`);
+                    });
+                }
+            } else if (!newWs) {
+                console.error(`WebSocket连接创建失败: sessionId=${tab.sessionId}, tabKey=${tabKey}`);
+            }
+        } catch (error) {
+            console.error(`为标签 ${tabKey} 创建WebSocket连接失败:`, error);
         }
     }, [safeTabs, createWebSocketConnection]);
 

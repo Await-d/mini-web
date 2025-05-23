@@ -175,6 +175,23 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
     createWebSocketConnection: createWsConnection
   };
 
+  // 添加调试信息，确保数据正确传递
+  useEffect(() => {
+    if (tabs.length > 0) {
+      console.log(`TerminalConnectionWrapper 准备传递给子组件的数据:`, {
+        tabsCount: tabs.length,
+        activeTabKey,
+        firstTabInfo: tabs[0] ? {
+          key: tabs[0].key,
+          connectionId: tabs[0].connectionId,
+          sessionId: tabs[0].sessionId,
+          hasWebSocketRef: !!tabs[0].webSocketRef
+        } : null,
+        hasCreateWebSocketConnection: !!createWsConnection
+      });
+    }
+  }, [tabs, activeTabKey, createWsConnection]);
+
   // 渲染子组件
   return children(connectionProps);
 };

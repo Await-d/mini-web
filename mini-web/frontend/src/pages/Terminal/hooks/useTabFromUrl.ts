@@ -110,6 +110,21 @@ const useTabFromUrl = () => {
                         // 创建新标签
                         console.log(`创建新标签: ${tabKey}, 连接ID: ${connectionId}, 会话ID: ${sessionParam}`);
 
+                        // 确保sessionId有效
+                        const validSessionId = sessionParam ? Number(sessionParam) : undefined;
+                        if (sessionParam && isNaN(validSessionId)) {
+                            console.error(`无效的会话ID: ${sessionParam}`);
+                            return;
+                        }
+
+                        console.log(`准备添加标签:`, {
+                            key: tabKey,
+                            connectionId: Number(connectionId),
+                            sessionId: validSessionId,
+                            sessionParam: sessionParam,
+                            connectionData: connectionData.name
+                        });
+
                         // 清除所有关闭标志，确保新标签可以正常创建
                         localStorage.removeItem('force_closing_last_tab');
                         localStorage.removeItem('all_tabs_closed');
@@ -120,7 +135,7 @@ const useTabFromUrl = () => {
                             key: tabKey,
                             title: connectionData.name || `终端 ${connectionId}`,
                             connectionId: Number(connectionId),
-                            sessionId: sessionParam ? Number(sessionParam) : undefined,
+                            sessionId: validSessionId,
                             connection: connectionData,
                             protocol: connectionData.protocol,
                             isConnected: false,
