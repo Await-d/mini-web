@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-10 21:34:58
  * @LastEditors: Await
- * @LastEditTime: 2025-05-23 19:54:51
+ * @LastEditTime: 2025-05-24 18:47:00
  * @Description: 终端页面组件
  */
 import React, { useCallback, useEffect, createRef } from 'react';
@@ -14,8 +14,6 @@ import TerminalConnectionWrapper from './components/TerminalConnectionWrapper';
 import EmptyTerminalGuide from './components/EmptyTerminalGuide';
 import TerminalEventManager from './components/TerminalEventManager';
 import WebSocketManager from './components/WebSocketManager';
-import useWebSocketAdapter from './hooks/useWebSocketAdapter';
-import type { ConnectionChildProps } from './Terminal.d';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { terminalStateRef } from '../../contexts/TerminalContext';
 import { connectionAPI, sessionAPI } from '../../services/api';
@@ -45,9 +43,6 @@ const Terminal: React.FC = () => {
   const { state, addTab, updateTab, closeTab, setActiveTab, clearTabs } = useTerminal();
   const { tabs, activeTabKey } = state;
 
-  // 使用WebSocket适配器
-  const { adaptContextToManagerWebSocket } = useWebSocketAdapter();
-
   // 使用标签页URL参数处理
   // 这个hook会根据URL参数创建或激活标签页
   const urlParams = useTabFromUrl();
@@ -64,8 +59,32 @@ const Terminal: React.FC = () => {
         `/terminal/${tab.connectionId}?session=${tab.sessionId || ''}&tabKey=${activeKey}`,
         { replace: true }
       );
+
+      // 触发终端标签激活事件，通知需要建立WebSocket连接
+      window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
+        detail: {
+          tabKey: activeKey,
+          connectionId: tab.connectionId,
+          sessionId: tab.sessionId
+        }
+      }));
+
+      console.log(`标签切换: ${activeKey}, 已触发terminal-tab-activated事件`);
+
+      // 检查WebSocket连接状态，如果未连接则更新状态
+      const needConnection = !tab.webSocketRef?.current ||
+        (tab.webSocketRef.current.readyState !== WebSocket.OPEN &&
+          tab.webSocketRef.current.readyState !== WebSocket.CONNECTING);
+
+      if (needConnection) {
+        // 标记为正在连接
+        updateTab(activeKey, {
+          status: 'connecting',
+          error: undefined
+        });
+      }
     }
-  }, [setActiveTab, tabs, navigate]);
+  }, [tabs, navigate, updateTab]);
 
   // 标签页关闭处理
   const handleTabClose = useCallback((tabKey: string) => {
@@ -247,7 +266,7 @@ const Terminal: React.FC = () => {
               {/* WebSocket连接管理器 */}
               <WebSocketManager
                 tabs={connectionProps.tabs || []}
-                onCreateWebSocket={adaptContextToManagerWebSocket(connectionProps.createWebSocketConnection)}
+                createWebSocketConnection={connectionProps.createWebSocketConnection}
               />
             </>
           )}

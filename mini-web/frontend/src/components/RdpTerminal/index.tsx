@@ -117,31 +117,38 @@ const RdpTerminal: React.FC<RdpTerminalProps> = ({
                         setLoading(false);
                         setConnected(true);
                     });
-                } else {
-                    // 处理JSON控制消息
-                    const data = JSON.parse(event.data);
+                } else if (typeof event.data === 'string') {
+                    try {
+                        // 处理JSON控制消息
+                        const data = JSON.parse(event.data);
 
-                    if (data.type === 'connected') {
-                        console.log('RDP连接已建立');
-                        setLoading(false);
-                        setConnected(true);
-                        setError(null);
-                    } else if (data.type === 'error') {
-                        console.error('RDP错误:', data.message);
-                        setError(data.message || 'RDP连接出错');
-                        setLoading(false);
-                    } else if (data.type === 'resize') {
-                        // 处理调整大小事件
-                        if (data.width && data.height && canvas) {
-                            canvas.width = data.width;
-                            canvas.height = data.height;
+                        if (data.type === 'connected') {
+                            console.log('RDP连接已建立');
+                            setLoading(false);
+                            setConnected(true);
+                            setError(null);
+                        } else if (data.type === 'error') {
+                            console.error('RDP错误:', data.message);
+                            setError(data.message || 'RDP连接出错');
+                            setLoading(false);
+                        } else if (data.type === 'resize') {
+                            // 处理调整大小事件
+                            if (data.width && data.height && canvas) {
+                                canvas.width = data.width;
+                                canvas.height = data.height;
 
-                            // 调用回调通知尺寸变化
-                            if (onResize) {
-                                onResize(data.width, data.height);
+                                // 调用回调通知尺寸变化
+                                if (onResize) {
+                                    onResize(data.width, data.height);
+                                }
                             }
                         }
+                    } catch (jsonError) {
+                        // 如果JSON解析失败，则作为普通文本处理
+                        console.log('收到非JSON文本数据:', event.data);
                     }
+                } else {
+                    console.log('收到未知类型数据:', typeof event.data);
                 }
             } catch (e) {
                 console.error('处理WebSocket消息时出错:', e);

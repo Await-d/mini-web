@@ -84,198 +84,253 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
         const data = event.data;
 
         // 增强日志调试 - 打印所有消息内容
-        console.log(`收到WebSocket消息: 类型=${typeof data}, 长度=${typeof data === 'string' ? data.length : (data instanceof ArrayBuffer ? data.byteLength : 'unknown')}`);
+        console.log(`收到WebSocket消息: 类型=${typeof data}, 长度=${typeof data === 'string' ? data.length : (data instanceof Blob ? '二进制Blob' : (data instanceof ArrayBuffer ? data.byteLength : 'unknown'))}`);
 
-        // 检查是否是文本消息
-        if (typeof data === 'string') {
-          // 记录所有文本消息的完整内容
-          console.log('WebSocket文本消息完整内容:', data);
-
-          // 检查是否是图形协议消息
-          if (data.startsWith(protocol.toUpperCase() + '_')) {
-            const parts = data.split(':');
-            const messageType = parts[0];
-            console.log('图形协议消息类型:', messageType);
-
-            switch (messageType) {
-              case 'RDP_CONNECTED':
-              case 'VNC_CONNECT':
-                console.log('连接成功消息');
-                setIsConnected(true);
-                setLoading(false);
-                break;
-
-              case 'RDP_INFO':
-              case 'VNC_INFO':
-                // 显示连接信息
-                console.log('收到连接信息:', data);
-                // 可以在UI中显示连接信息
-                break;
-
-              case 'RDP_SCREENSHOT':
-              case 'VNC_SCREENSHOT':
-                console.log(`收到屏幕截图消息，分段数量: ${parts.length}`);
-
-                // 确保消息格式正确
-                if (parts.length >= 4) {
-                  try {
-                    const width = parseInt(parts[1]);
-                    const height = parseInt(parts[2]);
-                    const base64Image = parts.slice(3).join(':'); // 重新组合可能包含冒号的base64数据
-
-                    console.log(`解析屏幕截图消息: 宽度=${width}, 高度=${height}, 数据长度=${base64Image.length}`);
-
-                    // 确保base64数据有效
-                    if (base64Image.length > 0) {
-                      // 更新屏幕信息
-                      setScreenInfo({ width, height });
-
-                      // 绘制图像
-                      drawScreenshot(base64Image, width, height);
-
-                      // 如果之前在加载中，现在停止加载
-                      if (loading) {
-                        console.log('屏幕截图加载成功，结束加载状态');
-                        setLoading(false);
-                      }
-                    } else {
-                      console.error('屏幕截图base64数据为空');
-
-                      // 更新屏幕信息
-                      setScreenInfo({ width, height });
-
-                      // 数据为空时，绘制测试图案
-                      drawEmptyScreenshot(width, height);
-
-                      if (loading) {
-                        console.log('收到空屏幕数据，绘制测试图案');
-                        setLoading(false);
-                      }
-                    }
-                  } catch (error) {
-                    console.error('解析屏幕截图消息出错:', error);
-                  }
-                } else {
-                  console.error('截图数据格式错误:', parts);
-                }
-                break;
-
-              case 'RDP_ERROR':
-              case 'VNC_ERROR':
-                // 显示错误信息
-                if (parts.length >= 2) {
-                  const errorMessage = parts.slice(1).join(':');
-                  console.error('远程连接错误:', errorMessage);
-                  setError(errorMessage);
-                  message.error(`远程连接错误: ${errorMessage}`);
-                }
-                break;
-
-              case 'RDP_NOTICE':
-              case 'VNC_NOTICE':
-                // 显示通知信息
-                if (parts.length >= 2) {
-                  const noticeMessage = parts.slice(1).join(':');
-                  console.log('远程连接通知:', noticeMessage);
-                  message.info(noticeMessage);
-                }
-                break;
-
-              case 'RDP_KEEP_ALIVE':
-              case 'VNC_KEEP_ALIVE':
-                console.log('收到保活消息');
-                // 可以更新连接状态或响应保活
-                break;
-
-              // 增加对其他可能的消息类型的处理  
-              case 'RDP_KEY':
-              case 'VNC_KEY':
-                console.log('收到按键响应消息:', data);
-                break;
-
-              case 'RDP_MOUSE':
-              case 'VNC_MOUSE':
-                console.log('收到鼠标响应消息:', data);
-                break;
-
-              case 'RDP_RESIZE':
-              case 'VNC_RESIZE':
-                console.log('收到调整大小响应消息:', data);
-                break;
-
-              // 其他消息类型处理
-              default:
-                console.log('收到未知图形协议消息:', data);
-                break;
-            }
-          } else {
-            // 处理非特定协议前缀的消息
-            console.log('收到非协议格式文本消息:', data);
-
-            // 尝试解析为JSON
+        // 处理Blob数据
+        if (data instanceof Blob) {
+          console.log('收到Blob数据');
+          // 转换Blob为文本或ArrayBuffer
+          data.text().then(text => {
             try {
-              const jsonData = JSON.parse(data);
-              console.log('解析为JSON:', jsonData);
+              // 尝试解析为JSON
+              const jsonData = JSON.parse(text);
+              console.log('Blob转换为JSON:', jsonData);
 
-              // 处理JSON格式的消息
+              // 处理JSON数据
               if (jsonData.type) {
-                console.log('JSON消息类型:', jsonData.type);
-
-                switch (jsonData.type) {
-                  case 'init':
-                    console.log('收到初始化消息:', jsonData);
-                    break;
-
-                  case 'error':
-                    console.error('JSON错误消息:', jsonData.error || jsonData.message);
-                    setError(jsonData.error || jsonData.message || '未知错误');
-                    message.error(jsonData.error || jsonData.message || '未知错误');
-                    break;
-
-                  case 'screenshot':
-                    console.log('收到JSON格式屏幕截图消息');
-                    if (jsonData.data && jsonData.width && jsonData.height) {
-                      drawScreenshot(jsonData.data, jsonData.width, jsonData.height);
-                      setLoading(false);
-                    }
-                    break;
-                }
+                handleJsonMessage(jsonData);
               }
             } catch (e) {
-              // 不是JSON格式
-              console.log('不是JSON格式的消息:', e);
-
-              // 检查消息是否包含base64编码的图像数据
-              if (data.includes('data:image')) {
-                console.log('检测到内联图像数据');
-                try {
-                  // 尝试直接从内联数据中提取图像
-                  const img = new Image();
-                  img.onload = () => {
-                    if (canvasRef.current) {
-                      const ctx = canvasRef.current.getContext('2d');
-                      if (ctx) {
-                        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-                        ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
-                      }
-                      setLoading(false);
-                    }
-                  };
-                  img.src = data;
-                } catch (imgErr) {
-                  console.error('处理内联图像数据失败:', imgErr);
-                }
-              }
+              // 非JSON文本，可能是普通文本数据
+              console.log('Blob数据不是JSON格式:', text);
+              handleTextMessage(text);
             }
-          }
-        } else if (data instanceof ArrayBuffer) {
+          }).catch(error => {
+            console.error('读取Blob文本失败，尝试作为二进制数据处理:', error);
+            // 如果文本读取失败，尝试作为二进制数据处理
+            data.arrayBuffer().then(buffer => {
+              console.log('转换Blob为ArrayBuffer:', buffer.byteLength, '字节');
+              handleBinaryData(buffer);
+            }).catch(err => {
+              console.error('处理Blob数据失败:', err);
+            });
+          });
+        }
+        // 检查是否是文本消息
+        else if (typeof data === 'string') {
+          // 记录所有文本消息的完整内容
+          console.log('WebSocket文本消息完整内容:', data);
+          handleTextMessage(data);
+        }
+        // 处理二进制数据
+        else if (data instanceof ArrayBuffer) {
           // 二进制数据处理
-          console.log('收到二进制数据:', data.byteLength, '字节');
-          // 二进制数据处理逻辑待实现
+          console.log('收到ArrayBuffer二进制数据:', data.byteLength, '字节');
+          handleBinaryData(data);
         }
       } catch (err) {
         console.error('处理WebSocket消息出错:', err);
       }
+    };
+
+    // 处理文本消息
+    const handleTextMessage = (text: string) => {
+      // 检查是否是图形协议消息
+      if (text.startsWith(protocol.toUpperCase() + '_')) {
+        const parts = text.split(':');
+        const messageType = parts[0];
+        console.log('图形协议消息类型:', messageType);
+
+        switch (messageType) {
+          case 'RDP_CONNECTED':
+          case 'VNC_CONNECT':
+            console.log('连接成功消息');
+            setIsConnected(true);
+            setLoading(false);
+            break;
+
+          case 'RDP_INFO':
+          case 'VNC_INFO':
+            // 显示连接信息
+            console.log('收到连接信息:', text);
+            // 可以在UI中显示连接信息
+            break;
+
+          case 'RDP_SCREENSHOT':
+          case 'VNC_SCREENSHOT':
+            console.log(`收到屏幕截图消息，分段数量: ${parts.length}`);
+
+            // 确保消息格式正确
+            if (parts.length >= 4) {
+              try {
+                const width = parseInt(parts[1]);
+                const height = parseInt(parts[2]);
+                const base64Image = parts.slice(3).join(':'); // 重新组合可能包含冒号的base64数据
+
+                console.log(`解析屏幕截图消息: 宽度=${width}, 高度=${height}, 数据长度=${base64Image.length}`);
+
+                // 确保base64数据有效
+                if (base64Image.length > 0) {
+                  // 更新屏幕信息
+                  setScreenInfo({ width, height });
+
+                  // 绘制图像
+                  drawScreenshot(base64Image, width, height);
+
+                  // 如果之前在加载中，现在停止加载
+                  if (loading) {
+                    console.log('屏幕截图加载成功，结束加载状态');
+                    setLoading(false);
+                  }
+                } else {
+                  console.error('屏幕截图base64数据为空');
+
+                  // 更新屏幕信息
+                  setScreenInfo({ width, height });
+
+                  // 数据为空时，绘制测试图案
+                  drawEmptyScreenshot(width, height);
+
+                  if (loading) {
+                    console.log('收到空屏幕数据，绘制测试图案');
+                    setLoading(false);
+                  }
+                }
+              } catch (error) {
+                console.error('解析屏幕截图消息出错:', error);
+              }
+            } else {
+              console.error('截图数据格式错误:', parts);
+            }
+            break;
+
+          case 'RDP_ERROR':
+          case 'VNC_ERROR':
+            // 显示错误信息
+            if (parts.length >= 2) {
+              const errorMessage = parts.slice(1).join(':');
+              console.error('远程连接错误:', errorMessage);
+              setError(errorMessage);
+              message.error(`远程连接错误: ${errorMessage}`);
+            }
+            break;
+
+          case 'RDP_NOTICE':
+          case 'VNC_NOTICE':
+            // 显示通知信息
+            if (parts.length >= 2) {
+              const noticeMessage = parts.slice(1).join(':');
+              console.log('远程连接通知:', noticeMessage);
+              message.info(noticeMessage);
+            }
+            break;
+
+          case 'RDP_KEEP_ALIVE':
+          case 'VNC_KEEP_ALIVE':
+            console.log('收到保活消息');
+            // 可以更新连接状态或响应保活
+            break;
+
+          // 增加对其他可能的消息类型的处理  
+          case 'RDP_KEY':
+          case 'VNC_KEY':
+            console.log('收到按键响应消息:', text);
+            break;
+
+          case 'RDP_MOUSE':
+          case 'VNC_MOUSE':
+            console.log('收到鼠标响应消息:', text);
+            break;
+
+          case 'RDP_RESIZE':
+          case 'VNC_RESIZE':
+            console.log('收到调整大小响应消息:', text);
+            break;
+
+          // 其他消息类型处理
+          default:
+            console.log('收到未知图形协议消息:', text);
+            break;
+        }
+      } else {
+        // 处理非特定协议前缀的消息
+        console.log('收到非协议格式文本消息:', text);
+
+        // 尝试解析为JSON
+        try {
+          const jsonData = JSON.parse(text);
+          console.log('解析为JSON:', jsonData);
+          handleJsonMessage(jsonData);
+        } catch (e) {
+          // 不是JSON格式
+          console.log('不是JSON格式的消息:', e);
+
+          // 检查消息是否包含base64编码的图像数据
+          if (text.includes('data:image')) {
+            console.log('检测到内联图像数据');
+            try {
+              // 尝试直接从内联数据中提取图像
+              const img = new Image();
+              img.onload = () => {
+                if (canvasRef.current) {
+                  const ctx = canvasRef.current.getContext('2d');
+                  if (ctx) {
+                    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                    ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
+                  }
+                  setLoading(false);
+                }
+              };
+              img.src = text;
+            } catch (imgErr) {
+              console.error('处理内联图像数据失败:', imgErr);
+            }
+          }
+        }
+      }
+    };
+
+    // 处理JSON消息
+    const handleJsonMessage = (jsonData: any) => {
+      // 处理JSON格式的消息
+      if (jsonData.type) {
+        console.log('JSON消息类型:', jsonData.type);
+
+        switch (jsonData.type) {
+          case 'init':
+            console.log('收到初始化消息:', jsonData);
+            break;
+
+          case 'error':
+            console.error('JSON错误消息:', jsonData.error || jsonData.message);
+            setError(jsonData.error || jsonData.message || '未知错误');
+            message.error(jsonData.error || jsonData.message || '未知错误');
+            break;
+
+          case 'screenshot':
+            console.log('收到JSON格式屏幕截图消息');
+            if (jsonData.data && jsonData.width && jsonData.height) {
+              drawScreenshot(jsonData.data, jsonData.width, jsonData.height);
+              setLoading(false);
+            }
+            break;
+        }
+      }
+    };
+
+    // 处理二进制数据
+    const handleBinaryData = (buffer: ArrayBuffer) => {
+      // 这里可以处理二进制协议数据
+      // 例如：解码二进制协议格式的屏幕截图、处理音频数据等
+      console.log('处理二进制数据:', buffer.byteLength, '字节');
+
+      // 示例：检查是否为图像数据，根据头部信息
+      const headerView = new Uint8Array(buffer, 0, 4);
+      if (headerView[0] === 0x89 && headerView[1] === 0x50 && headerView[2] === 0x4E && headerView[3] === 0x47) {
+        console.log('检测到PNG图像数据');
+        // 处理PNG图像...
+      }
+      // 其他二进制数据处理...
     };
 
     // 绘制屏幕截图

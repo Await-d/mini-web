@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 15:32:12
  * @LastEditors: Await
- * @LastEditTime: 2025-05-23 20:01:11
+ * @LastEditTime: 2025-05-24 21:14:55
  * @Description: 终端事件管理器组件
  */
 import React, { useEffect } from 'react';
@@ -35,6 +35,73 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
     const effectiveTabs = tabs || contextTabs;
     const effectiveActiveTabKey = activeTabKey || contextActiveTabKey;
     const effectiveSetActiveTab = setActiveTab || contextSetActiveTab;
+
+    // 检查并连接活动标签页的WebSocket
+    useEffect(() => {
+        if (effectiveActiveTabKey && effectiveTabs && effectiveTabs.length > 0) {
+            const activeTab = effectiveTabs.find(tab => tab.key === effectiveActiveTabKey);
+
+            if (activeTab && createWebSocketConnection) {
+                // 检查WebSocket是否需要建立连接
+                const needConnection = !activeTab.webSocketRef?.current ||
+                    (activeTab.webSocketRef.current.readyState !== WebSocket.OPEN &&
+                        activeTab.webSocketRef.current.readyState !== WebSocket.CONNECTING);
+
+                if (needConnection && activeTab.sessionId) {
+                    console.log(`主动为活动标签 ${activeTab.key} 创建WebSocket连接`);
+
+                    // 更新标签状态
+                    updateTab(activeTab.key, {
+                        isConnected: false,
+                        status: 'connecting'
+                    });
+
+                    // 创建WebSocket连接
+                    const ws = createWebSocketConnection(activeTab.sessionId, activeTab.key);
+
+                    if (ws && activeTab.webSocketRef) {
+                        activeTab.webSocketRef.current = ws;
+
+                        // 监听WebSocket事件
+                        ws.addEventListener('open', () => {
+                            console.log(`WebSocket连接已打开: tabKey=${activeTab.key}`);
+                            updateTab(activeTab.key, {
+                                isConnected: true,
+                                status: 'connected'
+                            });
+
+                            // 触发终端就绪事件
+                            window.dispatchEvent(new CustomEvent('terminal-ready', {
+                                detail: {
+                                    tabKey: activeTab.key,
+                                    connectionId: activeTab.connectionId,
+                                    sessionId: activeTab.sessionId,
+                                    protocol: activeTab.protocol || 'ssh'
+                                }
+                            }));
+                        });
+
+                        ws.addEventListener('close', () => {
+                            console.log(`WebSocket连接已关闭: tabKey=${activeTab.key}`);
+                            updateTab(activeTab.key, {
+                                isConnected: false,
+                                status: 'disconnected'
+                            });
+                        });
+
+                        ws.addEventListener('error', (e) => {
+                            console.error(`WebSocket连接错误: tabKey=${activeTab.key}`, e);
+                            updateTab(activeTab.key, {
+                                isConnected: false,
+                                status: 'error',
+                                error: '连接出错，请尝试刷新'
+                            });
+                        });
+                    }
+                }
+            }
+        }
+    }, [effectiveActiveTabKey, effectiveTabs, createWebSocketConnection, updateTab]);
 
     // 处理终端就绪事件
     useEffect(() => {
@@ -214,16 +281,136 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
             }
         };
 
+        // 处理标签激活事件
+        const handleTabActivated = (event: CustomEvent) => {
+            const { tabKey, connectionId, sessionId } = event.detail;
+            console.log(`收到标签激活事件: tabKey=${tabKey}`);
+
+            // 找到被激活的标签
+            const tab = effectiveTabs.find(t => t.key === tabKey);
+            if (!tab) {
+                console.error(`未找到被激活的标签: ${tabKey}`);
+                return;
+            }
+
+            // 如果WebSocket未连接或不是打开状态，创建新连接
+            const wsRef = tab.webSocketRef?.current;
+            const needConnection = !wsRef ||
+                (wsRef.readyState !== WebSocket.OPEN &&
+                    wsRef.readyState !== WebSocket.CONNECTING);
+
+            if (needConnection && tab.sessionId) {
+                // 尝试创建WebSocket连接
+                if (createWebSocketConnection && tab.sessionId) {
+                    try {
+                        console.log(`主动为活动标签 ${tabKey} 创建WebSocket连接`);
+
+                        // 更新标签状态为正在连接
+                        updateTab(tabKey, {
+                            isConnected: false,
+                            status: 'connecting'
+                        });
+
+                        const ws = createWebSocketConnection(tab.sessionId, tabKey);
+                        if (ws) {
+                            // 如果tab有webSocketRef，将创建的WebSocket实例保存到引用中
+                            if (tab.webSocketRef) {
+                                tab.webSocketRef.current = ws;
+                                console.log(`标签激活: 已创建并保存WebSocket连接到标签 ${tabKey}`);
+
+                                // 监听WebSocket消息事件
+                                ws.addEventListener('message', async (event) => {
+                                    try {
+                                        let data = event.data;
+
+                                        // 如果数据是Blob类型，需要先转换为文本
+                                        if (data instanceof Blob) {
+                                            data = await data.text();
+                                        }
+
+                                        // 处理消息数据
+                                        if (typeof data === 'string') {
+                                            try {
+                                                // 尝试解析为JSON
+                                                const jsonData = JSON.parse(data);
+                                                // 在这里处理JSON数据
+                                            } catch (jsonError) {
+                                                // 不是JSON格式，直接处理文本
+                                                // 在这里处理文本数据
+                                            }
+                                        }
+                                    } catch (error) {
+                                        console.error(`处理WebSocket消息时出错:`, error);
+                                    }
+                                });
+                            }
+                        } else {
+                            console.error(`WebSocket创建失败: tabKey=${tabKey}`);
+
+                            // 标记为连接错误
+                            updateTab(tabKey, {
+                                isConnected: false,
+                                status: 'error',
+                                error: 'WebSocket连接创建失败'
+                            });
+
+                            // 尝试使用备用方法
+                            window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
+                                detail: {
+                                    tabKey,
+                                    connectionId: tab.connectionId,
+                                    sessionId: tab.sessionId
+                                }
+                            }));
+                        }
+                    } catch (error: any) {
+                        console.error(`WebSocket创建错误: tabKey=${tabKey}`, error);
+
+                        // 标记为连接错误
+                        updateTab(tabKey, {
+                            isConnected: false,
+                            status: 'error',
+                            error: `连接错误: ${error.message || '未知错误'}`
+                        });
+
+                        // 尝试使用备用方法
+                        window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
+                            detail: {
+                                tabKey,
+                                connectionId: tab.connectionId,
+                                sessionId: tab.sessionId
+                            }
+                        }));
+                    }
+                } else {
+                    console.log(`无法创建WebSocket连接: createWebSocketConnection未定义或无效, tabKey=${tabKey}`);
+
+                    // 触发terminal-tab-activated事件，让WebSocketManager尝试创建
+                    window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
+                        detail: {
+                            tabKey,
+                            connectionId: tab.connectionId,
+                            sessionId: tab.sessionId
+                        }
+                    }));
+                }
+            } else {
+                console.log(`标签 ${tabKey} 已有WebSocket连接或无会话ID，无需创建新连接`);
+            }
+        };
+
         // 添加事件监听器
         window.addEventListener('terminal-ready', handleTerminalReady as EventListener);
         window.addEventListener('terminal-reconnect', handleTerminalReconnect as EventListener);
         window.addEventListener('terminal-tab-refresh', handleTerminalRefresh as EventListener);
+        window.addEventListener('terminal-tab-activated', handleTabActivated as EventListener);
 
         // 清理函数
         return () => {
             window.removeEventListener('terminal-ready', handleTerminalReady as EventListener);
             window.removeEventListener('terminal-reconnect', handleTerminalReconnect as EventListener);
             window.removeEventListener('terminal-tab-refresh', handleTerminalRefresh as EventListener);
+            window.removeEventListener('terminal-tab-activated', handleTabActivated as EventListener);
         };
     }, [updateTab, effectiveTabs, effectiveActiveTabKey, effectiveSetActiveTab, createWebSocketConnection]);
 

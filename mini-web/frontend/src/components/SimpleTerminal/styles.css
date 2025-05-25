@@ -1,38 +1,297 @@
 /* SimpleTerminal组件样式 */
 
 .simple-terminal-container {
-  display: flex;
-  flex-direction: column;
   width: 100%;
   height: 100%;
-  min-height: 100%;
-  background-color: #1e1e1e;
-  color: #ffffff;
-  font-family: 'Courier New', monospace;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #e2e8f0;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 14px;
   line-height: 1.5;
-  overflow: hidden;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
-.simple-terminal-output {
+/* 加载状态 */
+.terminal-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  border-radius: 8px;
+}
+
+.terminal-loading .ant-spin-text {
+  color: #ffffff;
+}
+
+/* 错误状态 */
+.terminal-error {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  padding: 20px;
+  border-radius: 8px;
+}
+
+.error-message {
+  color: #ff6b6b;
+  margin-bottom: 16px;
+  text-align: center;
+  font-size: 16px;
+}
+
+.reconnect-button {
+  background-color: #007acc;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.reconnect-button:hover {
+  background-color: #005a9e;
+}
+
+/* 终端输出区域 */
+.terminal-output {
   flex: 1;
   overflow-y: auto;
-  padding: 10px;
+  padding: 12px 16px;
+  background: transparent;
   white-space: pre-wrap;
+  word-wrap: break-word;
+  backdrop-filter: blur(10px);
+}
+
+/* 终端行 */
+.terminal-line {
+  margin: 0;
+  padding: 6px 12px;
+  min-height: 1.5em;
   word-break: break-all;
+  border-radius: 4px;
+  margin-bottom: 1px;
+  transition: background-color 0.2s ease;
 }
 
-.simple-terminal-line {
-  line-height: 1.3;
-  margin-bottom: 2px;
+/* 交替行背景 */
+.terminal-line:nth-child(even) {
+  background-color: rgba(15, 23, 42, 0.3);
 }
 
-.simple-terminal-input-container {
+.terminal-line:nth-child(odd) {
+  background-color: rgba(30, 41, 59, 0.2);
+}
+
+/* 鼠标悬停效果 */
+.terminal-line:hover {
+  background-color: rgba(59, 130, 246, 0.1) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* 当前输入行 */
+.terminal-input-line {
   display: flex;
-  padding: 5px 10px;
-  background-color: #1a1a1a;
-  border-top: 1px solid #333;
+  align-items: baseline;
+  margin: 0;
+  padding: 8px 12px;
+  min-height: 1.5em;
+  line-height: 1.5;
+  background-color: rgba(59, 130, 246, 0.05);
+  border-radius: 4px;
+  border-left: 3px solid #3b82f6;
+  margin-top: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.terminal-prompt {
+  color: #10b981;
+  white-space: pre;
+  font-weight: 500;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.terminal-input-before,
+.terminal-input-after {
+  color: #f1f5f9;
+  white-space: pre;
+  font-family: inherit;
+  word-break: keep-all;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* 光标样式 */
+.terminal-cursor {
+  background: linear-gradient(45deg, #3b82f6, #06b6d4);
+  color: #ffffff;
+  display: inline-block;
+  width: 1ch;
+  min-width: 8px;
+  height: 1.3em;
+  animation: blink 1s infinite;
+  vertical-align: baseline;
+  white-space: pre;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+}
+
+.terminal-cursor.visible {
+  background: linear-gradient(45deg, #3b82f6, #06b6d4);
+  color: #ffffff;
+}
+
+@keyframes blink {
+  0%, 50% {
+    background: linear-gradient(45deg, #3b82f6, #06b6d4);
+    color: #ffffff;
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+  }
+  51%, 100% {
+    background: transparent;
+    color: #f1f5f9;
+    box-shadow: none;
+  }
+}
+
+/* 隐藏的输入焦点元素 */
+.terminal-input-focus {
+  position: absolute;
+  left: -9999px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 滚动条样式 */
+.terminal-output::-webkit-scrollbar {
+  width: 6px;
+}
+
+.terminal-output::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+  border-radius: 3px;
+}
+
+.terminal-output::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #3b82f6, #1e40af);
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.terminal-output::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #60a5fa, #3b82f6);
+}
+
+/* ANSI颜色支持 */
+.ansi-black { color: #000000; }
+.ansi-red { color: #cd3131; }
+.ansi-green { color: #0dbc79; }
+.ansi-yellow { color: #e5e510; }
+.ansi-blue { color: #2472c8; }
+.ansi-magenta { color: #bc3fbc; }
+.ansi-cyan { color: #11a8cd; }
+.ansi-white { color: #e5e5e5; }
+
+.ansi-bright-black { color: #666666; }
+.ansi-bright-red { color: #f14c4c; }
+.ansi-bright-green { color: #23d18b; }
+.ansi-bright-yellow { color: #f5f543; }
+.ansi-bright-blue { color: #3b8eea; }
+.ansi-bright-magenta { color: #d670d6; }
+.ansi-bright-cyan { color: #29b8db; }
+.ansi-bright-white { color: #ffffff; }
+
+/* 背景色 */
+.ansi-bg-black { background-color: #000000; }
+.ansi-bg-red { background-color: #cd3131; }
+.ansi-bg-green { background-color: #0dbc79; }
+.ansi-bg-yellow { background-color: #e5e510; }
+.ansi-bg-blue { background-color: #2472c8; }
+.ansi-bg-magenta { background-color: #bc3fbc; }
+.ansi-bg-cyan { background-color: #11a8cd; }
+.ansi-bg-white { background-color: #e5e5e5; }
+
+/* 文本样式 */
+.ansi-bold { font-weight: bold; }
+.ansi-dim { opacity: 0.5; }
+.ansi-italic { font-style: italic; }
+.ansi-underline { text-decoration: underline; }
+.ansi-strikethrough { text-decoration: line-through; }
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .simple-terminal-container {
+    font-size: 12px;
+  }
+  
+  .terminal-output {
+    padding: 6px 8px;
+  }
+}
+
+/* 选中文本样式 */
+.terminal-output::selection,
+.terminal-line::selection {
+  background: linear-gradient(45deg, rgba(59, 130, 246, 0.3), rgba(139, 92, 246, 0.3));
+  color: #ffffff;
+  backdrop-filter: blur(2px);
+}
+
+/* 焦点状态 */
+.simple-terminal-container:focus-within {
+  outline: 2px solid rgba(59, 130, 246, 0.6);
+  outline-offset: -2px;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1), 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* 新样式：输入行和光标 */
+.simple-terminal-input-line {
+  display: flex;
+  line-height: 1.3;
+  margin-top: 5px;
+  align-items: baseline;
+}
+
+.terminal-prompt {
+  color: #3aa6ff;
+  font-weight: bold;
+  padding-right: 5px;
+}
+
+.terminal-input-text {
+  white-space: pre;
+}
+
+.terminal-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 18px;
+  background-color: #ffffff;
+  vertical-align: middle;
+  position: relative;
+  animation: blink 1s step-end infinite;
+  margin-left: 1px;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* 隐藏旧的输入容器 */
+.simple-terminal-input-container {
+  display: none;
 }
 
 .simple-terminal-input {
@@ -97,9 +356,73 @@
   background: transparent;
   min-height: 100px;
   min-width: 100px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+}
+
+.loading-tip {
+  color: #ffffff;
+  font-size: 14px;
+  margin-top: 16px;
+  text-align: center;
 }
 
 /* 欢迎消息样式 */
+.welcome-line {
+  text-align: center;
+  margin: 4px 0;
+  padding: 8px 16px;
+  background: rgba(59, 130, 246, 0.05) !important;
+  border-radius: 6px;
+  animation: fadeIn 0.8s ease-in;
+  backdrop-filter: blur(5px);
+}
+
+.welcome-separator {
+  color: #a855f7 !important;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(168, 85, 247, 0.3);
+}
+
+.welcome-title {
+  color: #10b981 !important;
+  font-weight: 700;
+  font-size: 18px;
+  text-shadow: 0 1px 3px rgba(16, 185, 129, 0.3);
+}
+
+.welcome-success {
+  color: #f59e0b !important;
+  font-weight: 500;
+  text-shadow: 0 1px 3px rgba(245, 158, 11, 0.3);
+}
+
+.welcome-tip {
+  color: #06b6d4 !important;
+  font-style: italic;
+  font-size: 14px;
+  text-shadow: 0 1px 3px rgba(6, 182, 212, 0.3);
+}
+
+.welcome-contact {
+  color: #8b5cf6 !important;
+  font-size: 14px;
+  text-shadow: 0 1px 3px rgba(139, 92, 246, 0.3);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .simple-terminal-welcome {
   color: #3aa6ff;
   margin-bottom: 10px;

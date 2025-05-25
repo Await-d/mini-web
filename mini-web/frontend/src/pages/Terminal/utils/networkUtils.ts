@@ -5,7 +5,7 @@
  * 发送ping消息并计算接收pong响应的时间差
  */
 export const measureNetworkLatency = (
-  ws: WebSocket, 
+  ws: WebSocket,
   callback: (latency: number) => void
 ): void => {
   if (ws.readyState !== WebSocket.OPEN) {
@@ -16,16 +16,16 @@ export const measureNetworkLatency = (
   try {
     // 记录发送时间
     const startTime = Date.now();
-    
+
     // 发送ping消息
     const pingMessage = JSON.stringify({
       type: 'ping',
       timestamp: startTime
     });
-    
+
     // 发送ping消息
     ws.send(pingMessage);
-    
+
     // 设置一次性消息处理器来接收pong响应
     const originalOnMessage = ws.onmessage;
     const messageHandler = (event: MessageEvent) => {
@@ -35,10 +35,10 @@ export const measureNetworkLatency = (
           // 计算延迟
           const endTime = Date.now();
           const latency = endTime - startTime;
-          
+
           // 调用回调函数
           callback(latency);
-          
+
           // 恢复原始消息处理器
           ws.onmessage = originalOnMessage;
         } else if (originalOnMessage) {
@@ -54,10 +54,10 @@ export const measureNetworkLatency = (
         }
       }
     };
-    
+
     // 设置临时消息处理器
     ws.onmessage = messageHandler;
-    
+
     // 设置超时，避免永久等待
     setTimeout(() => {
       // 如果当前消息处理器仍然是我们设置的，则恢复原始处理器

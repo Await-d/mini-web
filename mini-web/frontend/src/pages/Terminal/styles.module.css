@@ -2,26 +2,30 @@
 .terminalLayout {
   display: flex;
   flex-direction: column;
-  height: 100%;
   width: 100%;
+  height: 100vh;
   overflow: hidden;
 }
 
 /* 终端内容区 */
 .terminalContent {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
   background-color: #1e1e1e;
 }
 
 /* 终端容器盒子 */
 .terminalContainerBox {
+  display: flex;
+  flex-direction: column;
   flex: 1;
-  position: relative;
   overflow: hidden;
+  position: relative;
+  min-height: 300px; /* 确保有最小高度 */
+  height: calc(100vh - 50px); /* 减去标签页高度 */
 }
 
 /* 终端容器集合 */
