@@ -7,10 +7,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Card, Statistic, Row, Col, Button, Progress, Table, Badge, Typography, Divider, Tooltip } from 'antd';
+import { Card, Statistic, Row, Col, Button, Progress, Table, Badge, Typography, Divider, Tooltip, Space } from 'antd';
 import { ReloadOutlined, LinkOutlined, DisconnectOutlined, WarningOutlined } from '@ant-design/icons';
 import type { WebSocketStats } from '../services/WebSocketService';
-import { useWebSocketManager } from '../hooks/useWebSocketManager';
+import webSocketService from '../services/WebSocketService';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -48,7 +48,19 @@ const styles = {
  * WebSocket统计组件
  */
 const WebSocketStatistics: React.FC = () => {
-    const { stats, resetStats } = useWebSocketManager();
+    const [stats, setStats] = useState<WebSocketStats>(webSocketService.getStats());
+
+    // 更新统计数据
+    useEffect(() => {
+        const updateStats = () => {
+            setStats(webSocketService.getStats());
+        };
+
+        // 定期更新统计
+        const interval = setInterval(updateStats, 1000);
+
+        return () => clearInterval(interval);
+    }, []);
     const [refreshTrigger, setRefreshTrigger] = useState(0);
 
     // 格式化时间
@@ -71,7 +83,8 @@ const WebSocketStatistics: React.FC = () => {
 
     // 重置统计数据
     const handleReset = () => {
-        resetStats();
+        webSocketService.resetStats();
+        setStats(webSocketService.getStats());
         setRefreshTrigger(prev => prev + 1);
     };
 
@@ -120,114 +133,175 @@ const WebSocketStatistics: React.FC = () => {
     };
 
     return (
-        <Card
-            title={
-                <div style={styles.titleRow}>
-                    <Title level={4}>
-                        WebSocket连接统计
-                        <Badge
-                            status={getConnectionStatus()}
-                            style={{ marginLeft: '12px' }}
-                        />
+        <div className="websocket-statistics">
+            {/* 顶部工具栏 */}
+            <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 16
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <Title level={5} style={{ margin: 0 }}>
+                        连接统计
                     </Title>
+                    <Badge
+                        status={getConnectionStatus()}
+                        style={{ marginLeft: 8 }}
+                    />
+                </div>
+                <Space>
                     <Button
                         icon={<ReloadOutlined />}
                         onClick={handleRefresh}
                         size="small"
+                        type="text"
                     >
                         刷新
                     </Button>
-                </div>
-            }
-            style={styles.statisticsCard}
-        >
-            {/* 主要统计指标 */}
-            <Row gutter={16}>
-                <Col span={6} style={styles.statisticItem}>
-                    <Statistic
-                        title="活跃连接"
-                        value={stats.activeConnections}
-                        prefix={<LinkOutlined />}
-                        valueStyle={{ color: stats.activeConnections > 0 ? '#52c41a' : '#bfbfbf' }}
-                    />
-                </Col>
-                <Col span={6} style={styles.statisticItem}>
-                    <Statistic
-                        title="总连接数"
-                        value={stats.totalConnections}
-                    />
-                </Col>
-                <Col span={6} style={styles.statisticItem}>
-                    <Statistic
-                        title="重连次数"
-                        value={stats.reconnections}
-                        valueStyle={{ color: stats.reconnections > 0 ? '#faad14' : '#bfbfbf' }}
-                    />
-                </Col>
-                <Col span={6} style={styles.statisticItem}>
-                    <Statistic
-                        title="连接失败"
-                        value={stats.failedConnections}
-                        prefix={<DisconnectOutlined />}
-                        valueStyle={{ color: stats.failedConnections > 0 ? '#ff4d4f' : '#bfbfbf' }}
-                    />
-                </Col>
-            </Row>
+                </Space>
+            </div>
 
-            <Divider />
-
-            {/* 数据传输统计 */}
-            <Row gutter={16}>
-                <Col span={8} style={styles.statisticItem}>
-                    <Statistic
-                        title="发送数据"
-                        value={formatDataSize(stats.totalDataSent)}
-                    />
+            {/* 核心指标卡片 */}
+            <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+                <Col span={12}>
+                    <Card size="small" style={{ textAlign: 'center' }}>
+                        <Statistic
+                            title="活跃连接"
+                            value={stats.activeConnections}
+                            prefix={<LinkOutlined style={{ color: '#52c41a' }} />}
+                            valueStyle={{
+                                color: stats.activeConnections > 0 ? '#52c41a' : '#bfbfbf',
+                                fontSize: '20px',
+                                fontWeight: 'bold'
+                            }}
+                        />
+                    </Card>
                 </Col>
-                <Col span={8} style={styles.statisticItem}>
-                    <Statistic
-                        title="接收数据"
-                        value={formatDataSize(stats.totalDataReceived)}
-                    />
-                </Col>
-                <Col span={8} style={styles.statisticItem}>
-                    <Tooltip title="成功建立连接的百分比">
+                <Col span={12}>
+                    <Card size="small" style={{ textAlign: 'center' }}>
                         <Statistic
                             title="连接成功率"
                             value={successRate}
                             suffix="%"
-                            precision={0}
-                            valueStyle={{ color: successRate > 90 ? '#52c41a' : successRate > 70 ? '#faad14' : '#ff4d4f' }}
+                            valueStyle={{
+                                color: successRate > 90 ? '#52c41a' : successRate > 70 ? '#faad14' : '#ff4d4f',
+                                fontSize: '20px',
+                                fontWeight: 'bold'
+                            }}
                         />
-                    </Tooltip>
+                    </Card>
                 </Col>
             </Row>
 
-            <Divider />
+            {/* 统计详情 */}
+            <Card size="small" title="连接详情" style={{ marginBottom: 16 }}>
+                <Row gutter={[12, 8]}>
+                    <Col span={8}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#1890ff' }}>
+                                {stats.totalConnections}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#8c8c8c' }}>总连接数</div>
+                        </div>
+                    </Col>
+                    <Col span={8}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{
+                                fontSize: '18px',
+                                fontWeight: 'bold',
+                                color: stats.reconnections > 0 ? '#faad14' : '#bfbfbf'
+                            }}>
+                                {stats.reconnections}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#8c8c8c' }}>重连次数</div>
+                        </div>
+                    </Col>
+                    <Col span={8}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{
+                                fontSize: '18px',
+                                fontWeight: 'bold',
+                                color: stats.failedConnections > 0 ? '#ff4d4f' : '#bfbfbf'
+                            }}>
+                                {stats.failedConnections}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#8c8c8c' }}>连接失败</div>
+                        </div>
+                    </Col>
+                </Row>
+            </Card>
+
+            {/* 数据传输 */}
+            <Card size="small" title="数据传输" style={{ marginBottom: 16 }}>
+                <Row gutter={[12, 8]}>
+                    <Col span={12}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#52c41a' }}>
+                                {formatDataSize(stats.totalDataSent)}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#8c8c8c' }}>发送数据</div>
+                        </div>
+                    </Col>
+                    <Col span={12}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#1890ff' }}>
+                                {formatDataSize(stats.totalDataReceived)}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#8c8c8c' }}>接收数据</div>
+                        </div>
+                    </Col>
+                </Row>
+            </Card>
 
             {/* 协议分布 */}
-            <Title level={5}>协议分布</Title>
-            <Table
-                dataSource={protocolData}
-                columns={protocolColumns}
-                pagination={false}
-                size="small"
-                rowKey="protocol"
-            />
+            {protocolData.length > 0 && (
+                <Card size="small" title="协议分布" style={{ marginBottom: 16 }}>
+                    <div style={{ padding: '8px 0' }}>
+                        {protocolData.map(({ protocol, count, percent }) => (
+                            <div key={protocol} style={{ marginBottom: 8 }}>
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    marginBottom: 4
+                                }}>
+                                    <Text strong>{protocol.toUpperCase()}</Text>
+                                    <Text>{count}个连接</Text>
+                                </div>
+                                <Progress
+                                    percent={percent}
+                                    size="small"
+                                    status="active"
+                                    strokeColor="#1890ff"
+                                />
+                            </div>
+                        ))}
+                    </div>
+                </Card>
+            )}
 
             {/* 时间信息 */}
-            <div style={styles.timeInfo}>
-                <div>最近连接时间: {formatTime(stats.lastConnectionTime)}</div>
-                <div>最近断开时间: {formatTime(stats.lastDisconnectionTime)}</div>
-            </div>
+            <Card size="small" title="连接记录">
+                <div style={{ fontSize: '12px', color: '#8c8c8c', lineHeight: '1.6' }}>
+                    <div>最近连接时间: {formatTime(stats.lastConnectionTime)}</div>
+                    <div>最近断开时间: {formatTime(stats.lastDisconnectionTime)}</div>
+                </div>
 
-            {/* 操作按钮 */}
-            <div style={styles.actionsRow}>
-                <Button onClick={handleReset} icon={<ReloadOutlined />}>
-                    重置统计
-                </Button>
-            </div>
-        </Card>
+                {/* 操作按钮 */}
+                <div style={{ marginTop: 12, textAlign: 'center' }}>
+                    <Button
+                        onClick={handleReset}
+                        icon={<ReloadOutlined />}
+                        size="small"
+                        type="text"
+                        style={{ fontSize: '12px' }}
+                    >
+                        重置统计
+                    </Button>
+                </div>
+            </Card>
+        </div>
     );
 };
 

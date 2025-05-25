@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-25 19:34:00
+ * @LastEditTime: 2025-05-25 20:14:39
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -53,6 +53,45 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     // 提示符正则表达式 - 更宽松的匹配模式
     const promptRegex = /.*[@].*[$#]\s*$/;
 
+    // 检查是否是系统消息
+    const isSystemMessage = useCallback((text: string) => {
+        // 连接ID模式：conn-X-session-XXX-XXXXXXXXXXXX
+        const connectionIdPattern = /^conn-\d+-session-\d+-\d+$/;
+
+        // JSON初始化消息模式
+        const jsonInitPattern = /^\s*\{.*"type"\s*:\s*"init".*\}\s*$/;
+
+        // WebSocket系统消息模式
+        const systemPatterns = [
+            connectionIdPattern,
+            jsonInitPattern,
+            /^WebSocket\s+connected/i,
+            /^Connection\s+established/i,
+            /^Session\s+initialized/i,
+            /^\s*\{.*"type"\s*:\s*"heartbeat".*\}\s*$/
+        ];
+
+        // 检查是否匹配任何系统消息模式
+        return systemPatterns.some(pattern => pattern.test(text.trim()));
+    }, []);
+
+    // 清理文本，移除系统消息部分
+    const cleanSystemMessages = useCallback((text: string) => {
+        // 移除JSON系统消息
+        let cleaned = text.replace(/\s*\{[^{}]*"type"\s*:\s*"(init|heartbeat)"[^{}]*\}\s*/g, '');
+
+        // 移除连接ID
+        cleaned = cleaned.replace(/\s*conn-\d+-session-\d+-\d+\s*/g, '');
+
+        // 移除null字符
+        cleaned = cleaned.replace(/\^@/g, '');
+
+        // 移除多余的空白
+        cleaned = cleaned.trim();
+
+        return cleaned;
+    }, []);
+
     const outputRef = useRef<HTMLDivElement>(null);
     const terminalContainerRef = useRef<HTMLDivElement>(null);
     const terminalRef = useRef<HTMLDivElement>(null);
@@ -70,9 +109,26 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
 
     // 处理服务器返回的数据
     const processServerData = useCallback((text: string) => {
+        console.log('收到WebSocket消息(文本):', text);
+
+        // 先清理系统消息部分
+        const cleanedText = cleanSystemMessages(text);
+
+        // 如果清理后没有内容，则忽略
+        if (!cleanedText) {
+            console.log('清理后无有效内容，忽略消息:', text);
+            return;
+        }
+
+        // 检查清理后的文本是否是纯系统消息
+        if (isSystemMessage(cleanedText)) {
+            console.log('忽略系统消息:', cleanedText);
+            return;
+        }
+
         try {
             // 尝试解析为JSON
-            const data = JSON.parse(text);
+            const data = JSON.parse(cleanedText);
             if (data.type === 'data' && data.data) {
                 // 处理命令执行结果
                 const lines = data.data.split('\n').filter((line: string) => line.trim());
@@ -86,30 +142,36 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 setLoading(false);
             } else if (data.type === 'heartbeat_response') {
                 console.log('收到心跳响应');
+                //TODO 心跳响应
+            } else if (data.type === 'init') {
+                // 忽略初始化消息，不在终端中显示
+                console.log('收到初始化消息，已忽略显示');
+                return;
             }
         } catch (jsonError) {
-            // 如果不是JSON，处理为终端文本输出
-            console.log('处理文本数据:', text);
-
-            // 分行处理文本
-            const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+            // 分行处理文本 - 使用清理后的文本
+            const lines = cleanedText.split('\n').map(line => line.trim()).filter(line => line);
 
             // 检查每一行，找到最后一个提示符
             let newPrompt: string | null = null;
             const outputLines: string[] = [];
 
             for (const line of lines) {
+                // 跳过系统消息行
+                if (isSystemMessage(line)) {
+                    console.log('跳过系统消息行:', line);
+                    continue;
+                }
+
                 if (promptRegex.test(line)) {
                     // 这是一个提示符
                     newPrompt = line;
-                    console.log('检测到提示符:', line);
                 } else if (line.trim()) {
                     // 检查是否是服务器返回的控制字符回显，如果是则忽略
                     const trimmedLine = line.trim();
 
                     // 忽略服务器返回的控制字符回显
                     if (trimmedLine === '^C' || trimmedLine === '^D' || trimmedLine === '^Z') {
-                        console.log('忽略服务器回显的控制字符:', line);
                         continue;
                     }
 
@@ -122,11 +184,9 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     if (normalizedLastCommand &&
                         (normalizedLine === normalizedLastCommand ||
                             trimmedLine === trimmedLastCommand)) {
-                        console.log('忽略服务器回显的命令:', line, '(lastSentCommand:', lastSentCommand, ')');
-                        // 不在这里清除lastSentCommand，等到收到新提示符时再清除
+                        // 这是命令回显，跳过
+                        continue;
                     } else {
-                        // 这是真正的命令输出
-                        console.log('添加输出行:', line, '(lastSentCommand:', lastSentCommand, ')');
                         outputLines.push(line);
                     }
                 }
@@ -137,7 +197,6 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 setCurrentPrompt(newPrompt);
                 // 收到新提示符说明命令执行完成，清除lastSentCommand
                 if (lastSentCommand) {
-                    console.log('收到新提示符，清除lastSentCommand:', lastSentCommand);
                     setLastSentCommand('');
                 }
             }
@@ -149,7 +208,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
 
             scrollToBottom();
         }
-    }, [promptRegex, scrollToBottom]);
+    }, [promptRegex, scrollToBottom, isSystemMessage, cleanSystemMessages, lastSentCommand]);
 
     // 光标闪烁效果
     useEffect(() => {
@@ -158,11 +217,6 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         }, 500);
         return () => clearInterval(interval);
     }, []);
-
-    // 调试：监听currentPrompt变化
-    useEffect(() => {
-        console.log('currentPrompt 变化:', currentPrompt);
-    }, [currentPrompt]);
 
     // 处理WebSocket消息
     useEffect(() => {
@@ -194,7 +248,6 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         }
 
         const handleOpen = () => {
-            console.log('WebSocket已连接');
             setConnectionStatus('connected');
             setLoading(false);
             setError(null);
@@ -223,7 +276,6 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         };
 
         const handleClose = () => {
-            console.log('WebSocket已关闭');
             setConnectionStatus('disconnected');
             setError('终端连接已关闭');
         };
@@ -455,7 +507,6 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     // 渲染当前输入行
     const renderCurrentInputLine = () => {
         if (!currentPrompt) {
-            console.log('没有提示符，无法渲染输入行');
             return null;
         }
 

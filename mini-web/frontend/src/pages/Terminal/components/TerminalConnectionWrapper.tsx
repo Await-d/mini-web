@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-09 18:05:28
  * @LastEditors: Await
- * @LastEditTime: 2025-05-25 19:00:28
+ * @LastEditTime: 2025-05-25 19:53:33
  * @Description: 终端连接包装器组件
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
@@ -13,6 +13,8 @@ import { connectionAPI, sessionAPI, API_BASE_URL } from '../../../services/api';
 import { terminalStateRef } from '../../../contexts/TerminalContext';
 import { message } from 'antd';
 import { useNavigate } from 'react-router-dom';
+import webSocketService from '../services/WebSocketService';
+import type { WebSocketEventHandlers } from '../services/WebSocketService';
 
 /**
  * 终端连接包装器组件
@@ -92,42 +94,12 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
     }
 
     try {
-      // 获取认证token
-      const token = localStorage.getItem('token');
-      if (!token) {
-        console.error('无法创建WebSocket连接: 缺少认证token');
-        message.error('终端连接失败：未登录或会话已过期');
-        return null;
-      }
-
-      // 从API_BASE_URL中提取主机和路径
-      // 将http://localhost:8080/api转换为ws://localhost:8080
-      const apiUrl = new URL(API_BASE_URL);
-      const protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-      const apiHost = apiUrl.host; // 包括端口号
-
       // 查找对应的标签页，获取连接信息
       const tab = terminalStateRef.current?.tabs.find(t => t.key === tabKey);
-
-      // 获取连接的协议类型 - 有效值为: ssh, rdp, vnc, telnet
-      let connProtocol = 'ssh'; // 默认使用ssh
-
-      // 如果标签页存在且有连接信息，则获取实际协议类型
-      if (tab?.connection?.protocol) {
-        // 确保协议类型是有效的
-        const protocol = tab.connection.protocol.toLowerCase();
-        if (['ssh', 'rdp', 'vnc', 'telnet'].includes(protocol)) {
-          connProtocol = protocol;
-        }
+      if (!tab) {
+        console.error('无法创建WebSocket连接: 找不到对应的标签页');
+        return null;
       }
-
-      // 构建WebSocket URL，确保查询参数格式正确
-      const wsUrl = `${protocol}//${apiHost}/ws/${connProtocol}/${sessionId}?token=${encodeURIComponent(token)}`;
-
-      console.log(`创建WebSocket连接: ${wsUrl}`);
-
-      // 创建WebSocket连接
-      const ws = new WebSocket(wsUrl);
 
       // 创建消息队列和处理器
       const messageQueue: any[] = [];
@@ -161,6 +133,71 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
           }
         }
       };
+
+      // 设置WebSocket事件处理器
+      const handlers: WebSocketEventHandlers = {
+        onOpen: (ws: WebSocket) => {
+          console.log(`WebSocket连接已打开: ${tabKey}`);
+          setIsConnected(true);
+
+          // 更新标签页状态
+          updateTab(tabKey, {
+            status: 'connected',
+            webSocketRef: { current: ws }
+          });
+
+          // 触发连接事件
+          window.dispatchEvent(new CustomEvent('terminal-ws-connected', {
+            detail: { tabKey, sessionId, connectionId }
+          }));
+        },
+
+        onMessage: (event: MessageEvent) => {
+          // 处理消息队列
+          messageQueue.push(event.data);
+          processMessageQueue();
+        },
+
+        onClose: () => {
+          console.log(`WebSocket连接已关闭: ${tabKey}`);
+          setIsConnected(false);
+
+          // 更新标签页状态
+          updateTab(tabKey, {
+            status: 'disconnected',
+            webSocketRef: { current: null }
+          });
+
+          // 触发断开事件
+          window.dispatchEvent(new CustomEvent('terminal-ws-disconnected', {
+            detail: { tabKey }
+          }));
+        },
+
+        onError: (event: Event) => {
+          console.error(`WebSocket连接错误: ${tabKey}`, event);
+          setIsConnected(false);
+
+          // 更新标签页状态
+          updateTab(tabKey, {
+            status: 'error',
+            webSocketRef: { current: null }
+          });
+
+          // 触发错误事件
+          window.dispatchEvent(new CustomEvent('terminal-ws-error', {
+            detail: { tabKey, error: event }
+          }));
+        }
+      };
+
+      // 使用WebSocketService创建连接
+      const ws = webSocketService.connect(tab, handlers);
+
+      if (!ws) {
+        console.error('WebSocketService创建连接失败');
+        return null;
+      }
 
       // 处理单条消息
       const processMessage = async (data: any, tabKey: string) => {
@@ -233,46 +270,6 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
           }
         } catch (error) {
           console.error(`处理WebSocket消息时出错: ${tabKey}`, error);
-        }
-      };
-
-      // 设置WebSocket事件处理程序
-      ws.onopen = () => {
-        console.log(`WebSocket连接已打开: ${tabKey}`);
-        updateTab(tabKey, {
-          isConnected: true,
-          status: 'connected',
-          lastReconnectTime: new Date().toISOString(),
-          reconnectCount: (tab?.reconnectCount || 0) + 1
-        });
-      };
-
-      ws.onclose = (event) => {
-        console.log(`WebSocket连接已关闭: ${tabKey}, 代码: ${event.code}, 原因: ${event.reason}`);
-        updateTab(tabKey, {
-          isConnected: false,
-          status: 'disconnected'
-        });
-      };
-
-      ws.onerror = (error) => {
-        console.error(`WebSocket连接错误: ${tabKey}`, error);
-        updateTab(tabKey, {
-          isConnected: false,
-          status: 'error',
-          error: '连接发生错误',
-          errorTime: new Date().toISOString()
-        });
-      };
-
-      // 添加消息处理函数，使用队列处理消息
-      ws.onmessage = (event) => {
-        // 将消息添加到队列中
-        messageQueue.push(event.data);
-
-        // 开始处理队列（如果没有正在处理）
-        if (!isProcessing) {
-          processMessageQueue();
         }
       };
 

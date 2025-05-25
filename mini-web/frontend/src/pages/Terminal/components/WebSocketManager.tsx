@@ -2,14 +2,14 @@
  * @Author: Await
  * @Date: 2025-05-25 10:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-24 18:41:26
+ * @LastEditTime: 2025-05-25 20:06:32
  * @Description: WebSocket管理器组件
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Drawer, Button, Tabs, Badge, notification, Switch, Form, InputNumber, Divider } from 'antd';
+import { Drawer, Button, Tabs, Badge, notification, Switch, Form, InputNumber, Divider, Card } from 'antd';
 import { LinkOutlined, SettingOutlined, BarChartOutlined, WarningOutlined } from '@ant-design/icons';
-import { useWebSocketManager } from '../hooks/useWebSocketManager';
+import webSocketService from '../services/WebSocketService';
 import WebSocketStatistics from './WebSocketStatistics';
 import WebSocketConnectionDetails from './WebSocketConnectionDetails';
 import { useTerminal } from '../../../contexts/TerminalContext';
@@ -68,15 +68,8 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
     // 获取终端上下文
     const { updateTab } = useTerminal();
 
-    // WebSocket管理器Hook
-    const {
-        stats,
-        connect,
-        disconnect,
-        disconnectAll,
-        refresh,
-        getActiveConnections
-    } = useWebSocketManager();
+    // WebSocket统计状态
+    const [stats, setStats] = useState(webSocketService.getStats());
 
     // 组件状态
     const [drawerVisible, setDrawerVisible] = useState(false);
@@ -110,16 +103,24 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
         }
     }, [stats]);
 
-    // 组件初始化 - 添加WebSocket连接检查定时器
+    // 更新统计数据
     useEffect(() => {
+        const updateStats = () => {
+            setStats(webSocketService.getStats());
+        };
+
+        // 定期更新统计
+        const statsInterval = setInterval(updateStats, 1000);
+
         // 每30秒检查连接状态
         connectionCheckerRef.current = window.setInterval(() => {
-            const activeConnections = getActiveConnections();
+            const activeConnections = webSocketService.getActiveConnections();
 
             // 记录当前连接状态
             console.log(`WebSocket连接状态检查: ${activeConnections.length}个活动连接`);
 
-            // 如果有断开的连接需要重连，可以在这里处理
+            // 更新统计
+            updateStats();
         }, 30000);
 
         // 组件卸载时清理
@@ -128,8 +129,9 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
                 clearInterval(connectionCheckerRef.current);
                 connectionCheckerRef.current = null;
             }
+            clearInterval(statsInterval);
         };
-    }, [getActiveConnections]);
+    }, []);
 
     // 创建WebSocket连接
     const handleCreateWebSocket = useCallback((tab: TerminalTab, handlers: WebSocketEventHandlers) => {
@@ -197,15 +199,15 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
             return ws;
         }
 
-        return connect(tab, handlers);
-    }, [createWebSocketConnection, onCreateWebSocket, connect]);
+        return webSocketService.connect(tab, handlers);
+    }, [createWebSocketConnection, onCreateWebSocket]);
 
     // 关闭WebSocket连接
     const handleCloseWebSocket = (tabKey: string) => {
         if (onCloseWebSocket) {
             onCloseWebSocket(tabKey);
         } else {
-            disconnect(tabKey);
+            webSocketService.closeConnection(tabKey);
         }
     };
 
@@ -428,9 +430,65 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
         // 添加事件监听器
         window.addEventListener('terminal-tab-activated', handleTabActivated as EventListener);
 
+        // 监听重连请求事件
+        const handleReconnectRequest = (event: CustomEvent) => {
+            const { tabKey, tab, connectionId, sessionId } = event.detail;
+            console.log(`WebSocketManager收到重连请求: tabKey=${tabKey}`);
+
+            if (tab && tab.sessionId) {
+                // 创建自定义处理函数
+                const handlers: WebSocketEventHandlers = {
+                    onOpen: (ws) => {
+                        console.log(`重连成功: ${tabKey}`);
+                        updateTab(tab.key, {
+                            isConnected: true,
+                            status: 'connected',
+                            error: undefined
+                        });
+
+                        // 触发终端就绪事件
+                        window.dispatchEvent(new CustomEvent('terminal-ready', {
+                            detail: {
+                                tabKey: tab.key,
+                                connectionId: tab.connectionId,
+                                sessionId: tab.sessionId,
+                                protocol: tab.protocol || 'ssh'
+                            }
+                        }));
+                    },
+                    onClose: () => {
+                        console.log(`重连后断开: ${tabKey}`);
+                        updateTab(tab.key, {
+                            isConnected: false,
+                            status: 'disconnected'
+                        });
+                    },
+                    onError: (event) => {
+                        console.error(`重连失败: ${tabKey}`, event);
+                        updateTab(tab.key, {
+                            isConnected: false,
+                            status: 'error',
+                            error: '重连失败',
+                            errorTime: new Date().toISOString()
+                        });
+                    }
+                };
+
+                // 使用WebSocketService进行重连
+                const ws = webSocketService.refreshConnection(tab, handlers);
+                if (ws && tab.webSocketRef) {
+                    tab.webSocketRef.current = ws;
+                }
+            }
+        };
+
+        // 添加重连事件监听器
+        window.addEventListener('terminal-reconnect-request', handleReconnectRequest as EventListener);
+
         // 组件卸载时移除事件监听器
         return () => {
             window.removeEventListener('terminal-tab-activated', handleTabActivated as EventListener);
+            window.removeEventListener('terminal-reconnect-request', handleReconnectRequest as EventListener);
         };
     }, [tabs, updateTab, createWebSocketConnection]);
 
@@ -461,26 +519,39 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
 
             {/* 管理器抽屉 */}
             <Drawer
-                title="WebSocket连接管理器"
+                title={
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <LinkOutlined style={{ marginRight: '8px', color: '#1890ff' }} />
+                        <span>WebSocket连接管理器</span>
+                        <Badge
+                            status={statusBadge}
+                            style={{ marginLeft: '12px' }}
+                        />
+                    </div>
+                }
                 placement="right"
-                width={680}
+                width={400}
                 onClose={closeDrawer}
                 open={drawerVisible}
+                styles={{
+                    body: { padding: '16px' }
+                }}
             >
                 <Tabs
                     activeKey={activeTab}
                     onChange={setActiveTab}
+                    size="small"
                     items={[
                         {
                             key: 'stats',
                             label: (
                                 <span>
                                     <BarChartOutlined />
-                                    连接统计
+                                    统计
                                 </span>
                             ),
                             children: (
-                                <div style={styles.tabContent}>
+                                <div style={{ marginTop: '8px' }}>
                                     <WebSocketStatistics />
                                 </div>
                             )
@@ -490,12 +561,12 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
                             label: (
                                 <span>
                                     <LinkOutlined />
-                                    活动连接
-                                    <Badge count={stats.activeConnections} style={{ marginLeft: 8 }} />
+                                    连接
+                                    <Badge count={stats.activeConnections} size="small" style={{ marginLeft: 6 }} />
                                 </span>
                             ),
                             children: (
-                                <div style={styles.tabContent}>
+                                <div style={{ marginTop: '8px' }}>
                                     <WebSocketConnectionDetails tabs={tabs} />
                                 </div>
                             )
@@ -509,33 +580,75 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
                                 </span>
                             ),
                             children: (
-                                <div style={styles.tabContent}>
-                                    <h3>WebSocket设置</h3>
-                                    <Divider />
+                                <div style={{ marginTop: '8px' }}>
+                                    <Card size="small" title="连接配置">
+                                        <Form layout="vertical" size="small">
+                                            <Form.Item
+                                                label="自动重连"
+                                                tooltip="连接断开时自动尝试重新连接"
+                                                style={{ marginBottom: '12px' }}
+                                            >
+                                                <Switch defaultChecked size="small" />
+                                            </Form.Item>
 
-                                    <Form layout="vertical">
-                                        <Form.Item label="自动重连" tooltip="当WebSocket连接断开时，是否自动尝试重新连接">
-                                            <Switch defaultChecked />
-                                        </Form.Item>
+                                            <Form.Item
+                                                label="重连最大次数"
+                                                style={{ marginBottom: '12px' }}
+                                            >
+                                                <InputNumber
+                                                    min={1}
+                                                    max={10}
+                                                    defaultValue={5}
+                                                    size="small"
+                                                    style={{ width: '100%' }}
+                                                />
+                                            </Form.Item>
 
-                                        <Form.Item label="重连最大次数" tooltip="在放弃之前尝试重新连接的最大次数">
-                                            <InputNumber min={1} max={10} defaultValue={5} />
-                                        </Form.Item>
+                                            <Form.Item
+                                                label="重连延迟(秒)"
+                                                style={{ marginBottom: '12px' }}
+                                            >
+                                                <InputNumber
+                                                    min={1}
+                                                    max={30}
+                                                    defaultValue={3}
+                                                    size="small"
+                                                    style={{ width: '100%' }}
+                                                />
+                                            </Form.Item>
 
-                                        <Form.Item label="重连延迟(秒)" tooltip="每次重连尝试之间的等待时间">
-                                            <InputNumber min={1} max={30} defaultValue={3} />
-                                        </Form.Item>
+                                            <Form.Item
+                                                label="心跳间隔(秒)"
+                                                style={{ marginBottom: '12px' }}
+                                            >
+                                                <InputNumber
+                                                    min={5}
+                                                    max={60}
+                                                    defaultValue={30}
+                                                    size="small"
+                                                    style={{ width: '100%' }}
+                                                />
+                                            </Form.Item>
+                                        </Form>
+                                    </Card>
 
-                                        <Form.Item label="心跳间隔(秒)" tooltip="保持WebSocket连接活跃的心跳包发送间隔">
-                                            <InputNumber min={5} max={60} defaultValue={30} />
-                                        </Form.Item>
+                                    <Card size="small" title="通知设置" style={{ marginTop: '12px' }}>
+                                        <Form layout="vertical" size="small">
+                                            <Form.Item
+                                                label="连接异常通知"
+                                                style={{ marginBottom: '8px' }}
+                                            >
+                                                <Switch defaultChecked size="small" />
+                                            </Form.Item>
 
-                                        <Divider />
-
-                                        <Form.Item label="连接异常通知" tooltip="当WebSocket连接异常时，是否显示通知">
-                                            <Switch defaultChecked />
-                                        </Form.Item>
-                                    </Form>
+                                            <Form.Item
+                                                label="连接成功通知"
+                                                style={{ marginBottom: '8px' }}
+                                            >
+                                                <Switch size="small" />
+                                            </Form.Item>
+                                        </Form>
+                                    </Card>
                                 </div>
                             )
                         }

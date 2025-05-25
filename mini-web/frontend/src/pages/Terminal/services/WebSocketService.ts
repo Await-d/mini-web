@@ -2,11 +2,12 @@
  * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-23 20:26:08
+ * @LastEditTime: 2025-05-25 20:10:51
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
 import type { TerminalTab } from '../../../contexts/TerminalContext';
+import { API_BASE_URL } from '../../../services/api';
 
 // WebSocket连接统计接口
 export interface WebSocketStats {
@@ -83,10 +84,33 @@ export class WebSocketService {
         }
 
         try {
-            // 创建新的WebSocket连接
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const host = window.location.host;
-            const wsUrl = `${wsProtocol}//${host}/api/ws/terminal/${tab.sessionId}`;
+            // 获取认证token
+            const token = localStorage.getItem('token');
+            if (!token) {
+                console.error('无法创建WebSocket连接: 缺少认证token');
+                this.stats.failedConnections++;
+                return null;
+            }
+
+            // 获取连接的协议类型 - 有效值为: ssh, rdp, vnc, telnet
+            let connProtocol = 'ssh'; // 默认使用ssh
+
+            // 如果标签页存在且有连接信息，则获取实际协议类型
+            if (tab?.connection?.protocol) {
+                // 确保协议类型是有效的
+                const protocol = tab.connection.protocol.toLowerCase();
+                if (['ssh', 'rdp', 'vnc', 'telnet'].includes(protocol)) {
+                    connProtocol = protocol;
+                }
+            }
+
+            // 从API_BASE_URL中提取主机和端口信息
+            const apiUrl = new URL(API_BASE_URL);
+            const wsProtocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = apiUrl.host; // 包含端口号
+
+            // 构建WebSocket URL，不包含/api路径
+            const wsUrl = `${wsProtocol}//${host}/ws/${connProtocol}/${tab.sessionId}?token=${encodeURIComponent(token)}`;
 
             console.log(`创建WebSocket连接: ${wsUrl}`);
             const ws = new WebSocket(wsUrl);
@@ -168,9 +192,11 @@ export class WebSocketService {
         ws.onclose = (event) => {
             console.log(`WebSocket连接已关闭: ${tab.key}`);
 
-            // 更新统计信息
-            this.stats.activeConnections--;
-            this.stats.lastDisconnectionTime = new Date().toISOString();
+            // 更新统计信息 - 只有在连接映射中存在时才减少计数
+            if (this.connections.has(tab.key)) {
+                this.stats.activeConnections = Math.max(0, this.stats.activeConnections - 1);
+                this.stats.lastDisconnectionTime = new Date().toISOString();
+            }
 
             // 清除心跳检测
             this.clearHeartbeat(tab.key);
@@ -293,11 +319,18 @@ export class WebSocketService {
     /**
      * 关闭指定标签的WebSocket连接
      * @param tabKey 标签键
+     * @param preserveHandlers 是否保留处理函数(用于重连)
      */
-    closeConnection(tabKey: string): void {
+    closeConnection(tabKey: string, preserveHandlers: boolean = false): void {
         const ws = this.connections.get(tabKey);
         if (ws) {
             console.log(`关闭WebSocket连接: ${tabKey}`);
+
+            // 更新统计信息 - 如果连接是活跃的，减少活跃连接数
+            if (ws.readyState === WebSocket.OPEN) {
+                this.stats.activeConnections = Math.max(0, this.stats.activeConnections - 1);
+                this.stats.lastDisconnectionTime = new Date().toISOString();
+            }
 
             // 安全关闭WebSocket
             this.closeWebSocket(ws);
@@ -308,8 +341,10 @@ export class WebSocketService {
             // 清除心跳检测
             this.clearHeartbeat(tabKey);
 
-            // 移除处理函数
-            this.handlers.delete(tabKey);
+            // 根据参数决定是否移除处理函数
+            if (!preserveHandlers) {
+                this.handlers.delete(tabKey);
+            }
         }
     }
 
@@ -338,9 +373,10 @@ export class WebSocketService {
     /**
      * 刷新指定标签的WebSocket连接
      * @param tab 终端标签
+     * @param handlers 可选的事件处理函数
      * @returns 新的WebSocket实例或null(如果创建失败)
      */
-    refreshConnection(tab: TerminalTab): WebSocket | null {
+    refreshConnection(tab: TerminalTab, handlers?: WebSocketEventHandlers): WebSocket | null {
         if (!tab || !tab.key) {
             console.error('无法刷新WebSocket连接: 标签缺少必要信息');
             return null;
@@ -348,14 +384,18 @@ export class WebSocketService {
 
         console.log(`刷新WebSocket连接: ${tab.key}`);
 
-        // 先关闭现有连接
-        this.closeConnection(tab.key);
+        // 保存现有的处理函数
+        const existingHandlers = this.handlers.get(tab.key);
+        const finalHandlers = handlers || existingHandlers;
+
+        // 先关闭现有连接，但保留处理函数
+        this.closeConnection(tab.key, true);
 
         // 更新统计信息
         this.stats.reconnections++;
 
-        // 创建新连接
-        return this.connect(tab, this.handlers.get(tab.key));
+        // 创建新连接，使用保存的处理函数
+        return this.connect(tab, finalHandlers);
     }
 
     /**

@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-08 18:19:21
  * @LastEditors: Await
- * @LastEditTime: 2025-05-18 09:14:12
+ * @LastEditTime: 2025-05-25 20:04:07
  * @Description: 请填写简介
  */
 import React from 'react';
@@ -13,7 +13,6 @@ import zhCN from 'antd/lib/locale/zh_CN';
 import { router } from './router';
 import { TerminalProvider } from './contexts/TerminalContext';
 import './index.css';
-
 
 const root = ReactDOM.createRoot(document.getElementById('root')!, {
   onUncaughtError: (error, errorInfo) => {

@@ -2,14 +2,14 @@
  * @Author: Await
  * @Date: 2025-05-25 11:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-25 11:00:00
+ * @LastEditTime: 2025-05-25 20:09:41
  * @Description: WebSocket连接详情组件
  */
 
 import React, { useEffect, useState } from 'react';
 import { Table, Tag, Button, Space, Modal, Card, Descriptions, Badge, Typography, Tooltip, Progress } from 'antd';
 import { LinkOutlined, CloseOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons';
-import { useWebSocketManager } from '../hooks/useWebSocketManager';
+import webSocketService from '../services/WebSocketService';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
 
 const { Text, Title } = Typography;
@@ -41,9 +41,6 @@ interface WebSocketConnectionDetailsProps {
 const WebSocketConnectionDetails: React.FC<WebSocketConnectionDetailsProps> = ({
     tabs = []
 }) => {
-    // WebSocket管理器Hook
-    const { getActiveConnections, refresh, disconnect } = useWebSocketManager();
-
     // 组件状态
     const [connections, setConnections] = useState<any[]>([]);
     const [selectedConnection, setSelectedConnection] = useState<any | null>(null);
@@ -52,7 +49,7 @@ const WebSocketConnectionDetails: React.FC<WebSocketConnectionDetailsProps> = ({
 
     // 获取连接详情
     useEffect(() => {
-        const activeConnections = getActiveConnections();
+        const activeConnections = webSocketService.getActiveConnections();
 
         // 将连接数据转换为表格数据
         const tableData = activeConnections.map(({ tabKey, ws }) => {
@@ -71,7 +68,7 @@ const WebSocketConnectionDetails: React.FC<WebSocketConnectionDetailsProps> = ({
         });
 
         setConnections(tableData);
-    }, [tabs, getActiveConnections, refreshTrigger]);
+    }, [tabs, refreshTrigger]);
 
     // 刷新连接列表
     const handleRefresh = () => {
@@ -92,7 +89,7 @@ const WebSocketConnectionDetails: React.FC<WebSocketConnectionDetailsProps> = ({
             okText: '确定',
             cancelText: '取消',
             onOk: () => {
-                disconnect(tabKey);
+                webSocketService.closeConnection(tabKey);
                 // 更新连接列表
                 setTimeout(() => {
                     handleRefresh();
@@ -107,15 +104,34 @@ const WebSocketConnectionDetails: React.FC<WebSocketConnectionDetailsProps> = ({
         const tab = tabs.find(t => t.key === record.key);
 
         if (tab) {
-            // 先关闭现有连接
-            disconnect(record.key);
+            Modal.confirm({
+                title: '重新连接',
+                content: '确定要重新连接此WebSocket吗？',
+                okText: '确定',
+                cancelText: '取消',
+                onOk: () => {
+                    // 先关闭现有连接
+                    webSocketService.closeConnection(record.key);
 
-            // 重新连接
-            setTimeout(() => {
-                refresh(tab);
-                // 更新连接列表
-                handleRefresh();
-            }, 300);
+                    // 延迟稍长一些，确保连接完全关闭
+                    setTimeout(() => {
+                        // 触发重连事件，让外部组件处理重连逻辑
+                        window.dispatchEvent(new CustomEvent('terminal-reconnect-request', {
+                            detail: {
+                                tabKey: record.key,
+                                tab: tab,
+                                connectionId: tab.connectionId,
+                                sessionId: tab.sessionId
+                            }
+                        }));
+
+                        // 延迟刷新列表，等待重连完成
+                        setTimeout(() => {
+                            handleRefresh();
+                        }, 1000);
+                    }, 500);
+                }
+            });
         }
     };
 
@@ -164,7 +180,7 @@ const WebSocketConnectionDetails: React.FC<WebSocketConnectionDetailsProps> = ({
         {
             title: '操作',
             key: 'action',
-            render: (_, record: any) => (
+            render: (_: any, record: any) => (
                 <Space size="small">
                     <Button
                         size="small"
@@ -198,25 +214,117 @@ const WebSocketConnectionDetails: React.FC<WebSocketConnectionDetailsProps> = ({
 
     return (
         <div className="websocket-connections-details">
-            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Title level={5}>活动WebSocket连接 ({connections.length})</Title>
+            <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 16
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <Title level={5} style={{ margin: 0 }}>
+                        活动连接
+                    </Title>
+                    <Badge
+                        count={connections.length}
+                        style={{ marginLeft: 8 }}
+                        showZero
+                        color="#1890ff"
+                    />
+                </div>
                 <Button
                     icon={<ReloadOutlined />}
                     size="small"
                     onClick={handleRefresh}
+                    type="text"
                 >
                     刷新
                 </Button>
             </div>
 
-            <Table
-                dataSource={connections}
-                columns={columns}
-                rowKey="key"
-                pagination={false}
-                size="small"
-                bordered
-            />
+            {connections.length === 0 ? (
+                <Card size="small">
+                    <div style={{
+                        textAlign: 'center',
+                        padding: '40px 20px',
+                        color: '#8c8c8c'
+                    }}>
+                        <LinkOutlined style={{ fontSize: '32px', marginBottom: '16px' }} />
+                        <div>暂无活动连接</div>
+                        <div style={{ fontSize: '12px', marginTop: '8px' }}>
+                            点击左侧连接列表建立新的WebSocket连接
+                        </div>
+                    </div>
+                </Card>
+            ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {connections.map((connection) => (
+                        <Card
+                            key={connection.key}
+                            size="small"
+                            style={{
+                                border: '1px solid #f0f0f0',
+                                borderRadius: '8px'
+                            }}
+                        >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                                        <Text strong style={{ fontSize: '14px' }}>
+                                            {connection.tabName}
+                                        </Text>
+                                        <Tag
+                                            color={connection.protocol === 'ssh' ? 'blue' : connection.protocol === 'rdp' ? 'purple' : 'default'}
+                                            style={{ marginLeft: '8px' }}
+                                        >
+                                            {connection.protocol.toUpperCase()}
+                                        </Tag>
+                                        <Badge
+                                            status={
+                                                connection.state === 'OPEN' ? 'success' :
+                                                    connection.state === 'CONNECTING' ? 'processing' :
+                                                        connection.state === 'CLOSING' ? 'warning' : 'error'
+                                            }
+                                            text={connection.state}
+                                            style={{ marginLeft: '8px' }}
+                                        />
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#8c8c8c' }}>
+                                        会话ID: {connection.sessionId || '未知'}
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                    <Tooltip title="查看详情">
+                                        <Button
+                                            size="small"
+                                            type="text"
+                                            icon={<InfoCircleOutlined />}
+                                            onClick={() => handleViewDetails(connection)}
+                                        />
+                                    </Tooltip>
+                                    <Tooltip title="重新连接">
+                                        <Button
+                                            size="small"
+                                            type="text"
+                                            icon={<ReloadOutlined />}
+                                            onClick={() => handleReconnect(connection)}
+                                        />
+                                    </Tooltip>
+                                    <Tooltip title="断开连接">
+                                        <Button
+                                            size="small"
+                                            type="text"
+                                            danger
+                                            icon={<CloseOutlined />}
+                                            onClick={() => handleCloseConnection(connection.key)}
+                                        />
+                                    </Tooltip>
+                                </div>
+                            </div>
+                        </Card>
+                    ))}
+                </div>
+            )}
 
             {/* 连接详情对话框 */}
             <Modal
