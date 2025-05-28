@@ -2,12 +2,14 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-25 20:14:39
+ * @LastEditTime: 2025-05-26 20:28:23
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Spin } from 'antd';
+import { Spin, Button, Tooltip } from 'antd';
+import { FolderOutlined, FileOutlined, ExpandOutlined, ShrinkOutlined } from '@ant-design/icons';
+import FileBrowser from './FileBrowser';
 import './styles.css';
 import { parseTerminalOutput, ansiToHtml } from '../../pages/Terminal/utils/terminalUtils';
 
@@ -50,6 +52,10 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     // 跟踪是否已显示欢迎信息，避免重复显示
     const [welcomeShown, setWelcomeShown] = useState(false);
 
+    // 文件浏览器状态
+    const [fileBrowserVisible, setFileBrowserVisible] = useState(false);
+    const [showSplitView, setShowSplitView] = useState(false);
+
     // 提示符正则表达式 - 更宽松的匹配模式
     const promptRegex = /.*[@].*[$#]\s*$/;
 
@@ -61,10 +67,14 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         // JSON初始化消息模式
         const jsonInitPattern = /^\s*\{.*"type"\s*:\s*"init".*\}\s*$/;
 
+        // 反向搜索控制序列模式
+        const reverseSearchPattern = /\[A\[A\[26P\(reverse-i-search\)`':/;
+
         // WebSocket系统消息模式
         const systemPatterns = [
             connectionIdPattern,
             jsonInitPattern,
+            reverseSearchPattern,
             /^WebSocket\s+connected/i,
             /^Connection\s+established/i,
             /^Session\s+initialized/i,
@@ -85,6 +95,9 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
 
         // 移除null字符
         cleaned = cleaned.replace(/\^@/g, '');
+
+        // 移除反向搜索控制序列
+        cleaned = cleaned.replace(/\[A\[A\[26P\(reverse-i-search\)`':/g, '(reverse-i-search)`\':');
 
         // 移除多余的空白
         cleaned = cleaned.trim();
@@ -111,7 +124,38 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     const processServerData = useCallback((text: string) => {
         console.log('收到WebSocket消息(文本):', text);
 
-        // 先清理系统消息部分
+        // 检查是否是反向搜索消息
+        if (text.includes('[A[A[26P(reverse-i-search)')) {
+            // 这是反向搜索消息，提取搜索内容
+            const searchMatch = text.match(/\(reverse-i-search\)`([^']*)':/);
+            if (searchMatch && searchMatch[1]) {
+                const searchTerm = searchMatch[1];
+                // 显示格式化的反向搜索提示
+                const searchDisplay = `(reverse-i-search)\`${searchTerm}': `;
+
+                // 如果有匹配的命令，也提取出来
+                const commandMatch = text.match(/\(reverse-i-search\)`[^']*':(.*)/);
+                const matchedCommand = commandMatch && commandMatch[1] ? commandMatch[1].trim() : '';
+
+                if (matchedCommand) {
+                    setOutput(prev => {
+                        // 移除上一个反向搜索提示（如果存在）
+                        const filtered = prev.filter(line => !line.includes('(reverse-i-search)'));
+                        return [...filtered, `${searchDisplay}${matchedCommand}`];
+                    });
+                } else {
+                    setOutput(prev => {
+                        // 移除上一个反向搜索提示（如果存在）
+                        const filtered = prev.filter(line => !line.includes('(reverse-i-search)'));
+                        return [...filtered, searchDisplay];
+                    });
+                }
+
+                scrollToBottom();
+                return;
+            }
+        }
+
         const cleanedText = cleanSystemMessages(text);
 
         // 如果清理后没有内容，则忽略
@@ -152,9 +196,11 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             // 分行处理文本 - 使用清理后的文本
             const lines = cleanedText.split('\n').map(line => line.trim()).filter(line => line);
 
+            // 存储需要显示的输出行
+            const outputLines: string[] = [];
+
             // 检查每一行，找到最后一个提示符
             let newPrompt: string | null = null;
-            const outputLines: string[] = [];
 
             for (const line of lines) {
                 // 跳过系统消息行
@@ -454,6 +500,22 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 setCursorPosition(0);
                 scrollToBottom();
 
+            } else if (e.key === 'r' && e.ctrlKey) {
+                // Ctrl+R - 反向搜索历史命令
+                // 直接发送控制字符，但不在本地显示原始控制序列
+                // 而是显示一个更友好的提示
+                const cleanPrompt = currentPrompt.split('\n').pop() || currentPrompt;
+                const searchLine = `${cleanPrompt}(reverse-i-search)\`': `;
+                setOutput(prev => [...prev, searchLine]);
+
+                // 发送Ctrl+R字符
+                webSocketRef.current.send('\x12');
+
+                // 清空本地输入，让服务器端处理搜索
+                setLocalInput('');
+                setCursorPosition(0);
+                scrollToBottom();
+
             } else if (e.ctrlKey && e.key.length === 1) {
                 // 其他Ctrl+字符组合
                 const code = e.key.toUpperCase().charCodeAt(0) - 64;
@@ -543,52 +605,115 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             onClick={focusTerminal}
             onFocus={focusTerminal}
         >
-            {loading && (
-                <div className="terminal-loading">
-                    <Spin size="large" spinning={true}>
-                        <div className="spin-content-placeholder">
-                            <div className="loading-tip">{getConnectionStatusText()}</div>
-                        </div>
-                    </Spin>
-                </div>
-            )}
-
-            {error && (
-                <div className="terminal-error">
-                    <div className="error-message">{error}</div>
-                    {connectionStatus === 'disconnected' && (
-                        <button onClick={handleReconnectRequest} className="reconnect-button">
-                            重新连接
-                        </button>
+            {/* 工具栏 */}
+            <div className="terminal-toolbar">
+                <div className="toolbar-buttons">
+                    <Tooltip title="文件浏览器">
+                        <Button
+                            icon={<FolderOutlined />}
+                            size="small"
+                            type={fileBrowserVisible ? 'primary' : 'default'}
+                            onClick={() => {
+                                setFileBrowserVisible(!fileBrowserVisible);
+                                if (!fileBrowserVisible) {
+                                    setShowSplitView(true);
+                                }
+                            }}
+                        >
+                            文件
+                        </Button>
+                    </Tooltip>
+                    {fileBrowserVisible && (
+                        <>
+                            <Tooltip title={showSplitView ? '收起分屏' : '展开分屏'}>
+                                <Button
+                                    icon={showSplitView ? <ShrinkOutlined /> : <ExpandOutlined />}
+                                    size="small"
+                                    onClick={() => setShowSplitView(!showSplitView)}
+                                />
+                            </Tooltip>
+                        </>
                     )}
                 </div>
-            )}
-
-            <div
-                className="terminal-output"
-                ref={outputRef}
-                style={{ display: loading ? 'none' : 'block' }}
-                onClick={focusTerminal}
-            >
-                {output.map((line, index) => {
-                    // 检查是否为欢迎信息
-                    const isWelcomeLine = line.includes('welcome-') ||
-                        line.includes('欢迎使用') ||
-                        line.includes('连接已建立') ||
-                        line.includes('提示：') ||
-                        line.includes('如有问题') ||
-                        (line.includes('='.repeat(30)));
-
-                    return (
-                        <div key={index} className={`terminal-line ${isWelcomeLine ? 'welcome-line' : ''}`}>
-                            <span dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }} />
-                        </div>
-                    );
-                })}
-
-                {/* 当前输入行 */}
-                {connectionStatus === 'connected' && renderCurrentInputLine()}
             </div>
+
+            {/* 主内容区域 */}
+            <div className={`terminal-main-content ${showSplitView ? 'split-view' : ''}`}>
+                {/* 终端区域 */}
+                <div className={`terminal-panel ${showSplitView ? 'half-width' : 'full-width'}`}>
+                    {loading && (
+                        <div className="terminal-loading">
+                            <Spin size="large" spinning={true}>
+                                <div className="spin-content-placeholder">
+                                    <div className="loading-tip">{getConnectionStatusText()}</div>
+                                </div>
+                            </Spin>
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="terminal-error">
+                            <div className="error-message">{error}</div>
+                            {connectionStatus === 'disconnected' && (
+                                <button onClick={handleReconnectRequest} className="reconnect-button">
+                                    重新连接
+                                </button>
+                            )}
+                        </div>
+                    )}
+
+                    <div
+                        className="terminal-output"
+                        ref={outputRef}
+                        style={{ display: loading ? 'none' : 'block' }}
+                        onClick={focusTerminal}
+                    >
+                        {output.map((line, index) => {
+                            // 检查是否为欢迎信息
+                            const isWelcomeLine = line.includes('welcome-') ||
+                                line.includes('欢迎使用') ||
+                                line.includes('连接已建立') ||
+                                line.includes('提示：') ||
+                                line.includes('如有问题') ||
+                                (line.includes('='.repeat(30)));
+
+                            return (
+                                <div key={index} className={`terminal-line ${isWelcomeLine ? 'welcome-line' : ''}`}>
+                                    <span dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }} />
+                                </div>
+                            );
+                        })}
+
+                        {/* 当前输入行 */}
+                        {connectionStatus === 'connected' && renderCurrentInputLine()}
+                    </div>
+                </div>
+
+                {/* 文件浏览器区域 */}
+                {fileBrowserVisible && showSplitView && (
+                    <div className="file-browser-panel half-width">
+                        <FileBrowser
+                            webSocketRef={webSocketRef}
+                            visible={fileBrowserVisible}
+                            onClose={() => {
+                                setFileBrowserVisible(false);
+                                setShowSplitView(false);
+                            }}
+                        />
+                    </div>
+                )}
+            </div>
+
+            {/* 文件浏览器模态框（当不是分屏模式时） */}
+            {fileBrowserVisible && !showSplitView && (
+                <div className="file-browser-modal">
+                    <FileBrowser
+                        webSocketRef={webSocketRef}
+                        visible={fileBrowserVisible}
+                        onClose={() => setFileBrowserVisible(false)}
+                    />
+                </div>
+            )}
 
             <div
                 ref={terminalRef}
