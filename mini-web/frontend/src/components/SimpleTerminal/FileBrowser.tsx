@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-26 21:14:37
+ * @LastEditTime: 2025-05-31 16:47:44
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -337,39 +337,38 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         setOutputBuffer(''); // 清空缓冲区
         setIsWaitingForLs(true); // 设置等待状态为true，开始等待ls输出
 
-        // 使用简单的ls -la命令，不使用--color=never参数，避免命令错误
-        const command = `ls -la "${currentDirectory}"`;
-        console.log('执行命令:', command);
+        // 发送JSON格式的文件列表请求
+        const fileListRequest = {
+            type: 'file_list',
+            data: {
+                path: currentDirectory
+            }
+        };
 
-        executeSSHCommand(command);
+        console.log('发送文件列表请求:', fileListRequest);
+
+        if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            message.error('WebSocket连接未建立');
+            setLoading(false);
+            return;
+        }
+
+        // 发送JSON命令
+        webSocketRef.current.send(JSON.stringify(fileListRequest));
 
         // 设置超时，防止命令无响应
         const timeoutId = setTimeout(() => {
-            console.log('刷新目录超时，尝试从终端获取输出');
-
-            // 尝试手动解析终端输出
-            const terminalElement = document.querySelector('.simple-terminal-output');
-            if (terminalElement) {
-                const terminalText = terminalElement.textContent || '';
-                console.log('从终端获取文本长度:', terminalText.length);
-                if (terminalText.includes('drwxr-xr-x') || terminalText.includes('-rwxr-xr-x')) {
-                    console.log('超时后从终端文本解析');
-                    handleLsResult(terminalText);
-                } else {
-                    setLoading(false);
-                    message.error('获取目录信息失败，请检查路径是否正确');
-                }
-            } else {
-                setLoading(false);
-                message.error('获取目录信息超时');
-            }
-        }, 15000); // 增加超时时间到15秒
+            console.log('文件列表请求超时');
+            setLoading(false);
+            setIsWaitingForLs(false);
+            message.error('获取目录信息超时');
+        }, 10000); // 10秒超时
 
         // 返回清理函数
         return () => {
             clearTimeout(timeoutId);
         };
-    }, [currentDirectory, executeSSHCommand, handleLsResult]);
+    }, [currentDirectory, webSocketRef]);
 
     // 进入目录
     const enterDirectory = useCallback((dirName: string) => {
@@ -724,6 +723,44 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 // 尝试解析JSON消息
                 try {
                     const data = JSON.parse(event.data);
+
+                    // 处理文件列表响应
+                    if (data.type === 'file_list_response') {
+                        console.log('收到文件列表响应:', data);
+                        setLoading(false);
+                        setIsWaitingForLs(false);
+
+                        if (data.data) {
+                            if (data.data.error) {
+                                message.error(data.data.error);
+                                setFiles([]);
+                            } else if (data.data.files) {
+                                // 转换文件数据格式
+                                const fileItems: FileItem[] = data.data.files.map((file: any) => ({
+                                    name: file.name,
+                                    type: file.type as 'file' | 'directory',
+                                    size: file.size,
+                                    permissions: file.permissions,
+                                    modifiedTime: file.modified,
+                                    path: `${currentDirectory}/${file.name}`,
+                                    owner: file.owner,
+                                    group: file.group
+                                }));
+
+                                setFiles(fileItems);
+                                console.log(`成功加载 ${fileItems.length} 个文件/目录`);
+                            }
+                        }
+                        return;
+                    }
+
+                    // 处理处理中响应
+                    if (data.type === 'file_list_processing') {
+                        console.log('文件列表正在处理中...');
+                        return;
+                    }
+
+                    // 处理其他类型的消息
                     if (data.type === 'terminal_output' || data.type === 'output') {
                         messageData = String(data.content || data.data || '');
                     } else {
@@ -821,7 +858,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 clearTimeout(bufferTimeoutRef.current);
             }
         };
-    }, [webSocketRef, visible, handleLsResult, isWaitingForLs]);
+    }, [webSocketRef, visible, handleLsResult, isWaitingForLs, currentDirectory]);
 
     // 清理effect，在组件卸载时清除缓冲区超时
     useEffect(() => {

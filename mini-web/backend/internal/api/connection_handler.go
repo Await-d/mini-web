@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -681,58 +682,145 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 					log.Printf("文本消息内容过长，仅记录前1000字节: %s...", string(p[:1000]))
 				}
 
-				// 尝试解析JSON命令
-				var cmd struct {
-					Type string          `json:"type"`
-					Data json.RawMessage `json:"data"`
-				}
+				// 检查是否是JSON格式
+				if strings.HasPrefix(string(p), "{") && strings.HasSuffix(string(p), "}") {
+					// 尝试解析JSON命令
+					var cmd struct {
+						Type string          `json:"type"`
+						Data json.RawMessage `json:"data"`
+					}
 
-				if err := json.Unmarshal(p, &cmd); err == nil {
-					log.Printf("解析JSON命令成功: %s", cmd.Type)
+					if err := json.Unmarshal(p, &cmd); err == nil {
+						log.Printf("解析JSON命令成功: %s", cmd.Type)
 
-					// 处理特殊命令
-					switch cmd.Type {
-					case "resize":
-						// 支持两种不同格式的调整大小命令
-						// 1. {type: "resize", width: X, height: Y}
-						// 2. {type: "resize", cols: X, rows: Y}
-						var resizeData struct {
-							Width  int `json:"width"`
-							Height int `json:"height"`
-							Cols   int `json:"cols"`
-							Rows   int `json:"rows"`
-						}
-
-						if err := json.Unmarshal(cmd.Data, &resizeData); err == nil {
-							// 优先使用cols/rows格式
-							if resizeData.Cols > 0 && resizeData.Rows > 0 {
-								log.Printf("收到终端调整大小命令: 列=%d, 行=%d",
-									resizeData.Cols, resizeData.Rows)
-								terminal.WindowResize(uint16(resizeData.Rows), uint16(resizeData.Cols))
-							} else if resizeData.Width > 0 && resizeData.Height > 0 {
-								// 兼容width/height格式
-								log.Printf("收到终端调整大小命令: 宽度=%d, 高度=%d",
-									resizeData.Width, resizeData.Height)
-								terminal.WindowResize(uint16(resizeData.Height), uint16(resizeData.Width))
-							} else {
-								log.Printf("收到的调整大小命令数据不完整: %+v", resizeData)
+						// 处理特殊命令
+						switch cmd.Type {
+						case "file_list":
+							// 处理文件列表请求
+							var fileListData struct {
+								Path string `json:"path"`
 							}
-						} else {
-							log.Printf("解析调整大小命令失败: %v, 原始消息: %s", err, string(cmd.Data))
+							if err := json.Unmarshal(cmd.Data, &fileListData); err == nil {
+								log.Printf("收到文件列表请求: 路径=%s", fileListData.Path)
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok && sshTerminal.GetCommandHandler() != nil {
+									// 使用SSH命令处理器获取文件列表
+									go func() {
+										fileListResp, err := sshTerminal.GetCommandHandler().ExecuteFileListCommand(fileListData.Path)
+										if err != nil {
+											log.Printf("执行文件列表命令失败: %v", err)
+											response := struct {
+												Type string `json:"type"`
+												Data struct {
+													Path  string `json:"path"`
+													Error string `json:"error"`
+												} `json:"data"`
+											}{
+												Type: "file_list_response",
+												Data: struct {
+													Path  string `json:"path"`
+													Error string `json:"error"`
+												}{
+													Path:  fileListData.Path,
+													Error: err.Error(),
+												},
+											}
+											respData, _ := json.Marshal(response)
+											wsConn.WriteMessage(websocket.TextMessage, respData)
+											return
+										}
+
+										// 发送文件列表响应
+										response := struct {
+											Type string                    `json:"type"`
+											Data *service.FileListResponse `json:"data"`
+										}{
+											Type: "file_list_response",
+											Data: fileListResp,
+										}
+										respData, _ := json.Marshal(response)
+										wsConn.WriteMessage(websocket.TextMessage, respData)
+									}()
+								} else {
+									// 非SSH终端，使用传统方式
+									lsCmd := fmt.Sprintf("ls -la '%s' 2>&1", fileListData.Path)
+									terminal.Write([]byte(lsCmd + "\n"))
+
+									// 发送处理中响应
+									response := struct {
+										Type string `json:"type"`
+										Data struct {
+											Path       string `json:"path"`
+											Processing bool   `json:"processing"`
+										} `json:"data"`
+									}{
+										Type: "file_list_processing",
+										Data: struct {
+											Path       string `json:"path"`
+											Processing bool   `json:"processing"`
+										}{
+											Path:       fileListData.Path,
+											Processing: true,
+										},
+									}
+									respData, _ := json.Marshal(response)
+									wsConn.WriteMessage(websocket.TextMessage, respData)
+								}
+								continue
+							}
+						case "resize":
+							// 支持两种不同格式的调整大小命令
+							// 1. {type: "resize", width: X, height: Y}
+							// 2. {type: "resize", cols: X, rows: Y}
+							var resizeData struct {
+								Width  int `json:"width"`
+								Height int `json:"height"`
+								Cols   int `json:"cols"`
+								Rows   int `json:"rows"`
+							}
+
+							if err := json.Unmarshal(cmd.Data, &resizeData); err == nil {
+								// 优先使用cols/rows格式
+								if resizeData.Cols > 0 && resizeData.Rows > 0 {
+									log.Printf("收到终端调整大小命令: 列=%d, 行=%d",
+										resizeData.Cols, resizeData.Rows)
+									terminal.WindowResize(uint16(resizeData.Rows), uint16(resizeData.Cols))
+								} else if resizeData.Width > 0 && resizeData.Height > 0 {
+									// 兼容width/height格式
+									log.Printf("收到终端调整大小命令: 宽度=%d, 高度=%d",
+										resizeData.Width, resizeData.Height)
+									terminal.WindowResize(uint16(resizeData.Height), uint16(resizeData.Width))
+								} else {
+									log.Printf("收到的调整大小命令数据不完整: %+v", resizeData)
+								}
+							} else {
+								log.Printf("解析调整大小命令失败: %v, 原始消息: %s", err, string(cmd.Data))
+							}
+						case "screenshot":
+							log.Printf("收到屏幕截图请求")
+							// 将截图请求传递给终端处理
+							n, err := terminal.Write(p)
+							if err != nil {
+								log.Printf("写入终端屏幕截图请求错误: %v", err)
+								errChan <- err
+							} else {
+								log.Printf("屏幕截图请求已传递给终端: %d字节", n)
+							}
+						default:
+							// 其他命令直接传递给终端
+							log.Printf("将JSON命令传递给终端: %s", cmd.Type)
+							n, err := terminal.Write(p)
+							if err != nil {
+								log.Printf("写入终端错误: %v", err)
+								errChan <- err
+							} else {
+								log.Printf("写入终端成功: %d/%d 字节", n, len(p))
+							}
 						}
-					case "screenshot":
-						log.Printf("收到屏幕截图请求")
-						// 将截图请求传递给终端处理
-						n, err := terminal.Write(p)
-						if err != nil {
-							log.Printf("写入终端屏幕截图请求错误: %v", err)
-							errChan <- err
-						} else {
-							log.Printf("屏幕截图请求已传递给终端: %d字节", n)
-						}
-					default:
-						// 其他命令直接传递给终端
-						log.Printf("将JSON命令传递给终端: %s", cmd.Type)
+					} else {
+						// 非JSON格式文本，直接传递
+						log.Printf("非JSON格式文本，直接传递给终端")
 						n, err := terminal.Write(p)
 						if err != nil {
 							log.Printf("写入终端错误: %v", err)

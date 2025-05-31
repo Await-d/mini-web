@@ -10,8 +10,10 @@ package service
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"gitee.com/await29/mini-web/internal/model"
@@ -26,6 +28,13 @@ type SSHTerminalSession struct {
 	stdout  io.Reader
 	stderr  io.Reader
 	conn    *model.Connection
+	// 添加命令处理器
+	commandHandler *SSHCommandHandler
+	// 添加输出缓冲区，用于捕获命令输出
+	outputBuffer  []byte
+	bufferMutex   sync.Mutex
+	isCapturing   bool
+	captureMarker string
 }
 
 // 创建SSH终端会话
@@ -110,13 +119,23 @@ func createSSHTerminalSession(conn *model.Connection) (*SSHTerminalSession, erro
 		return nil, fmt.Errorf("启动shell失败: %w", err)
 	}
 
+	// 创建命令处理器
+	commandHandler, err := NewSSHCommandHandler(client)
+	if err != nil {
+		log.Printf("创建SSH命令处理器失败: %v", err)
+		// 不是致命错误，继续运行
+		commandHandler = nil
+	}
+
 	return &SSHTerminalSession{
-		client:  client,
-		session: session,
-		stdin:   stdin,
-		stdout:  stdout,
-		stderr:  stderr,
-		conn:    conn,
+		client:         client,
+		session:        session,
+		stdin:          stdin,
+		stdout:         stdout,
+		stderr:         stderr,
+		conn:           conn,
+		commandHandler: commandHandler,
+		outputBuffer:   make([]byte, 0, 1024*1024), // 1MB缓冲区
 	}, nil
 }
 
@@ -145,4 +164,9 @@ func (s *SSHTerminalSession) Close() error {
 // WindowResize 调整终端窗口大小
 func (s *SSHTerminalSession) WindowResize(rows, cols uint16) error {
 	return s.session.WindowChange(int(rows), int(cols))
+}
+
+// GetCommandHandler 获取命令处理器
+func (s *SSHTerminalSession) GetCommandHandler() *SSHCommandHandler {
+	return s.commandHandler
 }
