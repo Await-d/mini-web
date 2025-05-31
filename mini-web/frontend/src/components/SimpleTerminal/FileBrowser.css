@@ -454,19 +454,22 @@
 }
 
 .virtual-file-scroll-container {
-    flex: 1;
+    height: 100%;
     overflow: auto;
-    min-height: 0; /* 确保能够收缩 */
-    /* 性能优化 */
-    transform: translateZ(0); /* 开启硬件加速 */
-    -webkit-overflow-scrolling: touch; /* iOS平滑滚动 */
-    /* 优化滚动性能 */
-    scroll-behavior: auto; /* 禁用平滑滚动，提升性能 */
-    contain: layout style paint; /* 性能提升关键属性 */
+    flex: 1;
+    position: relative;
+    
+    /* 性能优化 - 启用硬件加速和smooth scrolling */
+    will-change: scroll-position;
+    transform: translateZ(0);
     backface-visibility: hidden;
     perspective: 1000px;
-    /* 减少重绘 */
-    will-change: scroll-position;
+    
+    /* 优化滚动行为 */
+    scroll-behavior: auto; /* 禁用smooth，减少性能开销 */
+    
+    /* 减少重排重绘 */
+    contain: layout style paint;
 }
 
 .virtual-file-scroll-container::-webkit-scrollbar {
@@ -506,25 +509,24 @@
 }
 
 .virtual-file-row {
-    display: grid;
-    grid-template-columns: 40px 1fr 100px 120px 180px 120px;
-    align-items: center;
-    padding: 0;
+    position: relative;
+    height: 48px;
     border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    align-items: center;
     cursor: pointer;
-    background: white;
-    height: 48px; /* 固定行高，与虚拟化配置一致 */
-    min-height: 48px;
-    /* 完全禁用所有过渡和动画效果 */
-    transition: none !important;
+    user-select: none;
+    transition: none; /* 移除transition以提高性能 */
+    background: #fff;
+    
+    /* 性能优化 */
+    contain: layout style paint;
+    will-change: auto; /* 移除will-change，让浏览器优化 */
+    transform: translateZ(0); /* 硬件加速 */
+    backface-visibility: hidden;
+    
+    /* 禁用动画以提高性能 */
     animation: none !important;
-    /* 使用 transform3d 开启硬件加速 */
-    transform: translateZ(0);
-    /* 避免重排重绘 */
-    will-change: auto;
-    contain: layout style paint; /* 严格隔离渲染 */
-    /* 禁用指针事件的额外效果 */
-    pointer-events: auto;
 }
 
 /* 移除原生hover效果，使用JavaScript控制的类 */
@@ -565,66 +567,79 @@
 }
 
 .file-row-content {
-    display: contents;
+    display: grid;
+    grid-template-columns: 40px 1fr 100px 120px 180px 120px;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    padding: 0 8px;
 }
 
 .file-checkbox {
     display: flex;
     justify-content: center;
     align-items: center;
-    padding: 0 8px;
+    width: 32px;
+    height: 32px;
 }
 
 .file-info {
     display: flex;
     align-items: center;
-    padding: 8px 4px;
-    min-width: 0;
+    min-width: 0; /* 允许文字溢出处理 */
+    padding-right: 8px;
 }
 
 .file-icon {
-    flex-shrink: 0;
     margin-right: 8px;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
 }
 
 .file-name {
-    flex: 1;
+    font-weight: 500;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 14px;
+    min-width: 0;
 }
 
 .file-size {
-    padding: 8px 4px;
-    text-align: right;
-    font-size: 13px;
+    font-family: 'Monaco', 'Consolas', monospace;
     color: #666;
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    font-size: 12px;
+    text-align: right;
+    padding-right: 8px;
 }
 
 .file-permissions {
-    padding: 8px 4px;
+    font-family: 'Monaco', 'Consolas', monospace;
     font-size: 12px;
-    color: #666;
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    background: #f5f5f5;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #595959;
+    text-align: center;
 }
 
 .file-modified {
-    padding: 8px 4px;
+    color: #8c8c8c;
     font-size: 12px;
-    color: #666;
+    text-align: center;
 }
 
 .file-actions {
     display: flex;
-    justify-content: center;
     align-items: center;
-    padding: 4px;
-    position: relative;
-    z-index: 10; /* 确保在其他元素之上 */
+    justify-content: center;
     gap: 4px;
-    width: 120px;
+    width: 100%;
+    padding: 4px;
 }
 
 .file-actions .ant-btn {

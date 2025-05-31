@@ -177,16 +177,19 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         return filtered;
     }, [files, searchTerm, sortField, sortOrder]);
 
-    // 虚拟化文件列表配置 - 激进优化性能
+    // 虚拟化文件列表配置 - 进一步优化滚动性能
     const rowVirtualizer = useVirtualizer({
         count: filteredFiles.length,
         getScrollElement: () => scrollElementRef.current,
-        estimateSize: () => 48, // 固定行高48px
-        overscan: 0, // 完全禁用 overscan，最大化性能
-        measureElement: undefined, // 禁用自动测量，使用固定高度
-        scrollMargin: 0, // 移除scrollMargin，避免额外空白
-        getItemKey: (index) => filteredFiles[index]?.name || index, // 简化key生成
-        debug: false, // 关闭调试模式
+        estimateSize: () => 48, // 固定行高
+        overscan: 1, // 最小化overscan以提高性能
+        measureElement: undefined, // 禁用动态测量
+        scrollMargin: 0,
+        getItemKey: (index) => {
+            const file = filteredFiles[index];
+            return file ? `${file.name}_${file.type}_${file.size}` : index;
+        },
+        debug: false,
     });
 
     // 生成用于localStorage的唯一键
@@ -1125,7 +1128,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
 
 
-    // 简化的文件行组件 - 使用简单按钮替代复杂下拉菜单
+    // 优化的文件行组件 - 修改点击行为：文件夹进入，文件打开
     const VirtualFileRow = React.memo(({
         index,
         style,
@@ -1137,7 +1140,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     }) => {
         const isSelected = selectedFiles.includes(file.name);
 
-        // 缓存事件处理器 - 只有双击才进入目录，单击选中
+        // 单击行为：文件夹进入，文件打开，不再默认选中
         const handleRowClick = useCallback((e: React.MouseEvent) => {
             e.stopPropagation();
 
@@ -1146,11 +1149,21 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 return;
             }
 
-            const isCurrentlySelected = selectedFiles.includes(file.name);
-            handleFileSelection(file.name, !isCurrentlySelected);
-        }, [file.name, selectedFiles, handleFileSelection]);
+            // 如果按住Ctrl键，则进行选择操作
+            if (e.ctrlKey || e.metaKey) {
+                handleFileAction('select', file, e);
+                return;
+            }
 
-        // 双击进入目录或查看文件
+            // 正常点击：文件夹进入，文件打开
+            if (file.type === 'directory') {
+                enterDirectory(file.name);
+            } else {
+                viewFile(file.name);
+            }
+        }, [file, enterDirectory, viewFile, handleFileAction]);
+
+        // 双击行为保持不变（兼容性）
         const handleRowDoubleClick = useCallback((e: React.MouseEvent) => {
             e.stopPropagation();
 
@@ -1183,6 +1196,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 className={`virtual-file-row ${isSelected ? 'selected' : ''} ${file.type === 'directory' ? 'directory' : 'file'}`}
                 onClick={handleRowClick}
                 onDoubleClick={handleRowDoubleClick}
+                title={file.type === 'directory' ? `点击进入文件夹: ${file.name}` : `点击打开文件: ${file.name}`}
             >
                 <div className="file-row-content">
                     {/* 选择框 */}
@@ -1361,24 +1375,37 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         };
     }, []);
 
-    // 监听WebSocket消息，解析ls命令结果
+    // 优化后的WebSocket消息监听 - 减少处理时间和频率
     useEffect(() => {
-        if (!webSocketRef.current || !visible) return;
+        if (!webSocketRef.current || !visible) {
+            return;
+        }
 
-        console.log('FileBrowser: 注册WebSocket消息监听器 (优化版)');
+        console.log('FileBrowser: 设置WebSocket消息监听器 (性能优化版)');
+
+        // 使用防抖和批处理优化性能
+        let messageQueue: MessageEvent[] = [];
+        let processingTimer: NodeJS.Timeout | null = null;
 
         const handleMessage = (event: MessageEvent) => {
-            // 使用异步处理，避免阻塞主线程
+            // 快速类型检查，立即返回不相关消息
             if (typeof event.data !== 'string') {
                 return;
             }
 
-            // 使用 requestIdleCallback 或 setTimeout 异步处理消息
-            const processMessage = () => {
-                const currentTime = Date.now();
+            // 添加到消息队列而不是立即处理
+            messageQueue.push(event);
 
-                // 防抖检查
-                if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 1000) {
+            // 如果已有处理定时器，取消它
+            if (processingTimer) {
+                clearTimeout(processingTimer);
+            }
+
+            // 使用批处理，延迟处理消息队列
+            processingTimer = setTimeout(() => {
+                // 防抖检查，避免过于频繁的更新
+                const currentTime = Date.now();
+                if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 50) {
                     return;
                 }
 
@@ -1386,78 +1413,89 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 lastUpdateTimeRef.current = currentTime;
 
                 try {
-                    let data;
-                    try {
-                        data = JSON.parse(event.data);
-                    } catch {
-                        return;
-                    }
-
-                    // 只处理文件列表相关的响应
-                    if (data.type === 'file_list_response') {
-                        if (data.data.requestId !== currentRequestRef.current) {
-                            return;
+                    // 批量处理所有排队的消息
+                    const relevantMessages = messageQueue.filter(msg => {
+                        try {
+                            const data = JSON.parse(msg.data);
+                            return data.type === 'file_list_response' || data.type === 'file_list_segment';
+                        } catch {
+                            return false;
                         }
+                    });
 
-                        // 使用批处理更新状态
-                        React.startTransition(() => {
-                            if (requestTimeoutRef.current) {
-                                clearTimeout(requestTimeoutRef.current);
-                                requestTimeoutRef.current = null;
-                            }
+                    // 只处理最新的相关消息
+                    if (relevantMessages.length > 0) {
+                        const latestMessage = relevantMessages[relevantMessages.length - 1];
+                        processFileListMessage(latestMessage);
+                    }
 
-                            setLoading(false);
-                            setIsWaitingForLs(false);
-                            currentRequestRef.current = null;
+                } finally {
+                    // 清空消息队列
+                    messageQueue = [];
+                    processingTimer = null;
 
-                            if (data.data.error) {
-                                message.error(`获取文件列表失败: ${data.data.error}`);
-                                return;
-                            }
+                    // 短暂延迟后重置更新标志
+                    setTimeout(() => {
+                        isUpdatingRef.current = false;
+                    }, 16); // 使用一帧的时间
+                }
+            }, 16); // 约60fps的更新频率
+        };
 
-                            if (data.data.files && Array.isArray(data.data.files)) {
-                                setFiles(data.data.files);
-                            } else {
-                                setFiles([]);
-                            }
-                        });
+        // 消息处理函数
+        const processFileListMessage = (event: MessageEvent) => {
+            try {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'file_list_response') {
+                    if (data.data.requestId !== currentRequestRef.current) {
                         return;
                     }
 
-                    // 处理分段响应
-                    if (data.type === 'file_list_segment') {
-                        handleSegmentedFileList({
-                            requestId: data.data.requestId,
-                            segmentId: data.data.segmentId,
-                            totalSegments: data.data.totalSegments,
-                            data: data.data.data,
-                            isComplete: data.data.isComplete
-                        });
-                        return;
-                    }
-
-                } catch (error) {
+                    // 使用React 19的批处理更新
                     React.startTransition(() => {
                         if (requestTimeoutRef.current) {
                             clearTimeout(requestTimeoutRef.current);
                             requestTimeoutRef.current = null;
                         }
+
                         setLoading(false);
                         setIsWaitingForLs(false);
                         currentRequestRef.current = null;
-                    });
-                } finally {
-                    setTimeout(() => {
-                        isUpdatingRef.current = false;
-                    }, 100);
-                }
-            };
 
-            // 使用 requestIdleCallback 或 setTimeout 异步处理
-            if (window.requestIdleCallback) {
-                window.requestIdleCallback(processMessage, { timeout: 100 });
-            } else {
-                setTimeout(processMessage, 0);
+                        if (data.data.error) {
+                            message.error(`获取文件列表失败: ${data.data.error}`);
+                            return;
+                        }
+
+                        if (data.data.files && Array.isArray(data.data.files)) {
+                            setFiles(data.data.files);
+                        } else {
+                            setFiles([]);
+                        }
+                    });
+                }
+
+                if (data.type === 'file_list_segment') {
+                    handleSegmentedFileList({
+                        requestId: data.data.requestId,
+                        segmentId: data.data.segmentId,
+                        totalSegments: data.data.totalSegments,
+                        data: data.data.data,
+                        isComplete: data.data.isComplete
+                    });
+                }
+
+            } catch (error) {
+                React.startTransition(() => {
+                    if (requestTimeoutRef.current) {
+                        clearTimeout(requestTimeoutRef.current);
+                        requestTimeoutRef.current = null;
+                    }
+                    setLoading(false);
+                    setIsWaitingForLs(false);
+                    currentRequestRef.current = null;
+                });
             }
         };
 
@@ -1466,11 +1504,15 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
         return () => {
             console.log('FileBrowser: 移除WebSocket消息监听器 (优化版)');
+            if (processingTimer) {
+                clearTimeout(processingTimer);
+            }
+            messageQueue = [];
             if (ws && ws.readyState !== WebSocket.CLOSED) {
                 ws.removeEventListener('message', handleMessage);
             }
         };
-    }, [webSocketRef, visible]); // 移除handleLsResult依赖，使用ref版本保持稳定
+    }, [webSocketRef, visible]);
 
     // 清理effect，在组件卸载时清除所有超时
     useEffect(() => {
@@ -1481,7 +1523,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         };
     }, []);
 
-    // 文件选择处理
+    // 文件选择处理 - 保留用于工具栏按钮等功能
     const handleFileSelection = useCallback((fileName: string, checked: boolean) => {
         setSelectedFiles(prev =>
             checked
@@ -1516,8 +1558,13 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     enterDirectory(file.name);
                 }
                 break;
+            case 'select':
+                // 处理手动选择（通过复选框或Ctrl+点击）
+                const isCurrentlySelected = selectedFiles.includes(file.name);
+                handleFileSelection(file.name, !isCurrentlySelected);
+                break;
         }
-    }, [viewFile, downloadFile, deleteItem, enterDirectory]);
+    }, [viewFile, downloadFile, deleteItem, enterDirectory, selectedFiles, handleFileSelection]);
 
     // 键盘事件处理 - 阻止事件冒泡到终端
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
