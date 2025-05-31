@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-31 21:15:54
+ * @LastEditTime: 2025-05-31 21:28:15
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -92,7 +92,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
     // 状态管理
     const [files, setFiles] = useState<FileItem[]>([]);
-    const [filteredFiles, setFilteredFiles] = useState<FileItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [currentDirectory, setCurrentDirectory] = useState(currentPath);
     const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
@@ -110,9 +109,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         files: [],
         operation: null
     });
-    const [outputBuffer, setOutputBuffer] = useState<string>('');
     const [isWaitingForLs, setIsWaitingForLs] = useState(false);
-    const bufferTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const currentRequestRef = useRef<string | null>(null);
     const [isDragOver, setIsDragOver] = useState(false);
 
@@ -136,17 +133,61 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     // 防止状态更新冲突的引用
     const isUpdatingRef = useRef(false);
     const lastUpdateTimeRef = useRef(0);
-    const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    // 虚拟化文件列表配置 - 修复空白问题
+    // 搜索和过滤文件 - 直接使用计算值，避免状态循环
+    const filteredFiles = useMemo(() => {
+        let filtered = [...files];
+
+        // 搜索过滤
+        if (searchTerm.trim()) {
+            const term = searchTerm.toLowerCase();
+            filtered = filtered.filter(file =>
+                file.name.toLowerCase().includes(term) ||
+                file.type.toLowerCase().includes(term) ||
+                file.permissions.toLowerCase().includes(term)
+            );
+        }
+
+        // 排序
+        filtered.sort((a, b) => {
+            let comparison = 0;
+
+            switch (sortField) {
+                case 'name':
+                    comparison = a.name.localeCompare(b.name, undefined, { numeric: true });
+                    break;
+                case 'size':
+                    comparison = a.size - b.size;
+                    break;
+                case 'modified':
+                    comparison = a.modified.localeCompare(b.modified);
+                    break;
+            }
+
+            return sortOrder === 'asc' ? comparison : -comparison;
+        });
+
+        // 目录排在前面（如果按名称排序）
+        if (sortField === 'name') {
+            filtered.sort((a, b) => {
+                if (a.type === 'directory' && b.type !== 'directory') return -1;
+                if (a.type !== 'directory' && b.type === 'directory') return 1;
+                return 0;
+            });
+        }
+
+        return filtered;
+    }, [files, searchTerm, sortField, sortOrder]);
+
+    // 虚拟化文件列表配置 - 优化性能
     const rowVirtualizer = useVirtualizer({
         count: filteredFiles.length,
         getScrollElement: () => scrollElementRef.current,
         estimateSize: () => 48, // 固定行高48px
-        overscan: 2, // 适当的overscan，平衡性能和滚动体验
+        overscan: 1, // 减少overscan，提高性能
         measureElement: undefined, // 禁用自动测量，使用固定高度
         scrollMargin: 0, // 移除scrollMargin，避免额外空白
-        getItemKey: (index) => filteredFiles[index]?.name || index, // 稳定的key
+        getItemKey: (index) => `${index}-${filteredFiles[index]?.name || 'empty'}`, // 更稳定的key
         debug: false, // 关闭调试模式
     });
 
@@ -622,10 +663,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             clearTimeout(requestTimeoutRef.current);
             requestTimeoutRef.current = null;
         }
-        if (bufferTimeoutRef.current) {
-            clearTimeout(bufferTimeoutRef.current);
-            bufferTimeoutRef.current = null;
-        }
         if (initializationTimerRef.current) {
             clearTimeout(initializationTimerRef.current);
             initializationTimerRef.current = null;
@@ -638,7 +675,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         setLoading(false);
         setIsWaitingForLs(false);
         currentRequestRef.current = null;
-        setOutputBuffer('');
 
         // 重置初始化标记，允许重新初始化
         hasInitializedRef.current = false;
@@ -675,7 +711,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         console.log('📁 开始刷新目录:', pathToUse, '请求ID:', requestId, '初始化状态:', hasInitializedRef.current);
         setLoading(true);
         setFiles([]); // 清空当前文件列表
-        setOutputBuffer(''); // 清空缓冲区
         setIsWaitingForLs(true); // 设置等待状态为true，开始等待ls输出
 
         // 发送JSON格式的文件列表请求
@@ -1073,55 +1108,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         return items;
     }, [currentDirectory, refreshDirectory, saveCurrentPath]);
 
-    // 搜索和过滤文件 - 使用 useMemo 优化
-    const filteredAndSortedFiles = useMemo(() => {
-        let filtered = [...files];
 
-        // 搜索过滤
-        if (searchTerm.trim()) {
-            const term = searchTerm.toLowerCase();
-            filtered = filtered.filter(file =>
-                file.name.toLowerCase().includes(term) ||
-                file.type.toLowerCase().includes(term) ||
-                file.permissions.toLowerCase().includes(term)
-            );
-        }
-
-        // 排序
-        filtered.sort((a, b) => {
-            let comparison = 0;
-
-            switch (sortField) {
-                case 'name':
-                    comparison = a.name.localeCompare(b.name, undefined, { numeric: true });
-                    break;
-                case 'size':
-                    comparison = a.size - b.size;
-                    break;
-                case 'modified':
-                    comparison = a.modified.localeCompare(b.modified);
-                    break;
-            }
-
-            return sortOrder === 'asc' ? comparison : -comparison;
-        });
-
-        // 目录排在前面（如果按名称排序）
-        if (sortField === 'name') {
-            filtered.sort((a, b) => {
-                if (a.type === 'directory' && b.type !== 'directory') return -1;
-                if (a.type !== 'directory' && b.type === 'directory') return 1;
-                return 0;
-            });
-        }
-
-        return filtered;
-    }, [files, searchTerm, sortField, sortOrder]);
-
-    // 使用 useEffect 更新状态，避免直接在render中修改状态
-    useEffect(() => {
-        setFilteredFiles(filteredAndSortedFiles);
-    }, [filteredAndSortedFiles]);
 
     // 处理排序
     const handleSort = useCallback((field: 'name' | 'size' | 'modified') => {
@@ -1188,43 +1175,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             }
         }, [file.name, file.type, enterDirectory, viewFile]);
 
-        // 鼠标悬停处理 - 完全防止与终端产生冲突
-        const handleRowMouseEnter = useCallback((e: React.MouseEvent) => {
-            e.stopPropagation();
-            e.preventDefault();
 
-            // 清除之前的超时
-            if (hoverTimeoutRef.current) {
-                clearTimeout(hoverTimeoutRef.current);
-                hoverTimeoutRef.current = null;
-            }
-
-            // 防抖处理，避免频繁触发和与终端光标同步
-            hoverTimeoutRef.current = setTimeout(() => {
-                const target = e.currentTarget as HTMLElement;
-                if (target && target.classList.contains('virtual-file-row')) {
-                    // 只使用CSS类控制，不修改style属性，避免重排
-                    target.classList.add('row-hovered');
-                }
-            }, 50);
-        }, []);
-
-        const handleRowMouseLeave = useCallback((e: React.MouseEvent) => {
-            e.stopPropagation();
-            e.preventDefault();
-
-            // 清除之前的超时
-            if (hoverTimeoutRef.current) {
-                clearTimeout(hoverTimeoutRef.current);
-                hoverTimeoutRef.current = null;
-            }
-
-            // 立即移除hover效果，不使用setTimeout
-            const target = e.currentTarget as HTMLElement;
-            if (target && target.classList.contains('virtual-file-row')) {
-                target.classList.remove('row-hovered');
-            }
-        }, []);
 
         const handleCheckboxChange = useCallback((e: any) => {
             e.stopPropagation();
@@ -1248,10 +1199,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 className={`virtual-file-row ${isSelected ? 'selected' : ''} ${file.type === 'directory' ? 'directory' : 'file'}`}
                 onClick={handleRowClick}
                 onDoubleClick={handleRowDoubleClick}
-                onMouseEnter={handleRowMouseEnter}
-                onMouseLeave={handleRowMouseLeave}
-                onMouseMove={(e) => e.stopPropagation()}
-                onContextMenu={(e) => e.stopPropagation()}
             >
                 <div className="file-row-content">
                     {/* 选择框 */}
@@ -1313,13 +1260,16 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             </div>
         );
     }, (prevProps, nextProps) => {
-        // 只在关键属性变化时重渲染
+        // 更严格的比较，确保完全相同才不重渲染
         return (
             prevProps.file.name === nextProps.file.name &&
             prevProps.file.type === nextProps.file.type &&
             prevProps.file.size === nextProps.file.size &&
             prevProps.file.modified === nextProps.file.modified &&
-            prevProps.index === nextProps.index
+            prevProps.file.permissions === nextProps.file.permissions &&
+            prevProps.file.path === nextProps.file.path &&
+            prevProps.index === nextProps.index &&
+            JSON.stringify(prevProps.style) === JSON.stringify(nextProps.style)
         );
     });
 
@@ -1390,159 +1340,38 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         console.log('FileBrowser: 注册WebSocket消息监听器 (优化版)');
 
         const handleMessage = (event: MessageEvent) => {
-            // 性能优化：减少不必要的日志输出和防止冲突
+            // 彻底简化消息处理，避免性能问题
             if (typeof event.data !== 'string') {
                 return;
             }
 
             const currentTime = Date.now();
 
-            // 防止过于频繁的消息处理，减少与终端光标的冲突
-            if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 100) {
+            // 更激进的防抖，减少处理频率
+            if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 1000) {
                 return;
             }
 
             isUpdatingRef.current = true;
             lastUpdateTimeRef.current = currentTime;
 
-            let messageData: string = '';
-
             try {
-                // 尝试解析JSON消息
+                let data;
                 try {
-                    const data = JSON.parse(event.data);
-
-                    // 减少不必要的日志输出，只在开发模式下输出
-                    if (process.env.NODE_ENV === 'development') {
-                        console.log('JSON解析成功，消息类型:', data.type);
-                    }
-
-                    // 处理文件列表响应
-                    if (data.type === 'file_list_response') {
-                        // 验证请求ID是否匹配
-                        if (data.data.requestId && data.data.requestId !== currentRequestRef.current) {
-                            return; // 快速返回，减少日志输出
-                        }
-
-                        // 清除超时定时器
-                        if (requestTimeoutRef.current) {
-                            clearTimeout(requestTimeoutRef.current);
-                            requestTimeoutRef.current = null;
-                        }
-
-                        setLoading(false);
-                        setIsWaitingForLs(false);
-
-                        if (data.data.error) {
-                            message.error(`获取文件列表失败: ${data.data.error}`);
-                            currentRequestRef.current = null;
-                            return;
-                        }
-
-                        // 解析文件列表 - 性能优化
-                        if (data.data.files && Array.isArray(data.data.files)) {
-                            // 使用React 18的并发特性批量更新
-                            React.startTransition(() => {
-                                setFiles(data.data.files);
-                            });
-                        } else {
-                            // 如果没有files字段或者不是数组，设置为空数组
-                            React.startTransition(() => {
-                                setFiles([]);
-                            });
-                        }
-
-                        // 清除当前请求ID
-                        currentRequestRef.current = null;
-                        return;
-                    }
-
-                    // 处理分段文件列表响应 - 减少日志输出
-                    if (data.type === 'file_list_segment') {
-                        handleSegmentedFileList({
-                            requestId: data.data.requestId,
-                            segmentId: data.data.segmentId,
-                            totalSegments: data.data.totalSegments,
-                            data: data.data.data,
-                            isComplete: data.data.isComplete
-                        });
-                        return;
-                    }
-
-                    // 处理处理中响应
-                    if (data.type === 'file_list_processing') {
-                        return; // 静默处理，减少日志输出
-                    }
-
-                    // 处理其他类型的消息
-                    if (data.type === 'terminal_output' || data.type === 'output') {
-                        messageData = String(data.content || data.data || '');
-                    } else {
-                        return; // 静默忽略其他类型的JSON消息
-                    }
-                } catch (jsonError) {
-                    // 如果不是JSON，直接使用原始数据，不输出错误日志
-                    messageData = String(event.data || '');
-                }
-
-                // 确保messageData是字符串且不为空
-                if (typeof messageData !== 'string' || !messageData.trim()) {
+                    data = JSON.parse(event.data);
+                } catch {
+                    // 不是JSON，忽略
                     return;
                 }
 
-                // 性能优化：移除调试日志
-
-                // 移除连接ID前缀 (conn-X-session-XXX-XXXXXXXXXX)
-                messageData = messageData.replace(/^conn-\d+-session-\d+-\d+\s+/, '');
-
-                // 移除各种提示符格式
-                messageData = messageData
-                    .replace(/\[01;32m[\w@\-_]+\[00m:\[01;34m~\[00m\$\s*/, '')
-                    .replace(/[\w@\-_]+:[~\w\/]*[$#]\s*/, '');
-
-                // 检查是否是ls命令的输出 - 更宽松的条件
-                const containsLsIndicators =
-                    messageData.includes('total ') ||
-                    messageData.includes('drwxr-xr-x') ||
-                    messageData.includes('-rwxr-xr-x') ||
-                    messageData.includes('lrwxrwxrwx') ||
-                    /[dl\-][rwx\-]{9}\s+\d+/.test(messageData);
-
-                // 如果是ls命令输出或者我们正在等待ls输出
-                if (isWaitingForLsRef.current || containsLsIndicators) {
-                    // 累积输出到缓冲区，减少状态更新频率
-                    setOutputBuffer(prev => prev + messageData);
-
-                    // 清除之前的超时
-                    if (bufferTimeoutRef.current) {
-                        clearTimeout(bufferTimeoutRef.current);
+                // 只处理文件列表相关的响应
+                if (data.type === 'file_list_response') {
+                    // 验证请求ID
+                    if (data.data.requestId !== currentRequestRef.current) {
+                        return;
                     }
 
-                    // 设置新的超时，等待完整输出
-                    bufferTimeoutRef.current = setTimeout(() => {
-                        setOutputBuffer(currentBuffer => {
-                            if (currentBuffer && currentBuffer.trim()) {
-                                try {
-                                    // 处理完整的ls输出
-                                    handleLsResult(currentBuffer);
-                                } catch (error) {
-                                    console.error('处理ls命令结果时出错:', error);
-                                    message.error('解析文件列表失败');
-                                    setLoading(false);
-                                }
-                            }
-                            setIsWaitingForLs(false);
-                            return ''; // 清空缓冲区
-                        });
-                    }, 1500); // 减少等待时间，提高响应速度
-                }
-
-                // 检查是否收到了命令错误
-                if (messageData.includes('command not found') ||
-                    messageData.includes('No such file or directory')) {
-                    console.error('命令执行错误:', messageData);
-
-                    // 清除超时定时器
+                    // 清除超时
                     if (requestTimeoutRef.current) {
                         clearTimeout(requestTimeoutRef.current);
                         requestTimeoutRef.current = null;
@@ -1551,25 +1380,49 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     setLoading(false);
                     setIsWaitingForLs(false);
                     currentRequestRef.current = null;
-                    message.error('执行命令失败，请重试');
-                }
-            } catch (error) {
-                console.error('处理WebSocket消息时出错:', error);
 
-                // 清除超时定时器
+                    if (data.data.error) {
+                        message.error(`获取文件列表失败: ${data.data.error}`);
+                        return;
+                    }
+
+                    // 简化文件列表更新
+                    if (data.data.files && Array.isArray(data.data.files)) {
+                        setFiles(data.data.files);
+                    } else {
+                        setFiles([]);
+                    }
+                    return;
+                }
+
+                // 处理分段文件列表响应
+                if (data.type === 'file_list_segment') {
+                    handleSegmentedFileList({
+                        requestId: data.data.requestId,
+                        segmentId: data.data.segmentId,
+                        totalSegments: data.data.totalSegments,
+                        data: data.data.data,
+                        isComplete: data.data.isComplete
+                    });
+                    return;
+                }
+
+                // 忽略其他所有消息类型，避免不必要的处理
+
+            } catch (error) {
+                // 静默处理错误，避免控制台输出
                 if (requestTimeoutRef.current) {
                     clearTimeout(requestTimeoutRef.current);
                     requestTimeoutRef.current = null;
                 }
-
                 setLoading(false);
                 setIsWaitingForLs(false);
                 currentRequestRef.current = null;
             } finally {
-                // 延迟重置更新标记，防止与终端消息冲突
+                // 延迟重置，避免连续消息导致的问题
                 setTimeout(() => {
                     isUpdatingRef.current = false;
-                }, 100);
+                }, 500);
             }
         };
 
@@ -1581,23 +1434,14 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             if (ws && ws.readyState !== WebSocket.CLOSED) {
                 ws.removeEventListener('message', handleMessage);
             }
-            if (bufferTimeoutRef.current) {
-                clearTimeout(bufferTimeoutRef.current);
-            }
         };
     }, [webSocketRef, visible]); // 移除handleLsResult依赖，使用ref版本保持稳定
 
     // 清理effect，在组件卸载时清除所有超时
     useEffect(() => {
         return () => {
-            if (bufferTimeoutRef.current) {
-                clearTimeout(bufferTimeoutRef.current);
-            }
             if (requestTimeoutRef.current) {
                 clearTimeout(requestTimeoutRef.current);
-            }
-            if (hoverTimeoutRef.current) {
-                clearTimeout(hoverTimeoutRef.current);
             }
         };
     }, []);
@@ -1793,6 +1637,11 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             onMouseMove={handleMouseEvent}
             onFocus={handleFocus}
             tabIndex={-1} // 使div可以接收键盘事件但不参与tab导航
+            style={{
+                animation: 'none !important',
+                transition: 'none !important',
+                willChange: 'auto !important'
+            }}
         >
             <Card
                 title={
@@ -2002,7 +1851,10 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                     flex: 1,
                                     overflow: 'hidden',
                                     position: 'relative',
-                                    minHeight: 0 // 确保能够收缩
+                                    minHeight: 0, // 确保能够收缩
+                                    animation: 'none !important',
+                                    transition: 'none !important',
+                                    willChange: 'auto !important'
                                 }}
                             >
                                 {/* 虚拟化列表表头 */}
@@ -2065,9 +1917,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                         overflow: 'auto',
                                         minHeight: 0, // 确保flex子元素能够收缩
                                     }}
-                                    onScroll={(e) => e.stopPropagation()}
-                                    onWheel={(e) => e.stopPropagation()}
-                                    onMouseMove={(e) => e.stopPropagation()}
+
                                 >
                                     <div
                                         style={{
@@ -2091,6 +1941,9 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                                         width: '100%',
                                                         height: `${virtualItem.size}px`,
                                                         transform: `translateY(${virtualItem.start}px)`, // 简化transform
+                                                        animation: 'none !important',
+                                                        transition: 'none !important',
+                                                        willChange: 'auto !important'
                                                     }}
                                                     file={file}
                                                 />

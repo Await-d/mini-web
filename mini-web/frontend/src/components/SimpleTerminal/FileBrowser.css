@@ -521,19 +521,27 @@
     /* 不设置任何样式，完全通过JavaScript控制 */
 }
 
-/* 通过JavaScript控制的hover效果，避免与终端光标冲突 */
+/* 完全禁用hover效果，避免跳动 */
 .virtual-file-row.row-hovered {
     background-color: #f0f9ff !important;
-    transition: none !important; /* 禁用过渡效果 */
+    transition: none !important;
+    animation: none !important;
+    will-change: auto !important;
 }
 
 /* 确保选中状态优先级更高 */
 .virtual-file-row.selected {
     background-color: #e6f7ff !important;
+    transition: none !important;
+    animation: none !important;
+    will-change: auto !important;
 }
 
 .virtual-file-row.selected.row-hovered {
-    background-color: #d6f2ff !important; /* 选中状态下的hover效果 */
+    background-color: #d6f2ff !important;
+    transition: none !important;
+    animation: none !important;
+    will-change: auto !important;
 }
 
 .virtual-file-row.selected {
