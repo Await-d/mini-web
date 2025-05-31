@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -63,6 +64,8 @@ func (h *SSHCommandHandler) ExecuteFileListCommand(path string) (*FileListRespon
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	log.Printf("开始执行文件列表命令，路径: %s", path)
+
 	// 创建一次性会话
 	session, err := h.client.NewSession()
 	if err != nil {
@@ -72,24 +75,69 @@ func (h *SSHCommandHandler) ExecuteFileListCommand(path string) (*FileListRespon
 			Error: "无法创建SSH会话",
 		}, nil
 	}
-	defer session.Close()
+	defer func() {
+		log.Printf("关闭SSH会话")
+		session.Close()
+	}()
 
-	// 直接执行命令并获取输出
-	cmd := fmt.Sprintf("ls -la '%s' 2>&1", path)
+	// 直接执行简单的ls命令
+	cmd := fmt.Sprintf("ls -la '%s'", path)
 	log.Printf("执行文件列表命令: %s", cmd)
 
-	output, err := session.CombinedOutput(cmd)
-	if err != nil {
-		log.Printf("执行命令失败: %v", err)
+	// 设置超时
+	done := make(chan struct{})
+	var output []byte
+	var cmdErr error
+
+	go func() {
+		defer close(done)
+		output, cmdErr = session.CombinedOutput(cmd)
+		log.Printf("命令执行完成，输出长度: %d, 错误: %v", len(output), cmdErr)
+	}()
+
+	// 等待命令完成或超时
+	select {
+	case <-done:
+		log.Printf("命令正常完成")
+	case <-time.After(10 * time.Second):
+		log.Printf("命令执行超时")
+		session.Close()
+		return &FileListResponse{
+			Path:  path,
+			Error: "命令执行超时",
+		}, nil
+	}
+
+	if cmdErr != nil {
+		log.Printf("执行命令失败: %v", cmdErr)
 		// 即使命令失败，也尝试解析输出
+		if len(output) == 0 {
+			return &FileListResponse{
+				Path:  path,
+				Error: fmt.Sprintf("执行命令失败: %v", cmdErr),
+			}, nil
+		}
 	}
 
 	outputStr := string(output)
-	log.Printf("命令输出: %s", outputStr)
+	previewLen := 200
+	if len(outputStr) < previewLen {
+		previewLen = len(outputStr)
+	}
+	log.Printf("命令输出预览 (前%d字符): %s", previewLen, outputStr[:previewLen])
 
 	// 解析输出
-	lines := strings.Split(strings.TrimSpace(outputStr), "\n")
-	return h.parseLsOutput(path, lines)
+	result, err := h.parseLsOutput(path, strings.Split(strings.TrimSpace(outputStr), "\n"))
+	if err != nil {
+		log.Printf("解析ls输出失败: %v", err)
+		return &FileListResponse{
+			Path:  path,
+			Error: fmt.Sprintf("解析输出失败: %v", err),
+		}, nil
+	}
+
+	log.Printf("成功解析文件列表，共 %d 个文件", len(result.Files))
+	return result, nil
 }
 
 // parseLsOutput 解析ls命令输出

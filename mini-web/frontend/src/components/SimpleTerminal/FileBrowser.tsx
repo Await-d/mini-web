@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-31 16:47:44
+ * @LastEditTime: 2025-05-31 17:18:33
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -18,7 +18,7 @@ import {
     HomeOutlined, ReloadOutlined, MoreOutlined, EyeOutlined,
     ScissorOutlined, CloudUploadOutlined, FolderAddOutlined,
     FileTextOutlined, FilePdfOutlined, FileImageOutlined,
-    FileZipOutlined, SelectOutlined
+    FileZipOutlined, SelectOutlined, UpOutlined, DownOutlined
 } from '@ant-design/icons';
 import './FileBrowser.css';
 
@@ -48,9 +48,13 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 }) => {
     // 状态管理
     const [files, setFiles] = useState<FileItem[]>([]);
+    const [filteredFiles, setFilteredFiles] = useState<FileItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [currentDirectory, setCurrentDirectory] = useState(currentPath);
     const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [sortField, setSortField] = useState<'name' | 'size' | 'modified'>('name');
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
     const [uploadVisible, setUploadVisible] = useState(false);
     const [newFolderVisible, setNewFolderVisible] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
@@ -65,6 +69,8 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     const [outputBuffer, setOutputBuffer] = useState<string>('');
     const [isWaitingForLs, setIsWaitingForLs] = useState(false);
     const bufferTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const currentRequestRef = useRef<string | null>(null);
+    const [isDragOver, setIsDragOver] = useState(false);
 
     // 执行SSH命令
     const executeSSHCommand = useCallback((command: string) => {
@@ -337,7 +343,11 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             return;
         }
 
-        console.log('开始刷新目录:', currentDirectory);
+        // 生成唯一请求ID
+        const requestId = `file_list_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        currentRequestRef.current = requestId;
+
+        console.log('开始刷新目录:', currentDirectory, '请求ID:', requestId);
         setLoading(true);
         setFiles([]); // 清空当前文件列表
         setOutputBuffer(''); // 清空缓冲区
@@ -347,7 +357,8 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         const fileListRequest = {
             type: 'file_list',
             data: {
-                path: currentDirectory
+                path: currentDirectory,
+                requestId: requestId
             }
         };
 
@@ -539,31 +550,161 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         return false; // 阻止默认上传行为
     }, [currentDirectory, executeSSHCommand, refreshDirectory]);
 
+    // 拖拽上传处理
+    const handleDragOver = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(true);
+    }, []);
+
+    const handleDragLeave = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(false);
+    }, []);
+
+    const handleDrop = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(false);
+
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length === 0) return;
+
+        // 批量上传文件
+        files.forEach(file => {
+            handleFileUpload(file);
+        });
+
+        message.success(`开始上传 ${files.length} 个文件`);
+    }, [handleFileUpload]);
+
     // 获取文件图标
     const getFileIcon = useCallback((file: FileItem) => {
         if (file.type === 'directory') {
-            return <FolderOutlined style={{ color: '#1890ff' }} />;
+            return <FolderOutlined style={{ color: '#1890ff', fontSize: '16px' }} />;
         }
 
         const ext = file.name.split('.').pop()?.toLowerCase();
+        const iconStyle = { fontSize: '16px' };
+
         switch (ext) {
+            // 文本文件
             case 'txt':
             case 'md':
+            case 'readme':
+                return <FileTextOutlined style={{ ...iconStyle, color: '#52c41a' }} />;
             case 'log':
-                return <FileTextOutlined style={{ color: '#52c41a' }} />;
+                return <FileTextOutlined style={{ ...iconStyle, color: '#722ed1' }} />;
+
+            // 文档文件
             case 'pdf':
-                return <FilePdfOutlined style={{ color: '#f5222d' }} />;
+                return <FilePdfOutlined style={{ ...iconStyle, color: '#f5222d' }} />;
+            case 'doc':
+            case 'docx':
+                return <FileTextOutlined style={{ ...iconStyle, color: '#1890ff' }} />;
+            case 'xls':
+            case 'xlsx':
+                return <FileOutlined style={{ ...iconStyle, color: '#52c41a' }} />;
+            case 'ppt':
+            case 'pptx':
+                return <FileOutlined style={{ ...iconStyle, color: '#fa8c16' }} />;
+
+            // 图片文件
             case 'jpg':
             case 'jpeg':
             case 'png':
             case 'gif':
-                return <FileImageOutlined style={{ color: '#fa8c16' }} />;
+            case 'bmp':
+            case 'svg':
+            case 'webp':
+                return <FileImageOutlined style={{ ...iconStyle, color: '#fa8c16' }} />;
+
+            // 压缩文件
             case 'zip':
+            case 'rar':
+            case '7z':
             case 'tar':
             case 'gz':
-                return <FileZipOutlined style={{ color: '#722ed1' }} />;
+            case 'bz2':
+                return <FileZipOutlined style={{ ...iconStyle, color: '#722ed1' }} />;
+
+            // 代码文件
+            case 'js':
+            case 'jsx':
+            case 'ts':
+            case 'tsx':
+                return <FileOutlined style={{ ...iconStyle, color: '#fadb14' }} />;
+            case 'html':
+            case 'htm':
+                return <FileOutlined style={{ ...iconStyle, color: '#fa541c' }} />;
+            case 'css':
+            case 'scss':
+            case 'sass':
+            case 'less':
+                return <FileOutlined style={{ ...iconStyle, color: '#1890ff' }} />;
+            case 'json':
+            case 'xml':
+                return <FileOutlined style={{ ...iconStyle, color: '#52c41a' }} />;
+            case 'py':
+                return <FileOutlined style={{ ...iconStyle, color: '#3776ab' }} />;
+            case 'java':
+                return <FileOutlined style={{ ...iconStyle, color: '#f89820' }} />;
+            case 'c':
+            case 'cpp':
+            case 'h':
+                return <FileOutlined style={{ ...iconStyle, color: '#659ad2' }} />;
+            case 'go':
+                return <FileOutlined style={{ ...iconStyle, color: '#00add8' }} />;
+            case 'php':
+                return <FileOutlined style={{ ...iconStyle, color: '#777bb4' }} />;
+            case 'rb':
+                return <FileOutlined style={{ ...iconStyle, color: '#cc342d' }} />;
+
+            // 配置文件
+            case 'conf':
+            case 'config':
+            case 'ini':
+            case 'cfg':
+            case 'yaml':
+            case 'yml':
+                return <FileOutlined style={{ ...iconStyle, color: '#8c8c8c' }} />;
+
+            // 数据库文件
+            case 'sql':
+            case 'db':
+            case 'sqlite':
+                return <FileOutlined style={{ ...iconStyle, color: '#fa541c' }} />;
+
+            // 音视频文件
+            case 'mp3':
+            case 'wav':
+            case 'flac':
+            case 'aac':
+                return <FileOutlined style={{ ...iconStyle, color: '#eb2f96' }} />;
+            case 'mp4':
+            case 'avi':
+            case 'mkv':
+            case 'mov':
+            case 'wmv':
+                return <FileOutlined style={{ ...iconStyle, color: '#13c2c2' }} />;
+
+            // 可执行文件
+            case 'exe':
+            case 'msi':
+            case 'deb':
+            case 'rpm':
+            case 'dmg':
+                return <FileOutlined style={{ ...iconStyle, color: '#fa8c16' }} />;
+
+            // 系统文件
+            case 'dll':
+            case 'so':
+            case 'dylib':
+                return <FileOutlined style={{ ...iconStyle, color: '#595959' }} />;
+
             default:
-                return <FileOutlined style={{ color: '#8c8c8c' }} />;
+                return <FileOutlined style={{ ...iconStyle, color: '#8c8c8c' }} />;
         }
     }, []);
 
@@ -605,20 +746,85 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         return items;
     }, [currentDirectory]);
 
+    // 搜索和过滤文件
+    useEffect(() => {
+        let filtered = [...files];
+
+        // 搜索过滤
+        if (searchTerm.trim()) {
+            const term = searchTerm.toLowerCase();
+            filtered = filtered.filter(file =>
+                file.name.toLowerCase().includes(term) ||
+                file.type.toLowerCase().includes(term) ||
+                file.permissions.toLowerCase().includes(term)
+            );
+        }
+
+        // 排序
+        filtered.sort((a, b) => {
+            let comparison = 0;
+
+            switch (sortField) {
+                case 'name':
+                    comparison = a.name.localeCompare(b.name, undefined, { numeric: true });
+                    break;
+                case 'size':
+                    comparison = a.size - b.size;
+                    break;
+                case 'modified':
+                    comparison = a.modifiedTime.localeCompare(b.modifiedTime);
+                    break;
+            }
+
+            return sortOrder === 'asc' ? comparison : -comparison;
+        });
+
+        // 目录排在前面（如果按名称排序）
+        if (sortField === 'name') {
+            filtered.sort((a, b) => {
+                if (a.type === 'directory' && b.type !== 'directory') return -1;
+                if (a.type !== 'directory' && b.type === 'directory') return 1;
+                return 0;
+            });
+        }
+
+        setFilteredFiles(filtered);
+    }, [files, searchTerm, sortField, sortOrder]);
+
+    // 处理排序
+    const handleSort = useCallback((field: 'name' | 'size' | 'modified') => {
+        if (sortField === field) {
+            setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortOrder('asc');
+        }
+    }, [sortField]);
+
+    // 清除搜索
+    const clearSearch = useCallback(() => {
+        setSearchTerm('');
+    }, []);
+
     // 表格列定义
     const columns = [
         {
-            title: '名称',
+            title: (
+                <div
+                    style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                    onClick={() => handleSort('name')}
+                >
+                    名称
+                    {sortField === 'name' && (
+                        sortOrder === 'asc' ? <UpOutlined style={{ marginLeft: 4 }} /> : <DownOutlined style={{ marginLeft: 4 }} />
+                    )}
+                </div>
+            ),
             dataIndex: 'name',
             key: 'name',
             render: (name: string, record: FileItem) => (
                 <div
-                    style={{
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        color: selectedFiles.includes(name) ? '#1890ff' : 'inherit'
-                    }}
+                    className={`file-item ${selectedFiles.includes(name) ? 'selected' : ''}`}
                     onClick={() => {
                         if (record.type === 'directory') {
                             enterDirectory(name);
@@ -631,30 +837,58 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                         }
                     }}
                 >
-                    {getFileIcon(record)}
-                    <span style={{ marginLeft: 8 }}>{name}</span>
+                    <div className="file-item-icon">
+                        {getFileIcon(record)}
+                    </div>
+                    <span className="file-item-name">{name}</span>
                 </div>
             ),
         },
         {
-            title: '大小',
+            title: (
+                <div
+                    style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                    onClick={() => handleSort('size')}
+                >
+                    大小
+                    {sortField === 'size' && (
+                        sortOrder === 'asc' ? <UpOutlined style={{ marginLeft: 4 }} /> : <DownOutlined style={{ marginLeft: 4 }} />
+                    )}
+                </div>
+            ),
             dataIndex: 'size',
             key: 'size',
-            render: (size: number, record: FileItem) =>
-                record.type === 'directory' ? '-' : formatFileSize(size),
+            render: (size: number, record: FileItem) => (
+                <span className="file-size">
+                    {record.type === 'directory' ? '-' : formatFileSize(size)}
+                </span>
+            ),
         },
         {
             title: '权限',
             dataIndex: 'permissions',
             key: 'permissions',
             render: (permissions: string) => (
-                <code style={{ fontSize: '12px' }}>{permissions}</code>
+                <span className="file-permissions">{permissions}</span>
             ),
         },
         {
-            title: '修改时间',
+            title: (
+                <div
+                    style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                    onClick={() => handleSort('modified')}
+                >
+                    修改时间
+                    {sortField === 'modified' && (
+                        sortOrder === 'asc' ? <UpOutlined style={{ marginLeft: 4 }} /> : <DownOutlined style={{ marginLeft: 4 }} />
+                    )}
+                </div>
+            ),
             dataIndex: 'modifiedTime',
             key: 'modifiedTime',
+            render: (modifiedTime: string) => (
+                <span className="file-time">{modifiedTime}</span>
+            ),
         },
         {
             title: '操作',
@@ -698,9 +932,11 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 }
 
                 return (
-                    <Dropdown menu={{ items: menuItems }} trigger={['click']}>
-                        <Button size="small" icon={<MoreOutlined />} />
-                    </Dropdown>
+                    <div className="file-actions">
+                        <Dropdown menu={{ items: menuItems }} trigger={['click']}>
+                            <Button size="small" icon={<MoreOutlined />} />
+                        </Dropdown>
+                    </div>
                 );
             },
         },
@@ -708,10 +944,15 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
     // 初始化时加载目录
     useEffect(() => {
-        if (visible) {
-            refreshDirectory();
+        if (visible && files.length === 0 && !loading && !isWaitingForLs) {
+            console.log('FileBrowser初始化，加载目录:', currentDirectory);
+            const timeoutId = setTimeout(() => {
+                refreshDirectory();
+            }, 100); // 延迟100ms避免重复调用
+
+            return () => clearTimeout(timeoutId);
         }
-    }, [visible, refreshDirectory]);
+    }, [visible]); // 只依赖visible，避免因其他状态变化导致重复调用
 
     // 监听WebSocket消息，解析ls命令结果
     useEffect(() => {
@@ -734,30 +975,29 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     // 处理文件列表响应
                     if (data.type === 'file_list_response') {
                         console.log('收到文件列表响应:', data);
+
+                        // 验证请求ID是否匹配
+                        if (data.data.requestId && data.data.requestId !== currentRequestRef.current) {
+                            console.log('请求ID不匹配，忽略响应:', data.data.requestId, '当前ID:', currentRequestRef.current);
+                            return;
+                        }
+
                         setLoading(false);
                         setIsWaitingForLs(false);
 
-                        if (data.data) {
-                            if (data.data.error) {
-                                message.error(data.data.error);
-                                setFiles([]);
-                            } else if (data.data.files) {
-                                // 转换文件数据格式
-                                const fileItems: FileItem[] = data.data.files.map((file: any) => ({
-                                    name: file.name,
-                                    type: file.type as 'file' | 'directory',
-                                    size: file.size,
-                                    permissions: file.permissions,
-                                    modifiedTime: file.modified,
-                                    path: `${currentDirectory}/${file.name}`,
-                                    owner: file.owner,
-                                    group: file.group
-                                }));
-
-                                setFiles(fileItems);
-                                console.log(`成功加载 ${fileItems.length} 个文件/目录`);
-                            }
+                        if (data.data.error) {
+                            message.error(`获取文件列表失败: ${data.data.error}`);
+                            return;
                         }
+
+                        // 解析文件列表
+                        if (data.data.files && Array.isArray(data.data.files)) {
+                            setFiles(data.data.files);
+                            console.log('文件列表更新完成，共', data.data.files.length, '个文件');
+                        }
+
+                        // 清除当前请求ID
+                        currentRequestRef.current = null;
                         return;
                     }
 
@@ -928,9 +1168,22 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     </div>
                 }
                 variant="outlined"
-                style={{ height: '100%' }}
+                style={{ height: '100%', position: 'relative' }}
                 styles={{ body: { padding: 0, height: 'calc(100% - 57px)' } }}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
             >
+                {/* 拖拽覆盖层 */}
+                {isDragOver && (
+                    <div className="drag-drop-overlay">
+                        <div>
+                            <CloudUploadOutlined style={{ fontSize: 48, marginBottom: 16 }} />
+                            <div>拖拽文件到此处上传</div>
+                        </div>
+                    </div>
+                )}
+
                 {/* 工具栏 */}
                 <div className="file-browser-toolbar">
                     <Space wrap>
@@ -938,6 +1191,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                             icon={<ReloadOutlined />}
                             onClick={refreshDirectory}
                             loading={loading}
+                            type="primary"
                         >
                             刷新
                         </Button>
@@ -957,7 +1211,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                             </Button>
                         </Upload>
                         {uploadProgress > 0 && uploadProgress < 100 && (
-                            <div style={{ minWidth: 150 }}>
+                            <div className="upload-progress">
                                 <Progress
                                     percent={uploadProgress}
                                     size="small"
@@ -989,21 +1243,104 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                     });
                                 }}
                             >
-                                批量删除
+                                批量删除 ({selectedFiles.length})
                             </Button>
                         )}
                     </Space>
                 </div>
+
                 <div className="file-browser-content">
-                    <Breadcrumb items={getBreadcrumbItems()} />
-                    <Table
-                        columns={columns}
-                        dataSource={files}
-                        rowKey="name"
-                        pagination={false}
-                        size="small"
-                        scroll={{ y: 'calc(100% - 250px)' }}
-                    />
+                    {/* 面包屑导航 */}
+                    <div className="file-browser-breadcrumb">
+                        <Breadcrumb items={getBreadcrumbItems()} />
+                    </div>
+
+                    {/* 搜索框 */}
+                    <div className="search-box">
+                        <Input.Search
+                            placeholder="搜索文件和文件夹..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            onSearch={(value) => setSearchTerm(value)}
+                            allowClear
+                            enterButton="搜索"
+                            size="large"
+                            style={{ marginBottom: 16 }}
+                        />
+                    </div>
+
+                    {/* 批量操作提示 */}
+                    {selectedFiles.length > 0 && (
+                        <div className="batch-actions">
+                            <div className="batch-actions-info">
+                                已选择 {selectedFiles.length} 个项目
+                            </div>
+                            <div className="batch-actions-buttons">
+                                <Button
+                                    size="small"
+                                    onClick={() => setSelectedFiles([])}
+                                >
+                                    取消选择
+                                </Button>
+                                <Button
+                                    size="small"
+                                    icon={<CopyOutlined />}
+                                >
+                                    复制
+                                </Button>
+                                <Button
+                                    size="small"
+                                    icon={<ScissorOutlined />}
+                                >
+                                    剪切
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 文件表格 */}
+                    <div className="file-browser-table">
+                        {loading ? (
+                            <div className="loading-overlay">
+                                <div style={{ textAlign: 'center' }}>
+                                    <ReloadOutlined spin style={{ fontSize: 24, marginBottom: 16 }} />
+                                    <div>正在加载文件列表...</div>
+                                </div>
+                            </div>
+                        ) : filteredFiles.length === 0 ? (
+                            <div className="empty-state">
+                                <FolderOutlined className="empty-state-icon" />
+                                <div>
+                                    {searchTerm ? `没有找到包含 "${searchTerm}" 的文件` : '此目录为空'}
+                                </div>
+                                {searchTerm && (
+                                    <Button
+                                        type="link"
+                                        onClick={clearSearch}
+                                        style={{ marginTop: 8 }}
+                                    >
+                                        清除搜索条件
+                                    </Button>
+                                )}
+                            </div>
+                        ) : (
+                            <Table
+                                columns={columns}
+                                dataSource={filteredFiles}
+                                rowKey="name"
+                                pagination={false}
+                                size="small"
+                                scroll={{ y: 'calc(100vh - 400px)' }}
+                                rowSelection={{
+                                    selectedRowKeys: selectedFiles,
+                                    onChange: (keys) => setSelectedFiles(keys as string[]),
+                                    getCheckboxProps: (record) => ({
+                                        name: record.name,
+                                    }),
+                                }}
+                            />
+                        )}
+                    </div>
                 </div>
             </Card>
         </div>

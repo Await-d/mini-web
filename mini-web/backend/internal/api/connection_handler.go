@@ -698,10 +698,11 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 						case "file_list":
 							// 处理文件列表请求
 							var fileListData struct {
-								Path string `json:"path"`
+								Path      string `json:"path"`
+								RequestId string `json:"requestId,omitempty"`
 							}
 							if err := json.Unmarshal(cmd.Data, &fileListData); err == nil {
-								log.Printf("收到文件列表请求: 路径=%s", fileListData.Path)
+								log.Printf("收到文件列表请求: 路径=%s, 请求ID=%s", fileListData.Path, fileListData.RequestId)
 
 								// 检查是否是SSH终端
 								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
@@ -712,89 +713,117 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 										response := struct {
 											Type string `json:"type"`
 											Data struct {
-												Path  string `json:"path"`
-												Error string `json:"error"`
+												Path      string `json:"path"`
+												Error     string `json:"error"`
+												RequestId string `json:"requestId,omitempty"`
 											} `json:"data"`
 										}{
 											Type: "file_list_response",
 											Data: struct {
-												Path  string `json:"path"`
-												Error string `json:"error"`
+												Path      string `json:"path"`
+												Error     string `json:"error"`
+												RequestId string `json:"requestId,omitempty"`
 											}{
-												Path:  fileListData.Path,
-												Error: "SSH命令处理器不可用",
+												Path:      fileListData.Path,
+												Error:     "SSH命令处理器不可用",
+												RequestId: fileListData.RequestId,
 											},
 										}
-										respData, _ := json.Marshal(response)
-										wsConn.WriteMessage(websocket.TextMessage, respData)
-										continue
+										if responseBytes, err := json.Marshal(response); err == nil {
+											wsConn.WriteMessage(websocket.TextMessage, responseBytes)
+										}
+										return
 									}
 
-									log.Printf("使用SSH命令处理器获取文件列表")
 									// 使用SSH命令处理器获取文件列表
 									go func() {
 										fileListResp, err := commandHandler.ExecuteFileListCommand(fileListData.Path)
+										var responseBytes []byte
+
 										if err != nil {
 											log.Printf("执行文件列表命令失败: %v", err)
 											response := struct {
 												Type string `json:"type"`
 												Data struct {
-													Path  string `json:"path"`
-													Error string `json:"error"`
+													Path      string `json:"path"`
+													Error     string `json:"error"`
+													RequestId string `json:"requestId,omitempty"`
 												} `json:"data"`
 											}{
 												Type: "file_list_response",
 												Data: struct {
-													Path  string `json:"path"`
-													Error string `json:"error"`
+													Path      string `json:"path"`
+													Error     string `json:"error"`
+													RequestId string `json:"requestId,omitempty"`
 												}{
-													Path:  fileListData.Path,
-													Error: err.Error(),
+													Path:      fileListData.Path,
+													Error:     fmt.Sprintf("命令执行失败: %v", err),
+													RequestId: fileListData.RequestId,
 												},
 											}
-											respData, _ := json.Marshal(response)
-											wsConn.WriteMessage(websocket.TextMessage, respData)
-											return
+											responseBytes, _ = json.Marshal(response)
+										} else {
+											// 构建响应
+											response := struct {
+												Type string `json:"type"`
+												Data struct {
+													Path      string             `json:"path"`
+													Files     []service.FileInfo `json:"files"`
+													Error     string             `json:"error,omitempty"`
+													RequestId string             `json:"requestId,omitempty"`
+												} `json:"data"`
+											}{
+												Type: "file_list_response",
+												Data: struct {
+													Path      string             `json:"path"`
+													Files     []service.FileInfo `json:"files"`
+													Error     string             `json:"error,omitempty"`
+													RequestId string             `json:"requestId,omitempty"`
+												}{
+													Path:      fileListResp.Path,
+													Files:     fileListResp.Files,
+													Error:     fileListResp.Error,
+													RequestId: fileListData.RequestId,
+												},
+											}
+											responseBytes, _ = json.Marshal(response)
 										}
 
-										log.Printf("文件列表获取成功，共%d个文件", len(fileListResp.Files))
-										// 发送文件列表响应
-										response := struct {
-											Type string                    `json:"type"`
-											Data *service.FileListResponse `json:"data"`
-										}{
-											Type: "file_list_response",
-											Data: fileListResp,
+										// 发送响应
+										if len(responseBytes) > 0 {
+											log.Printf("发送文件列表响应，文件数量: %d, 请求ID: %s", len(fileListResp.Files), fileListData.RequestId)
+											wsConn.WriteMessage(websocket.TextMessage, responseBytes)
+										} else {
+											log.Printf("序列化响应失败")
 										}
-										respData, _ := json.Marshal(response)
-										wsConn.WriteMessage(websocket.TextMessage, respData)
 									}()
 								} else {
-									// 非SSH终端，使用传统方式
-									lsCmd := fmt.Sprintf("ls -la '%s' 2>&1", fileListData.Path)
-									terminal.Write([]byte(lsCmd + "\n"))
-
-									// 发送处理中响应
+									log.Printf("不是SSH终端，无法处理文件列表请求")
 									response := struct {
 										Type string `json:"type"`
 										Data struct {
-											Path       string `json:"path"`
-											Processing bool   `json:"processing"`
+											Path      string `json:"path"`
+											Error     string `json:"error"`
+											RequestId string `json:"requestId,omitempty"`
 										} `json:"data"`
 									}{
-										Type: "file_list_processing",
+										Type: "file_list_response",
 										Data: struct {
-											Path       string `json:"path"`
-											Processing bool   `json:"processing"`
+											Path      string `json:"path"`
+											Error     string `json:"error"`
+											RequestId string `json:"requestId,omitempty"`
 										}{
-											Path:       fileListData.Path,
-											Processing: true,
+											Path:      fileListData.Path,
+											Error:     "仅SSH终端支持文件列表功能",
+											RequestId: fileListData.RequestId,
 										},
 									}
-									respData, _ := json.Marshal(response)
-									wsConn.WriteMessage(websocket.TextMessage, respData)
+									if responseBytes, err := json.Marshal(response); err == nil {
+										wsConn.WriteMessage(websocket.TextMessage, responseBytes)
+									}
 								}
-								continue
+							} else {
+								log.Printf("解析文件列表请求数据失败: %v", err)
 							}
 						case "resize":
 							// 支持两种不同格式的调整大小命令

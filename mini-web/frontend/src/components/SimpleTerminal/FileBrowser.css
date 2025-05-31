@@ -2,333 +2,368 @@
 
 .file-browser {
     height: 100%;
+    width: 100%;
     display: flex;
     flex-direction: column;
-    background: linear-gradient(135deg, #f6f9fc 0%, #ffffff 100%);
+    background: #fafafa;
+}
+
+.file-browser .ant-card {
     border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.file-browser .ant-card-body {
-    padding: 16px;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-}
-
-/* 工具栏样式 */
 .file-browser-toolbar {
-    margin-bottom: 16px;
-    padding: 12px;
-    background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
-    border-radius: 6px;
-    border: 1px solid #e1f5fe;
+    padding: 16px;
+    background: #fff;
+    border-bottom: 1px solid #f0f0f0;
+    border-radius: 8px 8px 0 0;
 }
 
 .file-browser-toolbar .ant-btn {
-    margin-right: 8px;
-    margin-bottom: 8px;
-    border-radius: 4px;
-    transition: all 0.3s ease;
+    border-radius: 6px;
+    font-weight: 500;
 }
 
-.file-browser-toolbar .ant-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(24, 144, 255, 0.2);
+.file-browser-toolbar .ant-btn-primary {
+    background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+    border: none;
+    box-shadow: 0 2px 4px rgba(24, 144, 255, 0.3);
 }
 
-/* 面包屑导航样式 */
+.file-browser-toolbar .ant-btn-primary:hover {
+    background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(24, 144, 255, 0.4);
+}
+
+.file-browser-content {
+    flex: 1;
+    padding: 16px;
+    background: #fff;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
 .file-browser-breadcrumb {
     margin-bottom: 16px;
     padding: 8px 12px;
-    background: rgba(240, 248, 255, 0.6);
-    border-radius: 4px;
-    border-left: 3px solid #1890ff;
-    backdrop-filter: blur(10px);
+    background: #f8f9fa;
+    border-radius: 6px;
+    border: 1px solid #e9ecef;
 }
 
 .file-browser-breadcrumb .ant-breadcrumb-link {
     color: #1890ff;
     font-weight: 500;
-    transition: color 0.3s ease;
+    transition: all 0.2s;
 }
 
 .file-browser-breadcrumb .ant-breadcrumb-link:hover {
     color: #40a9ff;
-    text-decoration: underline;
+    background: rgba(24, 144, 255, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
 }
 
-/* 文件表格样式 */
 .file-browser-table {
     flex: 1;
     overflow: hidden;
 }
 
 .file-browser-table .ant-table {
-    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-    border-radius: 8px;
+    border-radius: 6px;
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .file-browser-table .ant-table-thead > tr > th {
-    background: linear-gradient(135deg, #1890ff 0%, #722ed1 100%);
-    color: white;
+    background: #fafafa;
+    border-bottom: 2px solid #f0f0f0;
     font-weight: 600;
-    border: none;
-    padding: 12px 16px;
+    color: #262626;
 }
 
 .file-browser-table .ant-table-tbody > tr {
-    transition: all 0.3s ease;
+    transition: all 0.2s;
 }
 
 .file-browser-table .ant-table-tbody > tr:hover {
-    background: linear-gradient(135deg, rgba(24, 144, 255, 0.05) 0%, rgba(114, 46, 209, 0.05) 100%);
-    transform: translateX(4px);
-    box-shadow: 0 2px 8px rgba(24, 144, 255, 0.15);
+    background: #f0f9ff !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.file-browser-table .ant-table-tbody > tr > td {
-    padding: 12px 16px;
-    border-bottom: 1px solid #f0f0f0;
+.file-browser-table .ant-table-tbody > tr:nth-child(even) {
+    background: #fafafa;
 }
 
-/* 文件/目录名称样式 */
-.directory-name {
-    color: #1890ff;
+.file-browser-table .ant-table-tbody > tr.ant-table-row-selected {
+    background: #e6f7ff !important;
+}
+
+.file-item {
+    display: flex;
+    align-items: center;
     cursor: pointer;
-    font-weight: 500;
-    transition: color 0.3s ease;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all 0.2s;
 }
 
-.directory-name:hover {
-    color: #40a9ff;
-    text-decoration: underline;
+.file-item:hover {
+    background: rgba(24, 144, 255, 0.1);
 }
 
-.file-name {
-    color: #52c41a;
-    font-weight: 500;
+.file-item.selected {
+    background: rgba(24, 144, 255, 0.2);
+    color: #1890ff;
 }
 
-/* 文件图标样式 */
-.file-browser-table .anticon {
+.file-item-icon {
     margin-right: 8px;
     font-size: 16px;
-}
-
-/* 操作按钮样式 */
-.file-browser-table .ant-btn {
-    border-radius: 50%;
-    width: 32px;
-    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.3s ease;
+    width: 20px;
+    height: 20px;
 }
 
-.file-browser-table .ant-btn:hover {
-    transform: scale(1.1);
-}
-
-/* 复选框样式 */
-.file-browser-table input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-    cursor: pointer;
-    accent-color: #1890ff;
-    border-radius: 2px;
-}
-
-/* 标签样式 */
-.file-browser-table .ant-tag {
-    border-radius: 12px;
-    padding: 2px 8px;
-    font-size: 12px;
+.file-item-name {
     font-weight: 500;
-    background: linear-gradient(135deg, #e6f7ff 0%, #f0f5ff 100%);
-    border: 1px solid #91d5ff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-size {
+    font-family: 'Monaco', 'Consolas', monospace;
+    color: #666;
+    font-size: 12px;
+}
+
+.file-permissions {
+    font-family: 'Monaco', 'Consolas', monospace;
+    font-size: 12px;
+    background: #f5f5f5;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #595959;
+}
+
+.file-time {
+    color: #8c8c8c;
+    font-size: 12px;
+}
+
+.file-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.file-actions .ant-btn {
+    border-radius: 4px;
+    border: none;
+    background: transparent;
+    color: #8c8c8c;
+    transition: all 0.2s;
+}
+
+.file-actions .ant-btn:hover {
+    background: #f0f0f0;
     color: #1890ff;
 }
 
-/* 模态框样式 */
-.ant-modal .ant-modal-header {
-    background: linear-gradient(135deg, #1890ff 0%, #722ed1 100%);
-    border-radius: 8px 8px 0 0;
+.upload-progress {
+    margin-left: 12px;
+    min-width: 150px;
 }
 
-.ant-modal .ant-modal-title {
-    color: white;
-    font-weight: 600;
+.upload-progress .ant-progress-line {
+    margin: 0;
 }
 
-.ant-modal .ant-modal-close {
-    color: white;
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: #8c8c8c;
 }
 
-.ant-modal .ant-modal-close:hover {
-    color: #f0f0f0;
-}
-
-/* 上传区域样式 */
-.ant-upload-drag {
-    background: linear-gradient(135deg, #f6ffed 0%, #e6f7ff 100%);
-    border: 2px dashed #52c41a !important;
-    border-radius: 8px;
-    transition: all 0.3s ease;
-}
-
-.ant-upload-drag:hover {
-    border-color: #1890ff !important;
-    background: linear-gradient(135deg, #e6f7ff 0%, #f6ffed 100%);
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(24, 144, 255, 0.15);
-}
-
-.ant-upload-drag-icon .anticon {
-    color: #52c41a;
+.empty-state-icon {
     font-size: 48px;
+    margin-bottom: 16px;
+    color: #d9d9d9;
+}
+
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+.search-box {
     margin-bottom: 16px;
 }
 
-.ant-upload-text {
-    color: #52c41a;
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 8px;
+.search-box .ant-input {
+    border-radius: 6px;
 }
 
-.ant-upload-hint {
-    color: #8c8c8c;
-    font-size: 14px;
+.search-box .ant-input-affix-wrapper {
+    border-radius: 6px;
 }
 
-.upload-progress {
-    margin-top: 16px;
+.batch-actions {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: #e6f7ff;
+    border: 1px solid #91d5ff;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
 }
 
-/* 批量操作菜单样式 */
-.ant-dropdown-menu {
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+.batch-actions-info {
+    color: #1890ff;
+    font-weight: 500;
 }
 
-.ant-dropdown-menu-item {
+.batch-actions-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.context-menu {
+    background: #fff;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    padding: 4px 0;
+    z-index: 1000;
+}
+
+.context-menu-item {
     padding: 8px 16px;
-    transition: all 0.3s ease;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+    transition: all 0.2s;
 }
 
-.ant-dropdown-menu-item:hover {
-    background: linear-gradient(135deg, rgba(24, 144, 255, 0.08) 0%, rgba(114, 46, 209, 0.08) 100%);
-    transform: translateX(4px);
+.context-menu-item:hover {
+    background: #f0f0f0;
 }
 
-.ant-dropdown-menu-item-danger:hover {
-    background: linear-gradient(135deg, rgba(255, 77, 79, 0.08) 0%, rgba(255, 120, 117, 0.08) 100%);
+.context-menu-item.danger:hover {
+    background: #fff2f0;
     color: #ff4d4f;
+}
+
+.context-menu-icon {
+    margin-right: 8px;
+    width: 16px;
+    text-align: center;
+}
+
+.drag-drop-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(24, 144, 255, 0.1);
+    border: 2px dashed #1890ff;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    font-size: 18px;
+    font-weight: 500;
+    color: #1890ff;
 }
 
 /* 响应式设计 */
 @media (max-width: 768px) {
     .file-browser-toolbar {
-        padding: 8px;
+        padding: 12px;
     }
     
-    .file-browser-toolbar .ant-btn {
-        margin-right: 4px;
-        margin-bottom: 4px;
-        font-size: 12px;
-        padding: 4px 8px;
-        height: auto;
+    .file-browser-toolbar .ant-space {
+        flex-wrap: wrap;
     }
     
-    .file-browser-breadcrumb {
-        padding: 6px 8px;
-        font-size: 12px;
+    .file-browser-content {
+        padding: 12px;
     }
     
-    .file-browser-table .ant-table-thead > tr > th,
-    .file-browser-table .ant-table-tbody > tr > td {
-        padding: 8px 12px;
-        font-size: 12px;
-    }
-    
-    .file-browser-table .ant-btn {
-        width: 28px;
-        height: 28px;
-        font-size: 12px;
+    .file-browser-table .ant-table-scroll {
+        overflow-x: auto;
     }
 }
 
-/* 滚动条样式 */
-.file-browser-table .ant-table-body::-webkit-scrollbar {
+/* 滚动条美化 */
+.file-browser-table ::-webkit-scrollbar {
     width: 6px;
+    height: 6px;
 }
 
-.file-browser-table .ant-table-body::-webkit-scrollbar-track {
-    background: #f0f0f0;
+.file-browser-table ::-webkit-scrollbar-track {
+    background: #f1f1f1;
     border-radius: 3px;
 }
 
-.file-browser-table .ant-table-body::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, #1890ff, #722ed1);
+.file-browser-table ::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
     border-radius: 3px;
-    transition: background 0.3s;
 }
 
-.file-browser-table .ant-table-body::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, #40a9ff, #9254de);
-}
-
-/* 加载状态样式 */
-.ant-spin-nested-loading > div > .ant-spin {
-    max-height: none;
-}
-
-.ant-spin-dot {
-    color: #1890ff;
+.file-browser-table ::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
 }
 
 /* 动画效果 */
-@keyframes fadeInUp {
+@keyframes fadeIn {
     from {
         opacity: 0;
-        transform: translate3d(0, 20px, 0);
+        transform: translateY(10px);
     }
     to {
         opacity: 1;
-        transform: translate3d(0, 0, 0);
+        transform: translateY(0);
     }
 }
 
-.file-browser {
-    animation: fadeInUp 0.6s ease-out;
+.file-browser-content {
+    animation: fadeIn 0.3s ease-out;
 }
 
-/* 卡片头部样式 */
-.file-browser .ant-card-head {
-    background: linear-gradient(135deg, #1890ff 0%, #722ed1 100%);
-    border-radius: 8px 8px 0 0;
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+    100% {
+        transform: scale(1);
+    }
 }
 
-.file-browser .ant-card-head-title {
-    color: white;
-    font-weight: 600;
-    font-size: 16px;
-}
-
-.file-browser .ant-card-extra .ant-btn {
-    color: white;
-    border-color: rgba(255, 255, 255, 0.3);
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-}
-
-.file-browser .ant-card-extra .ant-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 255, 255, 0.5);
-    transform: translateY(-1px);
+.loading-overlay .ant-spin {
+    animation: pulse 2s infinite;
 } 
