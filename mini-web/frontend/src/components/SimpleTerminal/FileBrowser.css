@@ -504,18 +504,36 @@
     background: white;
     height: 48px; /* 固定行高，与虚拟化配置一致 */
     min-height: 48px;
-    /* 极简化过渡效果，提升滚动性能 */
-    transition: none; /* 完全禁用transition，避免重绘 */
+    /* 完全禁用所有过渡和动画效果 */
+    transition: none !important;
+    animation: none !important;
     /* 使用 transform3d 开启硬件加速 */
     transform: translateZ(0);
     /* 避免重排重绘 */
     will-change: auto;
-    contain: layout paint; /* 隔离渲染 */
+    contain: layout style paint; /* 严格隔离渲染 */
+    /* 禁用指针事件的额外效果 */
+    pointer-events: auto;
 }
 
+/* 移除原生hover效果，使用JavaScript控制的类 */
 .virtual-file-row:hover {
-    background: #f0f9ff;
-    /* 简化hover效果，提升性能 */
+    /* 不设置任何样式，完全通过JavaScript控制 */
+}
+
+/* 通过JavaScript控制的hover效果，避免与终端光标冲突 */
+.virtual-file-row.row-hovered {
+    background-color: #f0f9ff !important;
+    transition: none !important; /* 禁用过渡效果 */
+}
+
+/* 确保选中状态优先级更高 */
+.virtual-file-row.selected {
+    background-color: #e6f7ff !important;
+}
+
+.virtual-file-row.selected.row-hovered {
+    background-color: #d6f2ff !important; /* 选中状态下的hover效果 */
 }
 
 .virtual-file-row.selected {

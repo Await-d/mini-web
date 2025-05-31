@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-31 21:08:10
+ * @LastEditTime: 2025-05-31 21:15:54
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -132,6 +132,11 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     // 添加初始化标记，防止多次请求
     const hasInitializedRef = useRef<boolean>(false);
     const initializationTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+    // 防止状态更新冲突的引用
+    const isUpdatingRef = useRef(false);
+    const lastUpdateTimeRef = useRef(0);
+    const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     // 虚拟化文件列表配置 - 修复空白问题
     const rowVirtualizer = useVirtualizer({
@@ -1152,6 +1157,9 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
         // 缓存事件处理器 - 只有双击才进入目录，单击选中
         const handleRowClick = useCallback((e: React.MouseEvent) => {
+            // 阻止事件冒泡到父组件（终端）
+            e.stopPropagation();
+
             // 如果点击的是操作按钮区域，不处理行点击
             if ((e.target as HTMLElement).closest('.file-actions')) {
                 return;
@@ -1164,6 +1172,9 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
         // 双击进入目录
         const handleRowDoubleClick = useCallback((e: React.MouseEvent) => {
+            // 阻止事件冒泡到父组件（终端）
+            e.stopPropagation();
+
             // 如果点击的是操作按钮区域，不处理双击
             if ((e.target as HTMLElement).closest('.file-actions')) {
                 return;
@@ -1176,6 +1187,44 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 viewFile(file.name);
             }
         }, [file.name, file.type, enterDirectory, viewFile]);
+
+        // 鼠标悬停处理 - 完全防止与终端产生冲突
+        const handleRowMouseEnter = useCallback((e: React.MouseEvent) => {
+            e.stopPropagation();
+            e.preventDefault();
+
+            // 清除之前的超时
+            if (hoverTimeoutRef.current) {
+                clearTimeout(hoverTimeoutRef.current);
+                hoverTimeoutRef.current = null;
+            }
+
+            // 防抖处理，避免频繁触发和与终端光标同步
+            hoverTimeoutRef.current = setTimeout(() => {
+                const target = e.currentTarget as HTMLElement;
+                if (target && target.classList.contains('virtual-file-row')) {
+                    // 只使用CSS类控制，不修改style属性，避免重排
+                    target.classList.add('row-hovered');
+                }
+            }, 50);
+        }, []);
+
+        const handleRowMouseLeave = useCallback((e: React.MouseEvent) => {
+            e.stopPropagation();
+            e.preventDefault();
+
+            // 清除之前的超时
+            if (hoverTimeoutRef.current) {
+                clearTimeout(hoverTimeoutRef.current);
+                hoverTimeoutRef.current = null;
+            }
+
+            // 立即移除hover效果，不使用setTimeout
+            const target = e.currentTarget as HTMLElement;
+            if (target && target.classList.contains('virtual-file-row')) {
+                target.classList.remove('row-hovered');
+            }
+        }, []);
 
         const handleCheckboxChange = useCallback((e: any) => {
             e.stopPropagation();
@@ -1199,6 +1248,10 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 className={`virtual-file-row ${isSelected ? 'selected' : ''} ${file.type === 'directory' ? 'directory' : 'file'}`}
                 onClick={handleRowClick}
                 onDoubleClick={handleRowDoubleClick}
+                onMouseEnter={handleRowMouseEnter}
+                onMouseLeave={handleRowMouseLeave}
+                onMouseMove={(e) => e.stopPropagation()}
+                onContextMenu={(e) => e.stopPropagation()}
             >
                 <div className="file-row-content">
                     {/* 选择框 */}
@@ -1337,10 +1390,20 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         console.log('FileBrowser: 注册WebSocket消息监听器 (优化版)');
 
         const handleMessage = (event: MessageEvent) => {
-            // 性能优化：减少不必要的日志输出
+            // 性能优化：减少不必要的日志输出和防止冲突
             if (typeof event.data !== 'string') {
                 return;
             }
+
+            const currentTime = Date.now();
+
+            // 防止过于频繁的消息处理，减少与终端光标的冲突
+            if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 100) {
+                return;
+            }
+
+            isUpdatingRef.current = true;
+            lastUpdateTimeRef.current = currentTime;
 
             let messageData: string = '';
 
@@ -1502,6 +1565,11 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 setLoading(false);
                 setIsWaitingForLs(false);
                 currentRequestRef.current = null;
+            } finally {
+                // 延迟重置更新标记，防止与终端消息冲突
+                setTimeout(() => {
+                    isUpdatingRef.current = false;
+                }, 100);
             }
         };
 
@@ -1527,6 +1595,9 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             }
             if (requestTimeoutRef.current) {
                 clearTimeout(requestTimeoutRef.current);
+            }
+            if (hoverTimeoutRef.current) {
+                clearTimeout(hoverTimeoutRef.current);
             }
         };
     }, []);
@@ -1633,10 +1704,96 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         }, 0);
     }, [viewFile, downloadFile, deleteItem, enterDirectory]);
 
+    // 键盘事件处理 - 阻止事件冒泡到终端
+    const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+        // 阻止所有键盘事件冒泡到父组件（终端）
+        e.stopPropagation();
+
+        // 处理文件浏览器特定的快捷键
+        switch (e.key) {
+            case 'F5':
+                e.preventDefault();
+                refreshDirectory();
+                break;
+            case 'Escape':
+                if (onClose) {
+                    e.preventDefault();
+                    onClose();
+                }
+                break;
+            case 'Delete':
+                if (selectedFiles.length > 0) {
+                    e.preventDefault();
+                    // 处理删除选中文件的逻辑
+                    Modal.confirm({
+                        title: '批量删除',
+                        content: `确定要删除选中的 ${selectedFiles.length} 个项目吗？`,
+                        onOk: () => {
+                            message.info('批量删除功能正在开发中，将通过后端API实现');
+                            setSelectedFiles([]);
+                        }
+                    });
+                }
+                break;
+            case 'Enter':
+                if (selectedFiles.length === 1) {
+                    e.preventDefault();
+                    const selectedFile = files.find(f => f.name === selectedFiles[0]);
+                    if (selectedFile) {
+                        if (selectedFile.type === 'directory') {
+                            enterDirectory(selectedFile.name);
+                        } else {
+                            viewFile(selectedFile.name);
+                        }
+                    }
+                }
+                break;
+            case 'Backspace':
+                if (e.ctrlKey) {
+                    e.preventDefault();
+                    goToParent();
+                }
+                break;
+            case 'a':
+                if (e.ctrlKey) {
+                    e.preventDefault();
+                    // 全选
+                    if (selectedFiles.length === filteredFiles.length) {
+                        setSelectedFiles([]);
+                    } else {
+                        setSelectedFiles(filteredFiles.map(f => f.name));
+                    }
+                }
+                break;
+            default:
+                // 其他按键也阻止冒泡，防止影响终端
+                break;
+        }
+    }, [refreshDirectory, onClose, selectedFiles, files, filteredFiles, enterDirectory, viewFile, goToParent]);
+
+    // 鼠标事件处理 - 阻止不必要的事件冒泡
+    const handleMouseEvent = useCallback((e: React.MouseEvent) => {
+        // 阻止鼠标事件冒泡，防止影响终端的鼠标处理
+        e.stopPropagation();
+    }, []);
+
+    // 焦点处理 - 确保文件浏览器获得焦点时不影响终端
+    const handleFocus = useCallback((e: React.FocusEvent) => {
+        e.stopPropagation();
+    }, []);
+
     if (!visible) return null;
 
     return (
-        <div className="file-browser">
+        <div
+            className="file-browser"
+            onKeyDown={handleKeyDown}
+            onMouseDown={handleMouseEvent}
+            onMouseUp={handleMouseEvent}
+            onMouseMove={handleMouseEvent}
+            onFocus={handleFocus}
+            tabIndex={-1} // 使div可以接收键盘事件但不参与tab导航
+        >
             <Card
                 title={
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1908,6 +2065,9 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                         overflow: 'auto',
                                         minHeight: 0, // 确保flex子元素能够收缩
                                     }}
+                                    onScroll={(e) => e.stopPropagation()}
+                                    onWheel={(e) => e.stopPropagation()}
+                                    onMouseMove={(e) => e.stopPropagation()}
                                 >
                                     <div
                                         style={{
