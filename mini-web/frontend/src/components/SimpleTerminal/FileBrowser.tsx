@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-31 21:05:02
+ * @LastEditTime: 2025-05-31 21:08:10
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -1246,7 +1246,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                             trigger={['click']}
                             destroyOnHidden={true}
                             placement="bottomRight"
-                            overlayStyle={{ zIndex: 9999 }}
+                            getPopupContainer={(trigger) => trigger.parentElement || document.body}
                         >
                             <Button
                                 type="text"

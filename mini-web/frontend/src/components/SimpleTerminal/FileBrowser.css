@@ -610,9 +610,9 @@
     opacity: 1;
 }
 
-/* 确保下拉菜单层级正确 */
+/* 确保下拉菜单层级正确 - 使用合理的 zIndex 值 */
 .ant-dropdown {
-    z-index: 9999 !important;
+    z-index: 1050 !important; /* 比默认的 1000 稍高，但不会过高 */
 }
 
 /* 响应式设计 */
