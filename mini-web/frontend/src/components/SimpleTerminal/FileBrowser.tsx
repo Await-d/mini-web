@@ -331,6 +331,12 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
     // 刷新当前目录
     const refreshDirectory = useCallback(() => {
+        // 防止重复调用
+        if (loading || isWaitingForLs) {
+            console.log('正在加载中，跳过重复请求');
+            return;
+        }
+
         console.log('开始刷新目录:', currentDirectory);
         setLoading(true);
         setFiles([]); // 清空当前文件列表
@@ -350,6 +356,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
             message.error('WebSocket连接未建立');
             setLoading(false);
+            setIsWaitingForLs(false);
             return;
         }
 

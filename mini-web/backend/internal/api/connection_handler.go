@@ -704,10 +704,36 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 								log.Printf("收到文件列表请求: 路径=%s", fileListData.Path)
 
 								// 检查是否是SSH终端
-								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok && sshTerminal.GetCommandHandler() != nil {
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										response := struct {
+											Type string `json:"type"`
+											Data struct {
+												Path  string `json:"path"`
+												Error string `json:"error"`
+											} `json:"data"`
+										}{
+											Type: "file_list_response",
+											Data: struct {
+												Path  string `json:"path"`
+												Error string `json:"error"`
+											}{
+												Path:  fileListData.Path,
+												Error: "SSH命令处理器不可用",
+											},
+										}
+										respData, _ := json.Marshal(response)
+										wsConn.WriteMessage(websocket.TextMessage, respData)
+										continue
+									}
+
+									log.Printf("使用SSH命令处理器获取文件列表")
 									// 使用SSH命令处理器获取文件列表
 									go func() {
-										fileListResp, err := sshTerminal.GetCommandHandler().ExecuteFileListCommand(fileListData.Path)
+										fileListResp, err := commandHandler.ExecuteFileListCommand(fileListData.Path)
 										if err != nil {
 											log.Printf("执行文件列表命令失败: %v", err)
 											response := struct {
@@ -731,6 +757,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 											return
 										}
 
+										log.Printf("文件列表获取成功，共%d个文件", len(fileListResp.Files))
 										// 发送文件列表响应
 										response := struct {
 											Type string                    `json:"type"`

@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-08 18:19:21
  * @LastEditors: Await
- * @LastEditTime: 2025-05-21 20:01:12
+ * @LastEditTime: 2025-05-31 16:57:49
  * @Description: 请填写简介
  */
 package service
@@ -120,11 +120,14 @@ func createSSHTerminalSession(conn *model.Connection) (*SSHTerminalSession, erro
 	}
 
 	// 创建命令处理器
+	log.Printf("尝试创建SSH命令处理器...")
 	commandHandler, err := NewSSHCommandHandler(client)
 	if err != nil {
 		log.Printf("创建SSH命令处理器失败: %v", err)
 		// 不是致命错误，继续运行
 		commandHandler = nil
+	} else {
+		log.Printf("SSH命令处理器创建成功")
 	}
 
 	return &SSHTerminalSession{

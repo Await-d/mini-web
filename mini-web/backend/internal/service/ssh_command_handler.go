@@ -6,7 +6,6 @@ import (
 	"log"
 	"strings"
 	"sync"
-	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -47,35 +46,12 @@ type FileListResponse struct {
 
 // NewSSHCommandHandler 创建SSH命令处理器
 func NewSSHCommandHandler(client *ssh.Client) (*SSHCommandHandler, error) {
-	session, err := client.NewSession()
-	if err != nil {
-		return nil, fmt.Errorf("创建SSH会话失败: %w", err)
-	}
-
-	// 获取标准输入输出
-	stdin, err := session.StdinPipe()
-	if err != nil {
-		session.Close()
-		return nil, fmt.Errorf("获取标准输入管道失败: %w", err)
-	}
-
-	stdout, err := session.StdoutPipe()
-	if err != nil {
-		session.Close()
-		return nil, fmt.Errorf("获取标准输出管道失败: %w", err)
-	}
-
-	// 启动shell
-	if err := session.Shell(); err != nil {
-		session.Close()
-		return nil, fmt.Errorf("启动shell失败: %w", err)
-	}
-
+	// 不立即创建会话，而是在需要时创建一次性会话
 	handler := &SSHCommandHandler{
 		client:    client,
-		session:   session,
-		stdout:    bufio.NewReader(stdout),
-		stdin:     bufio.NewWriter(stdin),
+		session:   nil, // 不预创建会话
+		stdout:    nil,
+		stdin:     nil,
 		responses: make(chan *CommandResponse, 10),
 	}
 
@@ -87,67 +63,33 @@ func (h *SSHCommandHandler) ExecuteFileListCommand(path string) (*FileListRespon
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// 执行ls命令，使用特殊的标记来识别输出
-	marker := fmt.Sprintf("___FILE_LIST_START_%d___", time.Now().UnixNano())
-	endMarker := fmt.Sprintf("___FILE_LIST_END_%d___", time.Now().UnixNano())
+	// 创建一次性会话
+	session, err := h.client.NewSession()
+	if err != nil {
+		log.Printf("创建SSH会话失败: %v", err)
+		return &FileListResponse{
+			Path:  path,
+			Error: "无法创建SSH会话",
+		}, nil
+	}
+	defer session.Close()
 
-	// 使用更可靠的命令格式
-	cmd := fmt.Sprintf("echo '%s' && ls -la '%s' 2>&1 || echo 'ERROR:' $? && echo '%s'", marker, path, endMarker)
-
+	// 直接执行命令并获取输出
+	cmd := fmt.Sprintf("ls -la '%s' 2>&1", path)
 	log.Printf("执行文件列表命令: %s", cmd)
 
-	// 发送命令
-	if _, err := h.stdin.WriteString(cmd + "\n"); err != nil {
-		return nil, fmt.Errorf("发送命令失败: %w", err)
-	}
-	if err := h.stdin.Flush(); err != nil {
-		return nil, fmt.Errorf("刷新输入缓冲失败: %w", err)
+	output, err := session.CombinedOutput(cmd)
+	if err != nil {
+		log.Printf("执行命令失败: %v", err)
+		// 即使命令失败，也尝试解析输出
 	}
 
-	// 读取输出
-	var output []string
-	inOutput := false
-	timeout := time.After(5 * time.Second)
-
-	for {
-		select {
-		case <-timeout:
-			return &FileListResponse{
-				Path:  path,
-				Error: "命令执行超时",
-			}, nil
-		default:
-			line, err := h.stdout.ReadString('\n')
-			if err != nil {
-				log.Printf("读取输出错误: %v", err)
-				break
-			}
-
-			line = strings.TrimSpace(line)
-
-			if strings.Contains(line, marker) {
-				inOutput = true
-				continue
-			}
-
-			if strings.Contains(line, endMarker) {
-				break
-			}
-
-			if inOutput && line != "" {
-				output = append(output, line)
-			}
-		}
-
-		// 检查是否已经读取到结束标记
-		if len(output) > 0 && strings.Contains(output[len(output)-1], endMarker) {
-			output = output[:len(output)-1]
-			break
-		}
-	}
+	outputStr := string(output)
+	log.Printf("命令输出: %s", outputStr)
 
 	// 解析输出
-	return h.parseLsOutput(path, output)
+	lines := strings.Split(strings.TrimSpace(outputStr), "\n")
+	return h.parseLsOutput(path, lines)
 }
 
 // parseLsOutput 解析ls命令输出
@@ -237,5 +179,6 @@ func (h *SSHCommandHandler) parseLsOutput(path string, lines []string) (*FileLis
 // Close 关闭命令处理器
 func (h *SSHCommandHandler) Close() error {
 	close(h.responses)
-	return h.session.Close()
+	// 不需要关闭会话，因为使用的是一次性会话
+	return nil
 }
