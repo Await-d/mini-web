@@ -603,6 +603,8 @@
   border-radius: 0 0 8px 0;
   overflow: hidden;
   transition: all 0.3s ease;
+  height: 100%;
+  max-height: calc(100vh - 120px); /* 防止过度撑开 */
 }
 
 .file-browser-panel.half-width {
@@ -616,6 +618,7 @@
   right: 16px;
   width: 400px;
   height: calc(100% - 56px);
+  max-height: calc(100vh - 160px); /* 确保不超出视窗 */
   background: #ffffff;
   border-radius: 8px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);

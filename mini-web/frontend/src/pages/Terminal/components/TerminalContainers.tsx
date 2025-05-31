@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 15:31:39
  * @LastEditors: Await
- * @LastEditTime: 2025-05-24 18:26:45
+ * @LastEditTime: 2025-05-31 19:59:57
  * @Description: 终端容器组件，负责渲染适当的终端类型
  */
 import React, { useEffect, useCallback, useRef, useState } from 'react';
@@ -147,6 +147,7 @@ const TerminalContainers: React.FC<TerminalContainersProps> = ({
                     webSocketRef={tab.webSocketRef}
                     visible={tab.key === activeTabKey}
                     onReconnectRequest={handleReconnectRequest}
+                    tabKey={tab.key}
                 />
             );
         }

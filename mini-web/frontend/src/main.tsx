@@ -2,13 +2,16 @@
  * @Author: Await
  * @Date: 2025-05-08 18:19:21
  * @LastEditors: Await
- * @LastEditTime: 2025-05-25 20:04:07
+ * @LastEditTime: 2025-05-31 19:00:29
  * @Description: 请填写简介
  */
+// React 19 兼容性补丁 - 必须在所有其他导入之前
+import '@ant-design/v5-patch-for-react-19';
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { RouterProvider } from 'react-router-dom';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, App } from 'antd';
 import zhCN from 'antd/lib/locale/zh_CN';
 import { router } from './router';
 import { TerminalProvider } from './contexts/TerminalContext';
@@ -30,11 +33,17 @@ root.render(
   <React.StrictMode>
     <ConfigProvider
       locale={zhCN}
-      warning={{ compatibleReact19: true }}
+      theme={{
+        token: {
+          colorPrimary: '#1677ff',
+        },
+      }}
     >
-      <TerminalProvider>
-        <RouterProvider router={router} future={{ v7_startTransition: true }} />
-      </TerminalProvider>
+      <App>
+        <TerminalProvider>
+          <RouterProvider router={router} future={{ v7_startTransition: true }} />
+        </TerminalProvider>
+      </App>
     </ConfigProvider>
   </React.StrictMode>
 );

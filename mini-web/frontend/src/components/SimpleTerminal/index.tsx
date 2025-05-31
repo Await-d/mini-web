@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-26 20:28:23
+ * @LastEditTime: 2025-05-31 19:59:15
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -19,6 +19,7 @@ interface SimpleTerminalProps {
     webSocketRef: React.RefObject<WebSocket | null>;
     visible?: boolean;
     onReconnectRequest?: (connectionId: number, sessionId: string | number) => void;
+    tabKey?: string; // 添加tabKey属性
 }
 
 const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
@@ -26,7 +27,8 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     sessionId,
     webSocketRef,
     visible,
-    onReconnectRequest
+    onReconnectRequest,
+    tabKey
 }) => {
     // 基本状态
     const [output, setOutput] = useState<string[]>([]);
@@ -695,6 +697,9 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                         <FileBrowser
                             webSocketRef={webSocketRef}
                             visible={fileBrowserVisible}
+                            connectionId={connectionId}
+                            sessionId={sessionId}
+                            tabKey={tabKey}
                             onClose={() => {
                                 setFileBrowserVisible(false);
                                 setShowSplitView(false);
@@ -710,6 +715,9 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     <FileBrowser
                         webSocketRef={webSocketRef}
                         visible={fileBrowserVisible}
+                        connectionId={connectionId}
+                        sessionId={sessionId}
+                        tabKey={tabKey}
                         onClose={() => setFileBrowserVisible(false)}
                     />
                 </div>

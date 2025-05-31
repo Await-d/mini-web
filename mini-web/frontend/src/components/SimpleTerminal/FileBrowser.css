@@ -6,6 +6,7 @@
     display: flex;
     flex-direction: column;
     background: #fafafa;
+    overflow: hidden; /* 防止外部溢出 */
 }
 
 .file-browser .ant-card {
@@ -44,6 +45,7 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    min-height: 0; /* 确保能够收缩 */
 }
 
 .file-browser-breadcrumb {
@@ -70,6 +72,9 @@
 .file-browser-table {
     flex: 1;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0; /* 确保能够收缩 */
 }
 
 .file-browser-table .ant-table {
@@ -366,4 +371,264 @@
 
 .loading-overlay .ant-spin {
     animation: pulse 2s infinite;
+}
+
+/* 面包屑导航样式 */
+.breadcrumb-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.file-browser-breadcrumb {
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+/* 路径记录指示器样式 */
+.path-record-indicator {
+    display: flex;
+    align-items: center;
+}
+
+.saved-path-hint {
+    font-size: 12px;
+    color: #6c757d;
+    background: rgba(40, 167, 69, 0.1);
+    padding: 4px 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(40, 167, 69, 0.2);
+    cursor: help;
+    transition: all 0.2s ease-in-out;
+}
+
+.saved-path-hint:hover {
+    background: rgba(40, 167, 69, 0.15);
+    border-color: rgba(40, 167, 69, 0.3);
+    transform: scale(1.05);
+}
+
+/* 虚拟化文件列表样式 */
+.virtual-file-container {
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    overflow: hidden;
+    background: white;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0; /* 确保能够收缩 */
+}
+
+.virtual-file-header {
+    display: grid;
+    grid-template-columns: 40px 1fr 100px 120px 180px 60px;
+    align-items: center;
+    padding: 8px 12px;
+    background: #fafafa;
+    border-bottom: 1px solid #d9d9d9;
+    font-weight: 600;
+    color: #262626;
+    flex-shrink: 0;
+    height: 40px; /* 固定表头高度 */
+    min-height: 40px;
+}
+
+.virtual-file-scroll-container {
+    flex: 1;
+    overflow: auto;
+    min-height: 0; /* 确保能够收缩 */
+    /* 性能优化 */
+    transform: translateZ(0); /* 开启硬件加速 */
+    -webkit-overflow-scrolling: touch; /* iOS平滑滚动 */
+    /* 优化滚动性能 */
+    scroll-behavior: auto; /* 禁用平滑滚动，提升性能 */
+    contain: layout style paint; /* 性能提升关键属性 */
+    backface-visibility: hidden;
+    perspective: 1000px;
+    /* 减少重绘 */
+    will-change: scroll-position;
+}
+
+.virtual-file-scroll-container::-webkit-scrollbar {
+    width: 10px;
+}
+
+.virtual-file-scroll-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 5px;
+    margin: 2px;
+}
+
+.virtual-file-scroll-container::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 5px;
+    border: 2px solid #f1f1f1;
+}
+
+.virtual-file-scroll-container::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* Firefox 滚动条样式 */
+.virtual-file-scroll-container {
+    scrollbar-width: thin;
+    scrollbar-color: #c1c1c1 #f1f1f1;
+}
+
+.virtual-file-header > div {
+    padding: 0 4px;
+    display: flex;
+    align-items: center;
+}
+
+.virtual-file-header > div:hover {
+    color: #1890ff;
+}
+
+.virtual-file-row {
+    display: grid;
+    grid-template-columns: 40px 1fr 100px 120px 180px 60px;
+    align-items: center;
+    padding: 0;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    background: white;
+    height: 48px; /* 固定行高，与虚拟化配置一致 */
+    min-height: 48px;
+    /* 极简化过渡效果，提升滚动性能 */
+    transition: none; /* 完全禁用transition，避免重绘 */
+    /* 使用 transform3d 开启硬件加速 */
+    transform: translateZ(0);
+    /* 避免重排重绘 */
+    will-change: auto;
+    contain: layout paint; /* 隔离渲染 */
+}
+
+.virtual-file-row:hover {
+    background: #f0f9ff;
+    /* 简化hover效果，提升性能 */
+}
+
+.virtual-file-row.selected {
+    background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%);
+    border-color: #1890ff;
+}
+
+.virtual-file-row.directory {
+    font-weight: 500;
+}
+
+.file-row-content {
+    display: contents;
+}
+
+.file-checkbox {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 0 8px;
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    padding: 8px 4px;
+    min-width: 0;
+}
+
+.file-icon {
+    flex-shrink: 0;
+    margin-right: 8px;
+}
+
+.file-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+}
+
+.file-size {
+    padding: 8px 4px;
+    text-align: right;
+    font-size: 13px;
+    color: #666;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+}
+
+.file-permissions {
+    padding: 8px 4px;
+    font-size: 12px;
+    color: #666;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+}
+
+.file-modified {
+    padding: 8px 4px;
+    font-size: 12px;
+    color: #666;
+}
+
+.file-actions {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 8px 4px;
+    position: relative;
+    z-index: 10; /* 确保在其他元素之上 */
+}
+
+.file-actions .ant-btn {
+    border: none !important;
+    background: transparent !important;
+    color: #8c8c8c !important;
+    opacity: 0.7;
+    transition: all 0.2s ease;
+    border-radius: 4px !important;
+}
+
+.file-actions .ant-btn:hover,
+.file-actions .ant-btn:focus {
+    opacity: 1 !important;
+    background: rgba(24, 144, 255, 0.1) !important;
+    color: #1890ff !important;
+    transform: scale(1.1);
+    box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2);
+}
+
+.virtual-file-row:hover .file-actions .ant-btn {
+    opacity: 1;
+}
+
+/* 确保下拉菜单层级正确 */
+.ant-dropdown {
+    z-index: 9999 !important;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .virtual-file-header,
+    .virtual-file-row {
+        grid-template-columns: 30px 1fr 80px 50px;
+    }
+    
+    .file-permissions,
+    .file-modified {
+        display: none;
+    }
+    
+    .virtual-file-header .header-permissions,
+    .virtual-file-header .header-modified {
+        display: none;
+    }
 } 

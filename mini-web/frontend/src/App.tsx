@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
 import { TerminalProvider } from './contexts/TerminalContext';
 import { routes } from './routes';
-import { message } from 'antd';
+import { App as AntdApp } from 'antd';
 
 // 初始化WebSocket服务
 import './pages/Terminal/services/WebSocketService';
@@ -12,6 +12,7 @@ import './pages/Terminal/services/WebSocketService';
  * 应用根组件，包含认证提供者、终端提供者和路由
  */
 const App = () => {
+  const { message } = AntdApp.useApp();
   const element = useRoutes(routes);
 
   // 添加全局WebSocket错误处理

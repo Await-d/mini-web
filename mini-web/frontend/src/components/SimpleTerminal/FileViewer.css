@@ -1,0 +1,147 @@
+/* 文件查看器样式 */
+.file-text-content {
+    max-height: 70vh;
+    overflow: auto;
+}
+
+.file-text-content pre {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    tab-size: 4;
+}
+
+.file-image-content {
+    max-height: 70vh;
+    overflow: auto;
+}
+
+.file-image-content .ant-image {
+    max-width: 100%;
+    height: auto;
+}
+
+/* 语法高亮样式 */
+.syntax-highlight {
+    background-color: #f8f8f2;
+    color: #272822;
+    padding: 16px;
+    border-radius: 6px;
+    overflow: auto;
+    max-height: 60vh;
+}
+
+.syntax-highlight .keyword {
+    color: #f92672;
+    font-weight: bold;
+}
+
+.syntax-highlight .string {
+    color: #e6db74;
+}
+
+.syntax-highlight .comment {
+    color: #75715e;
+    font-style: italic;
+}
+
+.syntax-highlight .number {
+    color: #ae81ff;
+}
+
+.syntax-highlight .function {
+    color: #a6e22e;
+}
+
+.syntax-highlight .variable {
+    color: #fd971f;
+}
+
+/* 文件信息卡片样式 */
+.file-info-card {
+    margin-bottom: 16px;
+}
+
+.file-info-card .ant-card-body {
+    padding: 16px;
+}
+
+/* 图片查看器控制按钮 */
+.image-controls {
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+.image-controls .ant-btn {
+    margin: 0 4px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .file-text-content pre {
+        font-size: 12px;
+        padding: 12px;
+    }
+    
+    .image-controls .ant-btn {
+        margin: 2px;
+        padding: 4px 8px;
+    }
+}
+
+/* 滚动条样式 */
+.file-text-content::-webkit-scrollbar,
+.file-image-content::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.file-text-content::-webkit-scrollbar-track,
+.file-image-content::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.file-text-content::-webkit-scrollbar-thumb,
+.file-image-content::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+}
+
+.file-text-content::-webkit-scrollbar-thumb:hover,
+.file-image-content::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* 加载状态样式 */
+.file-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    color: #666;
+}
+
+.file-loading .ant-spin {
+    margin-bottom: 16px;
+}
+
+/* 错误状态样式 */
+.file-error {
+    text-align: center;
+    padding: 50px;
+    color: #ff4d4f;
+}
+
+/* 空状态样式 */
+.file-empty {
+    text-align: center;
+    padding: 50px;
+    color: #999;
+}
+
+.file-empty .anticon {
+    font-size: 48px;
+    margin-bottom: 16px;
+} 

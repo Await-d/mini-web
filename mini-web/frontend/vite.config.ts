@@ -47,7 +47,7 @@ export default defineConfig({
   },
   // 增加JSX和TS错误容忍度
   esbuild: {
-    logOverride: { 
+    logOverride: {
       'this-is-undefined-in-esm': 'silent',
       'commonjs-variables-before-imports': 'silent'
     }

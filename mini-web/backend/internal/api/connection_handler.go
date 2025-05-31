@@ -646,6 +646,21 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 	activityTimer := time.NewTicker(10 * time.Second)
 	defer activityTimer.Stop()
 
+	// 添加ping-pong机制检测连接状态
+	pingTimer := time.NewTicker(30 * time.Second)
+	defer pingTimer.Stop()
+
+	// 设置pong处理器
+	wsConn.SetPongHandler(func(appData string) error {
+		log.Printf("收到pong响应: %s", appData)
+		// 更新活动时间
+		select {
+		case activeChan <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+
 	// 从WebSocket读取数据并写入终端
 	go func() {
 		defer once.Do(func() {
@@ -789,10 +804,37 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 											responseBytes, _ = json.Marshal(response)
 										}
 
-										// 发送响应
+										// 发送响应 - 使用统一的发送方法
 										if len(responseBytes) > 0 {
-											log.Printf("发送文件列表响应，文件数量: %d, 请求ID: %s", len(fileListResp.Files), fileListData.RequestId)
-											wsConn.WriteMessage(websocket.TextMessage, responseBytes)
+											err := h.sendFileListResponse(wsConn, responseBytes, fileListData.RequestId, len(fileListResp.Files))
+											if err != nil {
+												log.Printf("发送文件列表响应最终失败: %v", err)
+
+												// 尝试发送错误响应
+												errorResponse := struct {
+													Type string `json:"type"`
+													Data struct {
+														Path      string `json:"path"`
+														Error     string `json:"error"`
+														RequestId string `json:"requestId,omitempty"`
+													} `json:"data"`
+												}{
+													Type: "file_list_response",
+													Data: struct {
+														Path      string `json:"path"`
+														Error     string `json:"error"`
+														RequestId string `json:"requestId,omitempty"`
+													}{
+														Path:      fileListData.Path,
+														Error:     "网络传输失败，请重试",
+														RequestId: fileListData.RequestId,
+													},
+												}
+												if errorBytes, marshalErr := json.Marshal(errorResponse); marshalErr == nil {
+													wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+													wsConn.WriteMessage(websocket.TextMessage, errorBytes)
+												}
+											}
 										} else {
 											log.Printf("序列化响应失败")
 										}
@@ -1025,7 +1067,144 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 				wsConn.WriteMessage(websocket.TextMessage, []byte("会话超时，连接将被关闭"))
 				return
 			}
+		case <-pingTimer.C:
+			// 发送ping检测连接状态
+			log.Printf("发送ping检测连接状态")
+			wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if err := wsConn.WriteMessage(websocket.PingMessage, []byte("ping")); err != nil {
+				log.Printf("发送ping失败，连接可能已断开: %v", err)
+				return
+			}
 		}
+	}
+}
+
+// sendSegmentedResponse 发送分段响应
+func (h *ConnectionHandler) sendSegmentedResponse(wsConn *websocket.Conn, data []byte, requestId string) error {
+	const segmentSize = 16384 // 16KB 每段，更保守的大小
+	totalSize := len(data)
+	totalSegments := (totalSize + segmentSize - 1) / segmentSize // 向上取整
+
+	log.Printf("开始分段传输: 总大小=%d字节, 分段大小=%d字节, 总分段数=%d", totalSize, segmentSize, totalSegments)
+
+	for i := 0; i < totalSegments; i++ {
+		start := i * segmentSize
+		end := start + segmentSize
+		if end > totalSize {
+			end = totalSize
+		}
+
+		segmentData := data[start:end]
+		isComplete := (i == totalSegments-1)
+
+		// 构建分段消息
+		segmentMessage := struct {
+			Type string `json:"type"`
+			Data struct {
+				RequestId     string `json:"requestId"`
+				SegmentId     int    `json:"segmentId"`
+				TotalSegments int    `json:"totalSegments"`
+				Data          string `json:"data"`
+				IsComplete    bool   `json:"isComplete"`
+			} `json:"data"`
+		}{
+			Type: "file_list_segment",
+			Data: struct {
+				RequestId     string `json:"requestId"`
+				SegmentId     int    `json:"segmentId"`
+				TotalSegments int    `json:"totalSegments"`
+				Data          string `json:"data"`
+				IsComplete    bool   `json:"isComplete"`
+			}{
+				RequestId:     requestId,
+				SegmentId:     i,
+				TotalSegments: totalSegments,
+				Data:          string(segmentData),
+				IsComplete:    isComplete,
+			},
+		}
+
+		segmentBytes, err := json.Marshal(segmentMessage)
+		if err != nil {
+			return fmt.Errorf("序列化分段消息失败: %v", err)
+		}
+
+		// 检查WebSocket连接状态
+		if wsConn == nil {
+			return fmt.Errorf("WebSocket连接为空")
+		}
+
+		// 设置写入超时
+		writeTimeout := 10 * time.Second
+		wsConn.SetWriteDeadline(time.Now().Add(writeTimeout))
+
+		// 发送分段消息
+		log.Printf("发送分段 %d/%d: 数据长度=%d字节", i+1, totalSegments, len(segmentData))
+		err = wsConn.WriteMessage(websocket.TextMessage, segmentBytes)
+		if err != nil {
+			log.Printf("发送分段 %d 失败: %v", i, err)
+			return fmt.Errorf("发送分段 %d 失败: %v", i, err)
+		}
+
+		// 在分段之间添加延迟，防止网络拥塞
+		if i < totalSegments-1 {
+			time.Sleep(50 * time.Millisecond) // 增加延迟到50ms
+		}
+	}
+
+	log.Printf("分段传输完成: 共发送 %d 个分段", totalSegments)
+	return nil
+}
+
+// sendFileListResponse 统一的文件列表响应发送方法
+func (h *ConnectionHandler) sendFileListResponse(wsConn *websocket.Conn, responseBytes []byte, requestId string, fileCount int) error {
+	if wsConn == nil {
+		return fmt.Errorf("WebSocket连接为空")
+	}
+
+	log.Printf("准备发送文件列表响应，文件数量: %d, 请求ID: %s, 响应大小: %d字节",
+		fileCount, requestId, len(responseBytes))
+
+	// 检查WebSocket连接状态
+	if wsConn.UnderlyingConn() == nil {
+		log.Printf("WebSocket底层连接已断开")
+		return fmt.Errorf("WebSocket底层连接已断开")
+	}
+
+	// 设置阈值：对于小数据也使用分段，避免网络问题
+	const maxDirectSize = 8192 // 8KB 阈值，更保守
+
+	if len(responseBytes) > maxDirectSize {
+		// 使用分段传输
+		log.Printf("响应数据较大 (%d 字节)，使用分段传输", len(responseBytes))
+		return h.sendSegmentedResponse(wsConn, responseBytes, requestId)
+	} else {
+		// 直接发送，但增加重试机制
+		log.Printf("使用直接传输，数据大小: %d 字节", len(responseBytes))
+
+		maxRetries := 3
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			// 设置写入超时
+			writeTimeout := 15 * time.Second
+			wsConn.SetWriteDeadline(time.Now().Add(writeTimeout))
+
+			err := wsConn.WriteMessage(websocket.TextMessage, responseBytes)
+			if err == nil {
+				log.Printf("文件列表响应发送成功 (尝试 %d/%d)", attempt, maxRetries)
+				return nil
+			}
+
+			log.Printf("发送失败 (尝试 %d/%d): %v", attempt, maxRetries, err)
+
+			if attempt < maxRetries {
+				// 等待后重试
+				time.Sleep(time.Duration(attempt*500) * time.Millisecond)
+				log.Printf("等待 %d 毫秒后重试...", attempt*500)
+			}
+		}
+
+		log.Printf("直接发送失败，转为分段传输")
+		return h.sendSegmentedResponse(wsConn, responseBytes, requestId)
 	}
 }
 

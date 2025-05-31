@@ -887,6 +887,15 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     const tabToClose = state.tabs.find(tab => tab.key === key);
     if (!tabToClose) return;
 
+    // 清除该tab对应的文件浏览器路径记录
+    const fileBrowserStorageKey = `file_browser_path_${key}`;
+    try {
+      localStorage.removeItem(fileBrowserStorageKey);
+      console.log(`已清除tab ${key} 的文件浏览器路径记录`);
+    } catch (error) {
+      console.warn('清除文件浏览器路径记录失败:', error);
+    }
+
     // 检查是否是最后一个标签
     const isLastTab = state.tabs.length === 1;
     if (isLastTab) {
