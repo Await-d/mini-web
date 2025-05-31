@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-31 21:28:15
+ * @LastEditTime: 2025-05-31 21:39:16
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -47,12 +47,10 @@ import {
     Card,
     Tag,
     Form,
-    Dropdown,
     Table,
     App,
 } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
-import type { MenuProps } from 'antd';
 import FileViewer from './FileViewer';
 import ArchiveManager from './ArchiveManager';
 import './FileBrowser.css';
@@ -179,15 +177,15 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         return filtered;
     }, [files, searchTerm, sortField, sortOrder]);
 
-    // 虚拟化文件列表配置 - 优化性能
+    // 虚拟化文件列表配置 - 激进优化性能
     const rowVirtualizer = useVirtualizer({
         count: filteredFiles.length,
         getScrollElement: () => scrollElementRef.current,
         estimateSize: () => 48, // 固定行高48px
-        overscan: 1, // 减少overscan，提高性能
+        overscan: 0, // 完全禁用 overscan，最大化性能
         measureElement: undefined, // 禁用自动测量，使用固定高度
         scrollMargin: 0, // 移除scrollMargin，避免额外空白
-        getItemKey: (index) => `${index}-${filteredFiles[index]?.name || 'empty'}`, // 更稳定的key
+        getItemKey: (index) => filteredFiles[index]?.name || index, // 简化key生成
         debug: false, // 关闭调试模式
     });
 
@@ -1127,7 +1125,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
 
 
-    // 文件行组件 - 修复下拉框和事件冒泡问题
+    // 简化的文件行组件 - 使用简单按钮替代复杂下拉菜单
     const VirtualFileRow = React.memo(({
         index,
         style,
@@ -1139,12 +1137,8 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     }) => {
         const isSelected = selectedFiles.includes(file.name);
 
-        // 缓存菜单项，避免每次重新生成
-        const menuItems = useMemo(() => getActionMenuItems(file), [file.name, file.type]);
-
         // 缓存事件处理器 - 只有双击才进入目录，单击选中
         const handleRowClick = useCallback((e: React.MouseEvent) => {
-            // 阻止事件冒泡到父组件（终端）
             e.stopPropagation();
 
             // 如果点击的是操作按钮区域，不处理行点击
@@ -1152,17 +1146,14 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 return;
             }
 
-            // 单击选中文件/文件夹
             const isCurrentlySelected = selectedFiles.includes(file.name);
             handleFileSelection(file.name, !isCurrentlySelected);
         }, [file.name, selectedFiles, handleFileSelection]);
 
-        // 双击进入目录
+        // 双击进入目录或查看文件
         const handleRowDoubleClick = useCallback((e: React.MouseEvent) => {
-            // 阻止事件冒泡到父组件（终端）
             e.stopPropagation();
 
-            // 如果点击的是操作按钮区域，不处理双击
             if ((e.target as HTMLElement).closest('.file-actions')) {
                 return;
             }
@@ -1170,28 +1161,21 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             if (file.type === 'directory') {
                 enterDirectory(file.name);
             } else {
-                // 如果是文件，双击查看文件
                 viewFile(file.name);
             }
         }, [file.name, file.type, enterDirectory, viewFile]);
-
-
 
         const handleCheckboxChange = useCallback((e: any) => {
             e.stopPropagation();
             handleFileSelection(file.name, e.target.checked);
         }, [file.name, handleFileSelection]);
 
-        const handleActionMenuClick = useCallback(({ key }: { key: string }) => {
-            console.log('菜单项点击:', key, '文件:', file.name);
-            handleActionClick(key, file);
-        }, [file, handleActionClick]);
-
-        // 操作按钮点击处理 - 只阻止冒泡，不阻止默认行为
-        const handleActionButtonClick = useCallback((e: React.MouseEvent) => {
-            console.log('操作按钮点击事件');
-            e.stopPropagation(); // 阻止冒泡到行点击事件
-        }, []);
+        // 简化的操作按钮 - 检查是否是压缩包
+        const isArchive = useMemo(() => {
+            const archiveExtensions = ['zip', 'tar', 'gz', 'tgz', 'tar.gz', 'rar', '7z', 'bz2', 'xz'];
+            const fileExtension = file.name.toLowerCase().split('.').pop() || '';
+            return archiveExtensions.includes(fileExtension) || file.name.toLowerCase().includes('.tar.');
+        }, [file.name]);
 
         return (
             <div
@@ -1204,8 +1188,8 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     {/* 选择框 */}
                     <div className="file-checkbox">
                         <Checkbox
-                            id={`file-checkbox-${index}-${file.name}`}
-                            name={`fileSelect_${file.name}`}
+                            id={`file-checkbox-${index}`}
+                            name={`fileCheckbox_${file.name}`}
                             checked={isSelected}
                             onChange={handleCheckboxChange}
                         />
@@ -1236,40 +1220,84 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                         {file.modified}
                     </div>
 
-                    {/* 操作按钮 */}
-                    <div className="file-actions" onClick={handleActionButtonClick}>
-                        <Dropdown
-                            menu={{
-                                items: menuItems,
-                                onClick: handleActionMenuClick
-                            }}
-                            trigger={['click']}
-                            destroyOnHidden={true}
-                            placement="bottomRight"
-                            getPopupContainer={(trigger) => trigger.parentElement || document.body}
-                        >
-                            <Button
-                                type="text"
-                                icon={<MoreOutlined />}
-                                size="small"
-                                onClick={handleActionButtonClick}
-                            />
-                        </Dropdown>
+                    {/* 简化的操作按钮 - 使用单独按钮而不是下拉菜单 */}
+                    <div className="file-actions">
+                        <Space size={2}>
+                            {/* 查看/进入按钮 */}
+                            {file.type === 'directory' ? (
+                                <Tooltip title="进入文件夹">
+                                    <Button
+                                        type="text"
+                                        size="small"
+                                        icon={<FolderOutlined />}
+                                        onClick={(e) => handleFileAction('enter', file, e)}
+                                    />
+                                </Tooltip>
+                            ) : isArchive ? (
+                                <Tooltip title="压缩包管理">
+                                    <Button
+                                        type="text"
+                                        size="small"
+                                        icon={<FileZipOutlined />}
+                                        onClick={(e) => handleFileAction('view', file, e)}
+                                    />
+                                </Tooltip>
+                            ) : (
+                                <Tooltip title="查看文件">
+                                    <Button
+                                        type="text"
+                                        size="small"
+                                        icon={<EyeOutlined />}
+                                        onClick={(e) => handleFileAction('view', file, e)}
+                                    />
+                                </Tooltip>
+                            )}
+
+                            {/* 下载按钮 - 只对文件显示 */}
+                            {file.type === 'file' && (
+                                <Tooltip title="下载">
+                                    <Button
+                                        type="text"
+                                        size="small"
+                                        icon={<DownloadOutlined />}
+                                        onClick={(e) => handleFileAction('download', file, e)}
+                                    />
+                                </Tooltip>
+                            )}
+
+                            {/* 重命名按钮 */}
+                            <Tooltip title="重命名">
+                                <Button
+                                    type="text"
+                                    size="small"
+                                    icon={<EditOutlined />}
+                                    onClick={(e) => handleFileAction('rename', file, e)}
+                                />
+                            </Tooltip>
+
+                            {/* 删除按钮 */}
+                            <Tooltip title="删除">
+                                <Button
+                                    type="text"
+                                    size="small"
+                                    icon={<DeleteOutlined />}
+                                    onClick={(e) => handleFileAction('delete', file, e)}
+                                    danger
+                                />
+                            </Tooltip>
+                        </Space>
                     </div>
                 </div>
             </div>
         );
     }, (prevProps, nextProps) => {
-        // 更严格的比较，确保完全相同才不重渲染
+        // 简化比较逻辑
         return (
             prevProps.file.name === nextProps.file.name &&
             prevProps.file.type === nextProps.file.type &&
             prevProps.file.size === nextProps.file.size &&
             prevProps.file.modified === nextProps.file.modified &&
-            prevProps.file.permissions === nextProps.file.permissions &&
-            prevProps.file.path === nextProps.file.path &&
-            prevProps.index === nextProps.index &&
-            JSON.stringify(prevProps.style) === JSON.stringify(nextProps.style)
+            prevProps.index === nextProps.index
         );
     });
 
@@ -1340,89 +1368,96 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         console.log('FileBrowser: 注册WebSocket消息监听器 (优化版)');
 
         const handleMessage = (event: MessageEvent) => {
-            // 彻底简化消息处理，避免性能问题
+            // 使用异步处理，避免阻塞主线程
             if (typeof event.data !== 'string') {
                 return;
             }
 
-            const currentTime = Date.now();
+            // 使用 requestIdleCallback 或 setTimeout 异步处理消息
+            const processMessage = () => {
+                const currentTime = Date.now();
 
-            // 更激进的防抖，减少处理频率
-            if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 1000) {
-                return;
-            }
+                // 防抖检查
+                if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 1000) {
+                    return;
+                }
 
-            isUpdatingRef.current = true;
-            lastUpdateTimeRef.current = currentTime;
+                isUpdatingRef.current = true;
+                lastUpdateTimeRef.current = currentTime;
 
-            try {
-                let data;
                 try {
-                    data = JSON.parse(event.data);
-                } catch {
-                    // 不是JSON，忽略
-                    return;
-                }
-
-                // 只处理文件列表相关的响应
-                if (data.type === 'file_list_response') {
-                    // 验证请求ID
-                    if (data.data.requestId !== currentRequestRef.current) {
+                    let data;
+                    try {
+                        data = JSON.parse(event.data);
+                    } catch {
                         return;
                     }
 
-                    // 清除超时
-                    if (requestTimeoutRef.current) {
-                        clearTimeout(requestTimeoutRef.current);
-                        requestTimeoutRef.current = null;
-                    }
+                    // 只处理文件列表相关的响应
+                    if (data.type === 'file_list_response') {
+                        if (data.data.requestId !== currentRequestRef.current) {
+                            return;
+                        }
 
-                    setLoading(false);
-                    setIsWaitingForLs(false);
-                    currentRequestRef.current = null;
+                        // 使用批处理更新状态
+                        React.startTransition(() => {
+                            if (requestTimeoutRef.current) {
+                                clearTimeout(requestTimeoutRef.current);
+                                requestTimeoutRef.current = null;
+                            }
 
-                    if (data.data.error) {
-                        message.error(`获取文件列表失败: ${data.data.error}`);
+                            setLoading(false);
+                            setIsWaitingForLs(false);
+                            currentRequestRef.current = null;
+
+                            if (data.data.error) {
+                                message.error(`获取文件列表失败: ${data.data.error}`);
+                                return;
+                            }
+
+                            if (data.data.files && Array.isArray(data.data.files)) {
+                                setFiles(data.data.files);
+                            } else {
+                                setFiles([]);
+                            }
+                        });
                         return;
                     }
 
-                    // 简化文件列表更新
-                    if (data.data.files && Array.isArray(data.data.files)) {
-                        setFiles(data.data.files);
-                    } else {
-                        setFiles([]);
+                    // 处理分段响应
+                    if (data.type === 'file_list_segment') {
+                        handleSegmentedFileList({
+                            requestId: data.data.requestId,
+                            segmentId: data.data.segmentId,
+                            totalSegments: data.data.totalSegments,
+                            data: data.data.data,
+                            isComplete: data.data.isComplete
+                        });
+                        return;
                     }
-                    return;
-                }
 
-                // 处理分段文件列表响应
-                if (data.type === 'file_list_segment') {
-                    handleSegmentedFileList({
-                        requestId: data.data.requestId,
-                        segmentId: data.data.segmentId,
-                        totalSegments: data.data.totalSegments,
-                        data: data.data.data,
-                        isComplete: data.data.isComplete
+                } catch (error) {
+                    React.startTransition(() => {
+                        if (requestTimeoutRef.current) {
+                            clearTimeout(requestTimeoutRef.current);
+                            requestTimeoutRef.current = null;
+                        }
+                        setLoading(false);
+                        setIsWaitingForLs(false);
+                        currentRequestRef.current = null;
                     });
-                    return;
+                } finally {
+                    setTimeout(() => {
+                        isUpdatingRef.current = false;
+                    }, 100);
                 }
+            };
 
-                // 忽略其他所有消息类型，避免不必要的处理
-
-            } catch (error) {
-                // 静默处理错误，避免控制台输出
-                if (requestTimeoutRef.current) {
-                    clearTimeout(requestTimeoutRef.current);
-                    requestTimeoutRef.current = null;
-                }
-                setLoading(false);
-                setIsWaitingForLs(false);
-                currentRequestRef.current = null;
-            } finally {
-                // 延迟重置，避免连续消息导致的问题
-                setTimeout(() => {
-                    isUpdatingRef.current = false;
-                }, 500);
+            // 使用 requestIdleCallback 或 setTimeout 异步处理
+            if (window.requestIdleCallback) {
+                window.requestIdleCallback(processMessage, { timeout: 100 });
+            } else {
+                setTimeout(processMessage, 0);
             }
         };
 
@@ -1455,97 +1490,33 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         );
     }, []);
 
-    // 预定义菜单项模板，避免重复创建
-    const baseMenuItems = useMemo(() => ({
-        enter: {
-            key: 'enter',
-            icon: <FolderOutlined />,
-            label: '进入文件夹',
-        },
-        rename: {
-            key: 'rename',
-            icon: <EditOutlined />,
-            label: '重命名',
-        },
-        delete: {
-            key: 'delete',
-            icon: <DeleteOutlined />,
-            label: '删除',
-            danger: true,
-        },
-        viewFile: {
-            key: 'view',
-            icon: <EyeOutlined />,
-            label: '查看文件',
-        },
-        viewArchive: {
-            key: 'view',
-            icon: <FileZipOutlined />,
-            label: '压缩包管理',
-        },
-        download: {
-            key: 'download',
-            icon: <DownloadOutlined />,
-            label: '下载',
-        }
-    }), []);
-
-    // 获取操作菜单项 - 优化版本
-    const getActionMenuItems = useCallback((file: FileItem): MenuProps['items'] => {
-        const { enter, rename, delete: deleteItem, viewFile, viewArchive, download } = baseMenuItems;
-
-        if (file.type === 'directory') {
-            return [enter, rename, deleteItem];
+    // 简化的操作处理 - 直接处理，避免复杂的菜单生成
+    const handleFileAction = useCallback((action: string, file: FileItem, event?: React.MouseEvent) => {
+        if (event) {
+            event.stopPropagation();
         }
 
-        // 检查是否是压缩包文件
-        const archiveExtensions = ['zip', 'tar', 'gz', 'tgz', 'tar.gz', 'rar', '7z', 'bz2', 'xz'];
-        const fileExtension = file.name.toLowerCase().split('.').pop() || '';
-        const isArchive = archiveExtensions.includes(fileExtension) || file.name.toLowerCase().includes('.tar.');
-
-        if (isArchive) {
-            return [viewArchive, download, rename, deleteItem];
-        } else {
-            return [viewFile, download, rename, deleteItem];
+        switch (action) {
+            case 'view':
+                viewFile(file.name);
+                break;
+            case 'download':
+                downloadFile(file.name);
+                break;
+            case 'rename':
+                setRenameTarget(file.name);
+                setNewName(file.name);
+                setRenameVisible(true);
+                break;
+            case 'delete':
+                deleteItem(file.name);
+                break;
+            case 'enter':
+                if (file.type === 'directory') {
+                    enterDirectory(file.name);
+                }
+                break;
         }
-    }, [baseMenuItems]);
-
-    // 处理操作点击 - 优化性能
-    const handleActionClick = useCallback((key: string, file: FileItem) => {
-        console.log('执行操作:', key, '文件:', file.name, '文件类型:', file.type);
-
-        // 使用setTimeout避免阻塞UI线程
-        setTimeout(() => {
-            switch (key) {
-                case 'view':
-                    console.log('查看文件:', file.name);
-                    viewFile(file.name);
-                    break;
-                case 'download':
-                    console.log('下载文件:', file.name);
-                    downloadFile(file.name);
-                    break;
-                case 'rename':
-                    console.log('重命名:', file.name);
-                    setRenameTarget(file.name);
-                    setNewName(file.name);
-                    setRenameVisible(true);
-                    break;
-                case 'delete':
-                    console.log('删除:', file.name);
-                    deleteItem(file.name);
-                    break;
-                case 'enter':
-                    if (file.type === 'directory') {
-                        console.log('进入目录:', file.name);
-                        enterDirectory(file.name);
-                    }
-                    break;
-                default:
-                    console.log('未知操作:', key);
-                    break;
-            }
-        }, 0);
     }, [viewFile, downloadFile, deleteItem, enterDirectory]);
 
     // 键盘事件处理 - 阻止事件冒泡到终端
@@ -1905,7 +1876,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                             sortOrder === 'asc' ? <UpOutlined style={{ marginLeft: 4 }} /> : <DownOutlined style={{ marginLeft: 4 }} />
                                         )}
                                     </div>
-                                    <div className="header-actions">操作</div>
+                                    <div className="header-actions" style={{ width: '120px' }}>操作</div>
                                 </div>
 
                                 {/* 虚拟化列表内容 */}
