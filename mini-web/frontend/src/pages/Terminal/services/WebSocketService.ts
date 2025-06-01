@@ -163,8 +163,10 @@ export class WebSocketService {
         ws.onopen = (event) => {
             console.log(`WebSocket连接已打开: ${tab.key}`);
 
-            // 发送初始化数据
-            this.sendInitMessage(ws, tab);
+            // 只有图形协议(RDP、VNC)才需要发送初始化消息
+            if (tab.protocol === 'rdp' || tab.protocol === 'vnc') {
+                this.sendInitMessage(ws, tab);
+            }
 
             // 调用自定义处理函数
             if (tabHandlers?.onOpen) {
@@ -233,6 +235,8 @@ export class WebSocketService {
 
     /**
      * 发送初始化消息
+     * 只有图形协议(RDP、VNC)需要发送init消息来初始化图形界面和请求截图
+     * 对于文本协议(SSH、Telnet)，这个消息是无用的
      * @param ws WebSocket实例
      * @param tab 终端标签
      */
