@@ -45,12 +45,12 @@ func (tf *TerminalFormatter) FormatOutput(data []byte) []byte {
 		return data
 	}
 
-	// 在密码模式下，不处理用户输入的密码内容
-	// 让前端处理密码显示，后端只负责识别密码提示和退出条件
+	// 在密码模式下，处理用户输入的密码内容
 	if tf.passwordMode && tf.isPasswordInput(text) {
-		// 不替换密码，让前端处理显示
+		// 替换密码为星号显示
+		maskedText := tf.maskPassword(text)
 		tf.lastLine = text
-		return data
+		return []byte(maskedText)
 	}
 
 	// 检查是否退出密码模式
@@ -106,18 +106,34 @@ func (tf *TerminalFormatter) isPasswordInput(text string) bool {
 
 	trimmed := strings.TrimSpace(text)
 
-	// 排除空行、错误消息等
-	if trimmed == "" ||
-		strings.Contains(strings.ToLower(trimmed), "sorry") ||
-		strings.Contains(strings.ToLower(trimmed), "incorrect") ||
-		strings.Contains(strings.ToLower(trimmed), "failed") ||
-		strings.Contains(trimmed, "$") ||
-		strings.Contains(trimmed, "#") ||
-		strings.Contains(trimmed, ">") {
+	// 排除空行
+	if trimmed == "" {
 		return false
 	}
 
-	// 如果包含明显的密码字符，认为是密码输入
+	// 排除错误消息
+	lowercaseText := strings.ToLower(trimmed)
+	if strings.Contains(lowercaseText, "sorry") ||
+		strings.Contains(lowercaseText, "incorrect") ||
+		strings.Contains(lowercaseText, "failed") ||
+		strings.Contains(lowercaseText, "wrong") ||
+		strings.Contains(lowercaseText, "try again") {
+		return false
+	}
+
+	// 排除明显的提示符（但要更精确，避免误判密码）
+	// 只有当整行主要是提示符格式时才排除
+	promptPattern := regexp.MustCompile(`^\s*[^@]*@[^$#>]*[$#>]\s*$`)
+	if promptPattern.MatchString(trimmed) {
+		return false
+	}
+
+	// 排除单独的提示符字符（但不是作为密码开头的）
+	if trimmed == "$" || trimmed == "#" || trimmed == ">" {
+		return false
+	}
+
+	// 如果不是密码提示且有内容，认为是密码输入
 	if len(trimmed) > 0 && !tf.isPasswordPrompt(text) {
 		return true
 	}
@@ -132,8 +148,16 @@ func (tf *TerminalFormatter) maskPassword(text string) string {
 		return text
 	}
 
+	// 为密码生成相应数量的星号
+	maskedPassword := strings.Repeat("*", len(trimmed))
+
 	// 保留原有的空白格式，只替换文本内容
-	return strings.Replace(text, trimmed, strings.Repeat("*", len(trimmed)), 1)
+	result := strings.Replace(text, trimmed, maskedPassword, 1)
+
+	// 添加调试日志
+	// log.Printf("密码掩码: 原始长度=%d, 掩码后=%s", len(trimmed), result)
+
+	return result
 }
 
 // shouldExitPasswordMode 检查是否应该退出密码模式

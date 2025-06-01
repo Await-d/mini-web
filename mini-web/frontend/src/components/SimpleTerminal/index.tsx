@@ -272,6 +272,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 // 检查是否是密码提示
                 if (isPasswordPrompt(line)) {
                     console.log('检测到密码提示:', line);
+                    // 立即设置密码模式
                     setPasswordMode(true);
                     setLastPasswordPrompt(line);
                     outputLines.push(`<span class="password-prompt">🔐 ${line}</span>`);
@@ -314,6 +315,14 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
 
                     // 忽略服务器返回的控制字符回显
                     if (trimmedLine === '^C' || trimmedLine === '^D' || trimmedLine === '^Z') {
+                        continue;
+                    }
+
+                    // 检查是否是密码行（包含星号的行）
+                    const isPasswordLine = passwordMode && /\*+/.test(trimmedLine);
+                    if (isPasswordLine) {
+                        console.log('检测到密码行:', trimmedLine);
+                        outputLines.push(`<span class="password-input-line">${line}</span>`);
                         continue;
                     }
 
@@ -607,7 +616,8 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     setLastSentCommand(localInput);
 
                     // 发送命令到服务器 - 无论是否为密码模式都发送原始输入
-                    console.log('发送命令:', passwordMode ? '密码输入' : localInput);
+                    console.log('发送命令:', passwordMode ? `密码输入(长度:${localInput.length})` : localInput);
+                    console.log('当前密码模式状态:', passwordMode);
                     webSocketRef.current.send(localInput + '\r\n');
                 }
 
