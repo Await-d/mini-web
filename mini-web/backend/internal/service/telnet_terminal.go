@@ -22,6 +22,8 @@ type TelnetTerminalSession struct {
 	closedChan chan struct{}
 	closeOnce  sync.Once
 	model      *model.Connection
+	// 添加终端格式化器
+	formatter *TerminalFormatter
 }
 
 // TelnetHandler 实现telnet.Caller接口
@@ -121,6 +123,7 @@ func createTelnetTerminalSession(conn *model.Connection) (*TelnetTerminalSession
 		stopChan:   stopChan,
 		closedChan: closedChan,
 		model:      conn,
+		formatter:  NewTerminalFormatter(), // 初始化格式化器
 	}
 
 	// 先尝试简单的TCP连接测试
@@ -142,7 +145,7 @@ func createTelnetTerminalSession(conn *model.Connection) (*TelnetTerminalSession
 			}
 			return
 		}
-		
+
 		// 注意：在这个实现中，DialToAndCall会阻塞直到连接结束
 		// 当函数返回时，表示连接已经关闭
 		if !isClosed(closedChan) {
@@ -156,15 +159,41 @@ func createTelnetTerminalSession(conn *model.Connection) (*TelnetTerminalSession
 	return session, nil
 }
 
-
-
 // Read 实现io.Reader接口
 func (t *TelnetTerminalSession) Read(p []byte) (int, error) {
-	return t.reader.Read(p)
+	// 先从reader读取原始数据
+	n, err := t.reader.Read(p)
+	if err != nil {
+		return n, err
+	}
+
+	if n > 0 {
+		// 使用格式化器处理输出
+		formatted := t.formatter.FormatOutput(p[:n])
+
+		// 如果格式化器返回空内容，表示该内容被过滤掉
+		if len(formatted) == 0 {
+			// 递归调用以获取下一段数据
+			return t.Read(p)
+		}
+
+		// 将格式化后的数据复制回缓冲区
+		copy(p, formatted)
+		return len(formatted), nil
+	}
+
+	return n, err
 }
 
 // Write 实现io.Writer接口
 func (t *TelnetTerminalSession) Write(p []byte) (int, error) {
+	// 如果写入的是命令，设置命令回显到格式化器
+	command := string(p)
+	if len(command) > 0 && command[len(command)-1] == '\n' {
+		// 移除换行符，设置为命令回显
+		t.formatter.SetCommandEcho(command[:len(command)-1])
+	}
+
 	return t.writer.Write(p)
 }
 

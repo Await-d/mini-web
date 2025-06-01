@@ -656,6 +656,43 @@
   position: relative;
 }
 
+/* 密码输入相关样式 */
+.password-mode {
+  background-color: rgba(255, 255, 0, 0.1);
+  border-left: 3px solid #faad14;
+  padding-left: 8px;
+}
+
+.password-input {
+  color: #ff4d4f;
+  font-family: monospace;
+  letter-spacing: 2px;
+}
+
+.password-prompt {
+  color: #faad14;
+  font-weight: bold;
+  animation: pulse-password 2s infinite;
+}
+
+@keyframes pulse-password {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+/* 密码提示图标 */
+.password-indicator {
+  color: #faad14;
+  margin-right: 5px;
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 /* 快捷键相关样式 */
 .shortcut-key {
   background: linear-gradient(135deg, #f6f8fa 0%, #e1e4e8 100%);

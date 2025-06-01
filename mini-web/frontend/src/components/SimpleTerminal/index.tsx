@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 19:09:40
+ * @LastEditTime: 2025-06-01 19:13:49
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';

@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-08 18:19:21
  * @LastEditors: Await
- * @LastEditTime: 2025-05-31 17:06:17
+ * @LastEditTime: 2025-06-01 19:14:45
  * @Description: 请填写简介
  */
 package service
@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,8 @@ type SSHTerminalSession struct {
 	bufferMutex   sync.Mutex
 	isCapturing   bool
 	captureMarker string
+	// 添加终端格式化器
+	formatter *TerminalFormatter
 }
 
 // 创建SSH终端会话
@@ -139,16 +142,45 @@ func createSSHTerminalSession(conn *model.Connection) (*SSHTerminalSession, erro
 		conn:           conn,
 		commandHandler: commandHandler,
 		outputBuffer:   make([]byte, 0, 1024*1024), // 1MB缓冲区
+		formatter:      NewTerminalFormatter(),     // 初始化格式化器
 	}, nil
 }
 
 // Read 实现io.Reader接口
 func (s *SSHTerminalSession) Read(p []byte) (int, error) {
-	return s.stdout.Read(p)
+	// 先从stdout读取原始数据
+	n, err := s.stdout.Read(p)
+	if err != nil {
+		return n, err
+	}
+
+	if n > 0 {
+		// 使用格式化器处理输出
+		formatted := s.formatter.FormatOutput(p[:n])
+
+		// 如果格式化器返回空内容，表示该内容被过滤掉
+		if len(formatted) == 0 {
+			// 递归调用以获取下一段数据
+			return s.Read(p)
+		}
+
+		// 将格式化后的数据复制回缓冲区
+		copy(p, formatted)
+		return len(formatted), nil
+	}
+
+	return n, err
 }
 
 // Write 实现io.Writer接口
 func (s *SSHTerminalSession) Write(p []byte) (int, error) {
+	// 如果写入的是命令，设置命令回显到格式化器
+	command := string(p)
+	if len(command) > 0 && command[len(command)-1] == '\n' {
+		// 移除换行符，设置为命令回显
+		s.formatter.SetCommandEcho(strings.TrimSpace(command))
+	}
+
 	return s.stdin.Write(p)
 }
 
