@@ -745,6 +745,171 @@ func (h *SSHCommandHandler) ExecuteFolderCreateCommand(path string) error {
 	}
 }
 
+// ExecuteFileUploadCommand 执行文件上传命令
+func (h *SSHCommandHandler) ExecuteFileUploadCommand(path string, content []byte, fileName string, totalSize int64, chunkIndex int, totalChunks int) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	log.Printf("开始执行文件上传命令，路径: %s, 文件名: %s, 分片: %d/%d, 当前分片大小: %d, 总大小: %d",
+		path, fileName, chunkIndex+1, totalChunks, len(content), totalSize)
+
+	// 创建一次性会话
+	session, err := h.client.NewSession()
+	if err != nil {
+		log.Printf("创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+	defer func() {
+		log.Printf("关闭SSH会话")
+		session.Close()
+	}()
+
+	// 构建完整的文件路径
+	fullPath := path
+	if !strings.HasSuffix(path, "/") {
+		fullPath = path + "/"
+	}
+	fullPath = fullPath + fileName
+
+	// 如果是第一个分片，检查并创建父目录，检查文件是否已存在
+	if chunkIndex == 0 {
+		// 1. 检查并创建父目录
+		parentDir := strings.TrimSuffix(fullPath, "/"+fileName)
+		if parentDir != "" {
+			checkParentCmd := fmt.Sprintf("test -d '%s' || mkdir -p '%s'", parentDir, parentDir)
+			log.Printf("检查并创建父目录: %s", checkParentCmd)
+
+			parentOutput, err := session.CombinedOutput(checkParentCmd)
+			if err != nil {
+				log.Printf("创建父目录失败: %v, 输出: %s", err, string(parentOutput))
+				return fmt.Errorf("无法创建父目录: %v", err)
+			}
+		}
+
+		// 重新创建会话
+		session.Close()
+		session, err = h.client.NewSession()
+		if err != nil {
+			log.Printf("重新创建SSH会话失败: %v", err)
+			return fmt.Errorf("无法创建SSH会话: %v", err)
+		}
+
+		// 2. 检查文件是否已存在
+		checkCmd := fmt.Sprintf("test -e '%s' && echo 'exists' || echo 'not_exists'", fullPath)
+		checkOutput, err := session.CombinedOutput(checkCmd)
+		if err != nil {
+			log.Printf("检查文件是否存在失败: %v", err)
+			return fmt.Errorf("检查文件失败: %v", err)
+		}
+
+		if strings.TrimSpace(string(checkOutput)) == "exists" {
+			return fmt.Errorf("文件已存在: %s", fileName)
+		}
+
+		// 重新创建会话
+		session.Close()
+		session, err = h.client.NewSession()
+		if err != nil {
+			log.Printf("重新创建SSH会话失败: %v", err)
+			return fmt.Errorf("无法创建SSH会话: %v", err)
+		}
+
+		// 3. 检查目录权限
+		targetDir := strings.TrimSuffix(fullPath, "/"+fileName)
+		if targetDir == "" {
+			targetDir = "."
+		}
+		permCmd := fmt.Sprintf("test -w '%s' && echo 'writable' || echo 'not_writable'", targetDir)
+		permOutput, err := session.CombinedOutput(permCmd)
+		if err != nil {
+			log.Printf("检查目录权限失败: %v", err)
+			return fmt.Errorf("检查目录权限失败: %v", err)
+		}
+
+		if strings.TrimSpace(string(permOutput)) != "writable" {
+			log.Printf("目录没有写权限: %s", targetDir)
+			return fmt.Errorf("目录没有写权限: %s", targetDir)
+		}
+
+		// 重新创建会话
+		session.Close()
+		session, err = h.client.NewSession()
+		if err != nil {
+			log.Printf("重新创建SSH会话失败: %v", err)
+			return fmt.Errorf("无法创建SSH会话: %v", err)
+		}
+	}
+
+	// 4. 写入文件内容
+	var cmd string
+	if chunkIndex == 0 {
+		// 第一个分片，创建新文件
+		cmd = fmt.Sprintf("cat > '%s'", fullPath)
+	} else {
+		// 后续分片，追加到文件
+		cmd = fmt.Sprintf("cat >> '%s'", fullPath)
+	}
+
+	log.Printf("执行文件上传命令: %s", cmd)
+
+	// 获取stdin
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		log.Printf("获取stdin失败: %v", err)
+		return fmt.Errorf("获取stdin失败: %v", err)
+	}
+
+	// 设置超时
+	done := make(chan error, 1)
+
+	go func() {
+		defer close(done)
+		defer stdin.Close()
+
+		// 启动命令
+		if err := session.Start(cmd); err != nil {
+			log.Printf("启动上传命令失败: %v", err)
+			done <- fmt.Errorf("启动命令失败: %v", err)
+			return
+		}
+
+		// 写入分片内容
+		_, err := stdin.Write(content)
+		if err != nil {
+			log.Printf("写入文件分片失败: %v", err)
+			done <- fmt.Errorf("写入分片失败: %v", err)
+			return
+		}
+
+		// 关闭stdin
+		stdin.Close()
+
+		// 等待命令完成
+		if err := session.Wait(); err != nil {
+			log.Printf("上传命令执行失败: %v", err)
+			done <- fmt.Errorf("上传失败: %v", err)
+			return
+		}
+
+		done <- nil
+	}()
+
+	// 等待命令完成或超时
+	select {
+	case err := <-done:
+		if err != nil {
+			log.Printf("文件分片上传失败: %v", err)
+			return err
+		}
+		log.Printf("文件分片上传成功: %s (分片 %d/%d)", fullPath, chunkIndex+1, totalChunks)
+		return nil
+	case <-time.After(60 * time.Second): // 上传可能需要更长时间
+		log.Printf("文件上传超时")
+		session.Close()
+		return fmt.Errorf("文件上传超时")
+	}
+}
+
 // Close 关闭命令处理器
 func (h *SSHCommandHandler) Close() error {
 	close(h.responses)

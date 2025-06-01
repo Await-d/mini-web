@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 18:00:21
+ * @LastEditTime: 2025-06-01 18:23:32
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -1157,18 +1157,214 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         message.info('下载文件功能正在开发中，将通过后端API实现');
     }, []);
 
+    // 上传状态管理
+    const [uploadingFiles, setUploadingFiles] = useState<Map<string, { progress: number, status: 'uploading' | 'success' | 'error' | 'retrying', error?: string, file?: File }>>(new Map());
+
     // 上传文件处理
     const handleFileUpload = useCallback((file: File) => {
-        if (file.size > 50 * 1024 * 1024) { // 50MB限制
-            message.error('文件大小不能超过50MB');
+        if (file.size > 100 * 1024 * 1024) { // 100MB限制
+            message.error('文件大小不能超过100MB');
             return false;
         }
 
-        // TODO: 实现后端JSON格式的文件上传操作
-        message.info(`文件上传功能正在开发中: ${file.name}`);
+        if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            message.error('WebSocket连接未建立');
+            return false;
+        }
+
+        // 开始上传文件
+        uploadFile(file);
 
         return false; // 阻止默认上传行为
+    }, [webSocketRef, currentDirectory]);
+
+    // WebSocket连接状态检测
+    const checkWebSocketConnection = useCallback(() => {
+        if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            console.warn('⚠️ WebSocket连接异常，状态:', webSocketRef.current?.readyState);
+            return false;
+        }
+        return true;
     }, []);
+
+    // 文件上传实现
+    const uploadFile = useCallback(async (file: File) => {
+        const requestId = `file_upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const fileName = file.name;
+        const chunkSize = 64 * 1024; // 64KB分片
+        const totalChunks = Math.ceil(file.size / chunkSize);
+
+        console.log('📤 开始上传文件:', {
+            fileName,
+            fileSize: file.size,
+            chunkSize,
+            totalChunks,
+            requestId
+        });
+
+        // 检查WebSocket连接状态
+        if (!checkWebSocketConnection()) {
+            const errorMsg = 'WebSocket连接断开，请刷新页面重试';
+            message.error(errorMsg);
+            setUploadingFiles(prev => new Map(prev.set(fileName, {
+                progress: 0,
+                status: 'error',
+                error: errorMsg,
+                file: file
+            })));
+            return;
+        }
+
+        // 初始化上传状态（保存文件引用）
+        setUploadingFiles(prev => new Map(prev.set(fileName, { progress: 0, status: 'uploading', file: file })));
+
+        let uploadFailed = false;
+
+        try {
+            // 读取文件内容并分片上传
+            const fileBuffer = await file.arrayBuffer();
+            const uint8Array = new Uint8Array(fileBuffer);
+
+            for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                // 在每个分片前再次检查连接状态
+                if (!checkWebSocketConnection()) {
+                    throw new Error('WebSocket连接在上传过程中断开');
+                }
+
+                const start = chunkIndex * chunkSize;
+                const end = Math.min(start + chunkSize, uint8Array.length);
+                const chunk = uint8Array.slice(start, end);
+
+                // 转换为base64
+                const base64Chunk = btoa(String.fromCharCode(...chunk));
+
+                const uploadRequest = {
+                    type: 'file_upload',
+                    data: {
+                        path: currentDirectory,
+                        fileName: fileName,
+                        content: base64Chunk,
+                        totalSize: file.size,
+                        chunkIndex: chunkIndex,
+                        totalChunks: totalChunks,
+                        requestId: requestId
+                    }
+                };
+
+                console.log(`📤 发送文件分片 ${chunkIndex + 1}/${totalChunks}:`, {
+                    fileName,
+                    chunkSize: chunk.length,
+                    progress: Math.round((chunkIndex + 1) / totalChunks * 100)
+                });
+
+                // 等待当前分片上传完成的确认（通过Promise和事件监听）
+                await new Promise<void>((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        uploadFailed = true;
+                        reject(new Error('分片上传超时（30秒）'));
+                    }, 30000); // 30秒超时
+
+                    const handleResponse = (event: MessageEvent) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'file_upload_response' && data.data.requestId === requestId) {
+                                if (data.data.success && data.data.chunkIndex === chunkIndex) {
+                                    clearTimeout(timeout);
+                                    webSocketRef.current?.removeEventListener('message', handleResponse);
+
+                                    // 更新进度
+                                    setUploadingFiles(prev => {
+                                        const newMap = new Map(prev);
+                                        const current = newMap.get(fileName);
+                                        if (current && current.status === 'uploading') {
+                                            newMap.set(fileName, {
+                                                ...current,
+                                                progress: data.data.progress,
+                                                status: data.data.isComplete ? 'success' : 'uploading'
+                                            });
+                                        }
+                                        return newMap;
+                                    });
+
+                                    resolve();
+                                } else if (!data.data.success) {
+                                    clearTimeout(timeout);
+                                    webSocketRef.current?.removeEventListener('message', handleResponse);
+                                    uploadFailed = true;
+                                    reject(new Error(data.data.error || '上传失败'));
+                                }
+                            }
+                        } catch (error) {
+                            // 忽略解析错误，可能不是我们期望的消息
+                        }
+                    };
+
+                    webSocketRef.current?.addEventListener('message', handleResponse);
+
+                    // 发送分片请求
+                    try {
+                        webSocketRef.current?.send(JSON.stringify(uploadRequest));
+                    } catch (sendError) {
+                        clearTimeout(timeout);
+                        webSocketRef.current?.removeEventListener('message', handleResponse);
+                        uploadFailed = true;
+                        reject(new Error(`发送请求失败: ${sendError}`));
+                    }
+                });
+
+                // 如果上传失败，立即停止
+                if (uploadFailed) {
+                    break;
+                }
+
+                // 稍微延迟，避免发送过快
+                if (chunkIndex < totalChunks - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+
+            // 检查是否因为失败而停止
+            if (uploadFailed) {
+                throw new Error('上传过程中出现错误');
+            }
+
+            console.log('✅ 文件上传完成:', fileName);
+            message.success(`文件上传完成: ${fileName}`);
+
+            // 刷新文件列表
+            setTimeout(() => {
+                refreshDirectory();
+                // 清除上传状态（成功后3秒自动清除）
+                setTimeout(() => {
+                    setUploadingFiles(prev => {
+                        const newMap = new Map(prev);
+                        newMap.delete(fileName);
+                        return newMap;
+                    });
+                }, 3000);
+            }, 500);
+
+        } catch (error) {
+            console.error('❌ 文件上传失败:', error);
+            const errorMessage = error instanceof Error ? error.message : '未知错误';
+            message.error(`文件上传失败: ${errorMessage}`);
+
+            // 设置错误状态（不自动清除，让用户自己决定）
+            setUploadingFiles(prev => {
+                const newMap = new Map(prev);
+                const currentState = newMap.get(fileName);
+                newMap.set(fileName, {
+                    progress: 0,
+                    status: 'error',
+                    error: errorMessage,
+                    file: currentState?.file || file // 保持文件引用
+                });
+                return newMap;
+            });
+
+            // 不再自动清除错误状态，让用户通过重试按钮或手动操作来清除
+        }
+    }, [webSocketRef, currentDirectory, refreshDirectory, checkWebSocketConnection]);
 
     // 拖拽上传处理
     const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -1551,6 +1747,14 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     } else {
                         message.error(`文件夹创建失败: ${data.data.error || '未知错误'}`);
                     }
+                    return;
+                }
+
+                // 处理文件上传响应
+                if (data.type === 'file_upload_response') {
+                    console.log('📤 处理文件上传响应:', data.data);
+                    // 文件上传的响应在uploadFile函数中通过事件监听器处理
+                    // 这里不需要额外处理，让uploadFile函数的监听器处理
                     return;
                 }
 
@@ -1940,13 +2144,122 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                 </Button>
                             </Tooltip>
                         )}
-                        {uploadProgress > 0 && uploadProgress < 100 && (
-                            <div className="upload-progress">
-                                <Progress
-                                    percent={uploadProgress}
-                                    size="small"
-                                    status="active"
-                                />
+                        {/* 上传进度显示 */}
+                        {uploadingFiles.size > 0 && (
+                            <div className="upload-progress-container">
+                                {Array.from(uploadingFiles.entries()).map(([fileName, status]) => (
+                                    <div key={fileName} className="upload-progress-item">
+                                        <div className="upload-file-info">
+                                            <span className="upload-file-name">{fileName}</span>
+                                            <div className="upload-file-actions">
+                                                <span className="upload-file-status">
+                                                    {status.status === 'uploading' && `${status.progress.toFixed(1)}%`}
+                                                    {status.status === 'retrying' && '🔄 重试中...'}
+                                                    {status.status === 'success' && '✅ 完成'}
+                                                    {status.status === 'error' && '❌ 失败'}
+                                                </span>
+                                                {status.status === 'error' && (
+                                                    <>
+                                                        <Button
+                                                            type="link"
+                                                            size="small"
+                                                            onClick={() => {
+                                                                // 获取保存的文件对象并重新上传
+                                                                const fileData = status.file;
+                                                                if (fileData) {
+                                                                    console.log('🔄 重新上传文件:', fileName);
+                                                                    message.info('正在重新上传...');
+
+                                                                    // 设置重试状态
+                                                                    setUploadingFiles(prev => {
+                                                                        const newMap = new Map(prev);
+                                                                        const current = newMap.get(fileName);
+                                                                        if (current) {
+                                                                            newMap.set(fileName, {
+                                                                                ...current,
+                                                                                status: 'retrying',
+                                                                                progress: 0,
+                                                                                error: undefined
+                                                                            });
+                                                                        }
+                                                                        return newMap;
+                                                                    });
+
+                                                                    // 重新上传文件
+                                                                    setTimeout(() => {
+                                                                        uploadFile(fileData);
+                                                                    }, 500);
+                                                                } else {
+                                                                    // 如果没有文件引用，提示重新选择
+                                                                    setUploadingFiles(prev => {
+                                                                        const newMap = new Map(prev);
+                                                                        newMap.delete(fileName);
+                                                                        return newMap;
+                                                                    });
+                                                                    message.info('请重新选择文件上传');
+                                                                }
+                                                            }}
+                                                            style={{
+                                                                padding: '0 4px',
+                                                                height: 'auto',
+                                                                fontSize: '12px',
+                                                                color: '#1677ff'
+                                                            }}
+                                                        >
+                                                            重试
+                                                        </Button>
+                                                    </>
+                                                )}
+                                                {(status.status === 'error' || status.status === 'retrying') && (
+                                                    <Button
+                                                        type="link"
+                                                        size="small"
+                                                        onClick={() => {
+                                                            // 直接清除状态
+                                                            setUploadingFiles(prev => {
+                                                                const newMap = new Map(prev);
+                                                                newMap.delete(fileName);
+                                                                return newMap;
+                                                            });
+                                                        }}
+                                                        style={{
+                                                            padding: '0 4px',
+                                                            height: 'auto',
+                                                            fontSize: '12px',
+                                                            color: '#8c8c8c'
+                                                        }}
+                                                    >
+                                                        ✕
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <Progress
+                                            percent={status.progress}
+                                            size="small"
+                                            status={
+                                                status.status === 'uploading' || status.status === 'retrying' ? 'active' :
+                                                    status.status === 'success' ? 'success' : 'exception'
+                                            }
+                                            showInfo={false}
+                                        />
+                                        {status.status === 'error' && status.error && (
+                                            <div className="upload-error-message">
+                                                {status.error}
+                                                {status.error.includes('权限') && (
+                                                    <div style={{ marginTop: '4px', fontSize: '11px', color: '#666' }}>
+                                                        提示：请选择有写权限的目录，或联系管理员
+                                                    </div>
+                                                )}
+                                                {status.error.includes('连接') && (
+                                                    <div style={{ marginTop: '4px', fontSize: '11px', color: '#666' }}>
+                                                        提示：网络连接异常，请刷新页面后重试
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
                             </div>
                         )}
                         {selectedFiles.length > 0 && (

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1060,6 +1061,67 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 								log.Printf("解析文件夹创建请求数据失败: %v", err)
 								h.sendFolderCreateError(wsConn, folderCreateData.RequestId, "请求数据格式错误")
 							}
+						case "file_upload":
+							// 处理文件上传请求
+							var fileUploadData struct {
+								Path        string `json:"path"`
+								FileName    string `json:"fileName"`
+								Content     string `json:"content"`     // base64编码的文件内容
+								TotalSize   int64  `json:"totalSize"`   // 文件总大小
+								ChunkIndex  int    `json:"chunkIndex"`  // 当前分片索引
+								TotalChunks int    `json:"totalChunks"` // 总分片数
+								RequestId   string `json:"requestId,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &fileUploadData); err == nil {
+								log.Printf("收到文件上传请求: 路径=%s, 文件名=%s, 分片=%d/%d, 总大小=%d, 请求ID=%s",
+									fileUploadData.Path, fileUploadData.FileName, fileUploadData.ChunkIndex+1,
+									fileUploadData.TotalChunks, fileUploadData.TotalSize, fileUploadData.RequestId)
+
+								// 解码base64内容
+								content, err := base64.StdEncoding.DecodeString(fileUploadData.Content)
+								if err != nil {
+									log.Printf("解码文件内容失败: %v", err)
+									h.sendFileUploadError(wsConn, fileUploadData.RequestId, "文件内容解码失败")
+									continue
+								}
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										h.sendFileUploadError(wsConn, fileUploadData.RequestId, "SSH命令处理器不可用")
+										continue
+									}
+
+									// 异步执行文件上传命令
+									go func() {
+										err := commandHandler.ExecuteFileUploadCommand(
+											fileUploadData.Path,
+											content,
+											fileUploadData.FileName,
+											fileUploadData.TotalSize,
+											fileUploadData.ChunkIndex,
+											fileUploadData.TotalChunks,
+										)
+
+										if err != nil {
+											log.Printf("文件上传失败: %v", err)
+											h.sendFileUploadError(wsConn, fileUploadData.RequestId, fmt.Sprintf("上传失败: %v", err))
+										} else {
+											log.Printf("文件分片上传成功")
+											h.sendFileUploadResponse(wsConn, fileUploadData.RequestId, fileUploadData.ChunkIndex, fileUploadData.TotalChunks)
+										}
+									}()
+								} else {
+									log.Printf("不是SSH终端，无法处理文件上传请求")
+									h.sendFileUploadError(wsConn, fileUploadData.RequestId, "仅SSH终端支持文件上传功能")
+								}
+							} else {
+								log.Printf("解析文件上传请求数据失败: %v", err)
+								h.sendFileUploadError(wsConn, fileUploadData.RequestId, "请求数据格式错误")
+							}
 						case "screenshot":
 							log.Printf("收到屏幕截图请求")
 							// 将截图请求传递给终端处理
@@ -1740,6 +1802,106 @@ func (h *ConnectionHandler) sendFolderCreateError(wsConn *websocket.Conn, reques
 		log.Printf("发送文件夹创建错误响应失败: %v", err)
 	} else {
 		log.Printf("文件夹创建错误响应发送成功: %s - %s", requestId, errorMsg)
+	}
+}
+
+// sendFileUploadResponse 发送文件上传成功响应
+func (h *ConnectionHandler) sendFileUploadResponse(wsConn *websocket.Conn, requestId string, chunkIndex int, totalChunks int) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId   string  `json:"requestId"`
+			Success     bool    `json:"success"`
+			ChunkIndex  int     `json:"chunkIndex"`
+			TotalChunks int     `json:"totalChunks"`
+			Progress    float64 `json:"progress"`
+			IsComplete  bool    `json:"isComplete"`
+		} `json:"data"`
+	}{
+		Type: "file_upload_response",
+		Data: struct {
+			RequestId   string  `json:"requestId"`
+			Success     bool    `json:"success"`
+			ChunkIndex  int     `json:"chunkIndex"`
+			TotalChunks int     `json:"totalChunks"`
+			Progress    float64 `json:"progress"`
+			IsComplete  bool    `json:"isComplete"`
+		}{
+			RequestId:   requestId,
+			Success:     true,
+			ChunkIndex:  chunkIndex,
+			TotalChunks: totalChunks,
+			Progress:    float64(chunkIndex+1) / float64(totalChunks) * 100,
+			IsComplete:  chunkIndex+1 >= totalChunks,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件上传响应失败: %v", err)
+		return
+	}
+
+	// 检查WebSocket连接状态
+	if wsConn == nil {
+		log.Printf("WebSocket连接为空，无法发送文件上传响应")
+		return
+	}
+
+	// 设置写入超时
+	wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件上传响应失败: %v", err)
+		// 连接可能已断开，记录但不要抛出错误
+	} else {
+		log.Printf("文件上传响应已发送: 分片 %d/%d, 进度: %.1f%%",
+			chunkIndex+1, totalChunks, float64(chunkIndex+1)/float64(totalChunks)*100)
+	}
+}
+
+// sendFileUploadError 发送文件上传错误响应
+func (h *ConnectionHandler) sendFileUploadError(wsConn *websocket.Conn, requestId string, errorMsg string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		} `json:"data"`
+	}{
+		Type: "file_upload_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		}{
+			RequestId: requestId,
+			Success:   false,
+			Error:     errorMsg,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件上传错误响应失败: %v", err)
+		return
+	}
+
+	// 检查WebSocket连接状态
+	if wsConn == nil {
+		log.Printf("WebSocket连接为空，无法发送文件上传错误响应")
+		return
+	}
+
+	// 设置较短的写入超时，避免长时间阻塞
+	wsConn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件上传错误响应失败: %v", err)
+		// 连接可能已断开，记录但不要抛出错误
+	} else {
+		log.Printf("文件上传错误响应已发送: %s", errorMsg)
 	}
 }
 
