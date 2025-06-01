@@ -895,6 +895,171 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 							} else {
 								log.Printf("解析调整大小命令失败: %v, 原始消息: %s", err, string(cmd.Data))
 							}
+						case "file_view":
+							// 处理文件查看请求
+							var fileViewData struct {
+								Path      string `json:"path"`
+								RequestId string `json:"requestId,omitempty"`
+								FileType  string `json:"fileType,omitempty"`
+								MaxSize   int64  `json:"maxSize,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &fileViewData); err == nil {
+								log.Printf("收到文件查看请求: 路径=%s, 请求ID=%s, 文件类型=%s",
+									fileViewData.Path, fileViewData.RequestId, fileViewData.FileType)
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										h.sendFileViewError(wsConn, fileViewData.RequestId, "SSH命令处理器不可用")
+										return
+									}
+
+									// 使用SSH命令处理器获取文件内容
+									go func() {
+										fileViewResp, err := commandHandler.ExecuteFileViewCommand(fileViewData.Path, fileViewData.FileType, fileViewData.MaxSize)
+
+										if err != nil {
+											log.Printf("执行文件查看命令失败: %v", err)
+											h.sendFileViewError(wsConn, fileViewData.RequestId, fmt.Sprintf("命令执行失败: %v", err))
+										} else {
+											// 发送成功响应
+											h.sendFileViewResponse(wsConn, fileViewData.RequestId, fileViewResp)
+										}
+									}()
+								} else {
+									log.Printf("不是SSH终端，无法处理文件查看请求")
+									h.sendFileViewError(wsConn, fileViewData.RequestId, "仅SSH终端支持文件查看功能")
+								}
+							} else {
+								log.Printf("解析文件查看请求数据失败: %v", err)
+								h.sendFileViewError(wsConn, fileViewData.RequestId, "请求数据格式错误")
+							}
+						case "file_save":
+							// 处理文件保存请求
+							var fileSaveData struct {
+								Path      string `json:"path"`
+								Content   string `json:"content"`
+								RequestId string `json:"requestId,omitempty"`
+								Encoding  string `json:"encoding,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &fileSaveData); err == nil {
+								log.Printf("收到文件保存请求: 路径=%s, 请求ID=%s, 编码=%s, 内容长度=%d",
+									fileSaveData.Path, fileSaveData.RequestId, fileSaveData.Encoding, len(fileSaveData.Content))
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										h.sendFileSaveError(wsConn, fileSaveData.RequestId, "SSH命令处理器不可用")
+										return
+									}
+
+									// 使用SSH命令处理器保存文件
+									go func() {
+										err := commandHandler.ExecuteFileSaveCommand(fileSaveData.Path, fileSaveData.Content, fileSaveData.Encoding)
+
+										if err != nil {
+											log.Printf("执行文件保存命令失败: %v", err)
+											h.sendFileSaveError(wsConn, fileSaveData.RequestId, fmt.Sprintf("文件保存失败: %v", err))
+										} else {
+											log.Printf("文件保存成功: %s", fileSaveData.Path)
+											h.sendFileSaveResponse(wsConn, fileSaveData.RequestId)
+										}
+									}()
+								} else {
+									log.Printf("不是SSH终端，无法处理文件保存请求")
+									h.sendFileSaveError(wsConn, fileSaveData.RequestId, "仅SSH终端支持文件保存功能")
+								}
+							} else {
+								log.Printf("解析文件保存请求数据失败: %v", err)
+								h.sendFileSaveError(wsConn, fileSaveData.RequestId, "请求数据格式错误")
+							}
+						case "file_create":
+							// 处理文件创建请求
+							var fileCreateData struct {
+								Path      string `json:"path"`
+								Content   string `json:"content,omitempty"`
+								RequestId string `json:"requestId,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &fileCreateData); err == nil {
+								log.Printf("收到文件创建请求: 路径=%s, 请求ID=%s, 内容长度=%d",
+									fileCreateData.Path, fileCreateData.RequestId, len(fileCreateData.Content))
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										h.sendFileCreateError(wsConn, fileCreateData.RequestId, "SSH命令处理器不可用")
+										return
+									}
+
+									// 使用SSH命令处理器创建文件
+									go func() {
+										err := commandHandler.ExecuteFileCreateCommand(fileCreateData.Path, fileCreateData.Content)
+
+										if err != nil {
+											log.Printf("执行文件创建命令失败: %v", err)
+											h.sendFileCreateError(wsConn, fileCreateData.RequestId, fmt.Sprintf("文件创建失败: %v", err))
+										} else {
+											log.Printf("文件创建成功: %s", fileCreateData.Path)
+											h.sendFileCreateResponse(wsConn, fileCreateData.RequestId)
+										}
+									}()
+								} else {
+									log.Printf("不是SSH终端，无法处理文件创建请求")
+									h.sendFileCreateError(wsConn, fileCreateData.RequestId, "仅SSH终端支持文件创建功能")
+								}
+							} else {
+								log.Printf("解析文件创建请求数据失败: %v", err)
+								h.sendFileCreateError(wsConn, fileCreateData.RequestId, "请求数据格式错误")
+							}
+						case "folder_create":
+							// 处理文件夹创建请求
+							var folderCreateData struct {
+								Path      string `json:"path"`
+								RequestId string `json:"requestId,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &folderCreateData); err == nil {
+								log.Printf("收到文件夹创建请求: 路径=%s, 请求ID=%s",
+									folderCreateData.Path, folderCreateData.RequestId)
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										h.sendFolderCreateError(wsConn, folderCreateData.RequestId, "SSH命令处理器不可用")
+										return
+									}
+
+									// 使用SSH命令处理器创建文件夹
+									go func() {
+										err := commandHandler.ExecuteFolderCreateCommand(folderCreateData.Path)
+
+										if err != nil {
+											log.Printf("执行文件夹创建命令失败: %v", err)
+											h.sendFolderCreateError(wsConn, folderCreateData.RequestId, fmt.Sprintf("文件夹创建失败: %v", err))
+										} else {
+											log.Printf("文件夹创建成功: %s", folderCreateData.Path)
+											h.sendFolderCreateResponse(wsConn, folderCreateData.RequestId)
+										}
+									}()
+								} else {
+									log.Printf("不是SSH终端，无法处理文件夹创建请求")
+									h.sendFolderCreateError(wsConn, folderCreateData.RequestId, "仅SSH终端支持文件夹创建功能")
+								}
+							} else {
+								log.Printf("解析文件夹创建请求数据失败: %v", err)
+								h.sendFolderCreateError(wsConn, folderCreateData.RequestId, "请求数据格式错误")
+							}
 						case "screenshot":
 							log.Printf("收到屏幕截图请求")
 							// 将截图请求传递给终端处理
@@ -1208,7 +1373,376 @@ func (h *ConnectionHandler) sendFileListResponse(wsConn *websocket.Conn, respons
 	}
 }
 
+// sendFileViewResponse 发送文件查看成功响应
+func (h *ConnectionHandler) sendFileViewResponse(wsConn *websocket.Conn, requestId string, fileViewResp *service.FileViewResponse) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			FileType  string `json:"fileType"`
+			Content   string `json:"content"`
+			Encoding  string `json:"encoding,omitempty"`
+			MimeType  string `json:"mimeType,omitempty"`
+			Error     string `json:"error,omitempty"`
+		} `json:"data"`
+	}{
+		Type: "file_view_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			FileType  string `json:"fileType"`
+			Content   string `json:"content"`
+			Encoding  string `json:"encoding,omitempty"`
+			MimeType  string `json:"mimeType,omitempty"`
+			Error     string `json:"error,omitempty"`
+		}{
+			RequestId: requestId,
+			FileType:  fileViewResp.FileType,
+			Content:   fileViewResp.Content,
+			Encoding:  fileViewResp.Encoding,
+			MimeType:  fileViewResp.MimeType,
+			Error:     fileViewResp.Error,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件查看响应失败: %v", err)
+		h.sendFileViewError(wsConn, requestId, "序列化响应失败")
+		return
+	}
+
+	// 对于大文件也使用分段传输
+	const maxDirectSize = 8192
+	if len(responseBytes) > maxDirectSize {
+		log.Printf("文件查看响应数据较大 (%d 字节)，使用分段传输", len(responseBytes))
+		if err := h.sendSegmentedFileViewResponse(wsConn, responseBytes, requestId); err != nil {
+			log.Printf("分段发送文件查看响应失败: %v", err)
+			h.sendFileViewError(wsConn, requestId, "传输失败")
+		}
+	} else {
+		// 直接发送
+		wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+			log.Printf("发送文件查看响应失败: %v", err)
+			h.sendFileViewError(wsConn, requestId, "网络传输失败")
+		} else {
+			log.Printf("文件查看响应发送成功，请求ID: %s", requestId)
+		}
+	}
+}
+
+// sendFileViewError 发送文件查看错误响应
+func (h *ConnectionHandler) sendFileViewError(wsConn *websocket.Conn, requestId string, errorMsg string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			FileType  string `json:"fileType"`
+			Content   string `json:"content"`
+			Error     string `json:"error"`
+		} `json:"data"`
+	}{
+		Type: "file_view_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			FileType  string `json:"fileType"`
+			Content   string `json:"content"`
+			Error     string `json:"error"`
+		}{
+			RequestId: requestId,
+			FileType:  "",
+			Content:   "",
+			Error:     errorMsg,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件查看错误响应失败: %v", err)
+		return
+	}
+
+	wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件查看错误响应失败: %v", err)
+	} else {
+		log.Printf("文件查看错误响应发送成功，请求ID: %s, 错误: %s", requestId, errorMsg)
+	}
+}
+
+// sendSegmentedFileViewResponse 发送分段的文件查看响应
+func (h *ConnectionHandler) sendSegmentedFileViewResponse(wsConn *websocket.Conn, data []byte, requestId string) error {
+	const segmentSize = 16384 // 16KB 每段
+	totalSize := len(data)
+	totalSegments := (totalSize + segmentSize - 1) / segmentSize
+
+	log.Printf("开始分段传输文件查看响应: 总大小=%d字节, 分段大小=%d字节, 总分段数=%d", totalSize, segmentSize, totalSegments)
+
+	for i := 0; i < totalSegments; i++ {
+		start := i * segmentSize
+		end := start + segmentSize
+		if end > totalSize {
+			end = totalSize
+		}
+
+		segmentData := data[start:end]
+		isComplete := (i == totalSegments-1)
+
+		// 构建分段消息
+		segmentMessage := struct {
+			Type string `json:"type"`
+			Data struct {
+				RequestId     string `json:"requestId"`
+				SegmentId     int    `json:"segmentId"`
+				TotalSegments int    `json:"totalSegments"`
+				Data          string `json:"data"`
+				IsComplete    bool   `json:"isComplete"`
+			} `json:"data"`
+		}{
+			Type: "file_view_segment",
+			Data: struct {
+				RequestId     string `json:"requestId"`
+				SegmentId     int    `json:"segmentId"`
+				TotalSegments int    `json:"totalSegments"`
+				Data          string `json:"data"`
+				IsComplete    bool   `json:"isComplete"`
+			}{
+				RequestId:     requestId,
+				SegmentId:     i,
+				TotalSegments: totalSegments,
+				Data:          string(segmentData),
+				IsComplete:    isComplete,
+			},
+		}
+
+		segmentBytes, err := json.Marshal(segmentMessage)
+		if err != nil {
+			return fmt.Errorf("序列化文件查看分段消息失败: %v", err)
+		}
+
+		// 设置写入超时
+		wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+
+		// 发送分段消息
+		log.Printf("发送文件查看分段 %d/%d: 数据长度=%d字节", i+1, totalSegments, len(segmentData))
+		err = wsConn.WriteMessage(websocket.TextMessage, segmentBytes)
+		if err != nil {
+			log.Printf("发送文件查看分段 %d 失败: %v", i, err)
+			return fmt.Errorf("发送文件查看分段 %d 失败: %v", i, err)
+		}
+
+		// 在分段之间添加延迟，防止网络拥塞
+		if i < totalSegments-1 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	log.Printf("文件查看分段传输完成: 共发送 %d 个分段", totalSegments)
+	return nil
+}
+
 // min 返回两个整数中的较小值（Go 1.14+已内置此函数，兼容早期版本）
+// sendFileSaveResponse 发送文件保存成功响应
+func (h *ConnectionHandler) sendFileSaveResponse(wsConn *websocket.Conn, requestId string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		} `json:"data"`
+	}{
+		Type: "file_save_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		}{
+			RequestId: requestId,
+			Success:   true,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件保存响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件保存响应失败: %v", err)
+	} else {
+		log.Printf("文件保存响应发送成功: %s", requestId)
+	}
+}
+
+// sendFileSaveError 发送文件保存错误响应
+func (h *ConnectionHandler) sendFileSaveError(wsConn *websocket.Conn, requestId string, errorMsg string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		} `json:"data"`
+	}{
+		Type: "file_save_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		}{
+			RequestId: requestId,
+			Success:   false,
+			Error:     errorMsg,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件保存错误响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件保存错误响应失败: %v", err)
+	} else {
+		log.Printf("文件保存错误响应发送成功: %s - %s", requestId, errorMsg)
+	}
+}
+
+// sendFileCreateResponse 发送文件创建成功响应
+func (h *ConnectionHandler) sendFileCreateResponse(wsConn *websocket.Conn, requestId string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		} `json:"data"`
+	}{
+		Type: "file_create_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		}{
+			RequestId: requestId,
+			Success:   true,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件创建响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件创建响应失败: %v", err)
+	} else {
+		log.Printf("文件创建响应发送成功: %s", requestId)
+	}
+}
+
+// sendFileCreateError 发送文件创建错误响应
+func (h *ConnectionHandler) sendFileCreateError(wsConn *websocket.Conn, requestId string, errorMsg string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		} `json:"data"`
+	}{
+		Type: "file_create_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		}{
+			RequestId: requestId,
+			Success:   false,
+			Error:     errorMsg,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件创建错误响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件创建错误响应失败: %v", err)
+	} else {
+		log.Printf("文件创建错误响应发送成功: %s - %s", requestId, errorMsg)
+	}
+}
+
+// sendFolderCreateResponse 发送文件夹创建成功响应
+func (h *ConnectionHandler) sendFolderCreateResponse(wsConn *websocket.Conn, requestId string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		} `json:"data"`
+	}{
+		Type: "folder_create_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		}{
+			RequestId: requestId,
+			Success:   true,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件夹创建响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件夹创建响应失败: %v", err)
+	} else {
+		log.Printf("文件夹创建响应发送成功: %s", requestId)
+	}
+}
+
+// sendFolderCreateError 发送文件夹创建错误响应
+func (h *ConnectionHandler) sendFolderCreateError(wsConn *websocket.Conn, requestId string, errorMsg string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		} `json:"data"`
+	}{
+		Type: "folder_create_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		}{
+			RequestId: requestId,
+			Success:   false,
+			Error:     errorMsg,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件夹创建错误响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件夹创建错误响应失败: %v", err)
+	} else {
+		log.Printf("文件夹创建错误响应发送成功: %s - %s", requestId, errorMsg)
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

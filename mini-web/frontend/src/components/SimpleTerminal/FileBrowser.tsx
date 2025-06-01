@@ -2,11 +2,10 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 09:16:09
+ * @LastEditTime: 2025-06-01 18:00:21
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     ReloadOutlined,
     FolderOutlined,
@@ -99,6 +98,8 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     const [uploadVisible, setUploadVisible] = useState(false);
     const [newFolderVisible, setNewFolderVisible] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
+    const [newFileVisible, setNewFileVisible] = useState(false);
+    const [newFileName, setNewFileName] = useState('');
     const [renameVisible, setRenameVisible] = useState(false);
     const [renameTarget, setRenameTarget] = useState<string>('');
     const [newName, setNewName] = useState('');
@@ -120,47 +121,39 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     const segmentBufferRef = useRef<Map<string, { segments: Map<number, string>, totalSegments: number, requestId: string }>>(new Map());
     const segmentTimeoutRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
-    // 添加虚拟化列表的容器引用
-    const parentRef = useRef<HTMLDivElement>(null);
-    const scrollElementRef = useRef<HTMLDivElement>(null);
+    // 分页相关状态
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(50);
 
     // 添加初始化标记，防止多次请求
     const hasInitializedRef = useRef<boolean>(false);
     const initializationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-    // 防止状态更新冲突的引用
-    const isUpdatingRef = useRef(false);
-    const lastUpdateTimeRef = useRef(0);
+    // 移除了延迟值处理，简化性能
 
-    // 使用React.useDeferredValue优化大数据处理
-    const deferredFiles = React.useDeferredValue(files);
-    const deferredSearchTerm = React.useDeferredValue(searchTerm);
-
-    // 搜索和过滤文件 - 优化大数据处理
+    // 搜索和过滤文件 - 简化处理
     const filteredFiles = useMemo(() => {
-        // 对于大数据集，使用延迟值避免阻塞UI
-        const sourceFiles = files.length > 1000 ? deferredFiles : files;
-        const sourceSearchTerm = files.length > 1000 ? deferredSearchTerm : searchTerm;
+        let filtered = [...files];
 
-        let filtered = [...sourceFiles];
-
-        // 搜索过滤
-        if (sourceSearchTerm.trim()) {
-            const term = sourceSearchTerm.toLowerCase();
+        // 搜索过滤 - 简化字符串匹配
+        if (searchTerm.trim()) {
+            const term = searchTerm.toLowerCase();
             filtered = filtered.filter(file =>
                 file.name.toLowerCase().includes(term) ||
-                file.type.toLowerCase().includes(term) ||
-                file.permissions.toLowerCase().includes(term)
+                file.type.toLowerCase().includes(term)
             );
         }
 
-        // 排序
+        // 简化排序
         filtered.sort((a, b) => {
-            let comparison = 0;
+            // 目录优先
+            if (a.type === 'directory' && b.type !== 'directory') return -1;
+            if (a.type !== 'directory' && b.type === 'directory') return 1;
 
+            let comparison = 0;
             switch (sortField) {
                 case 'name':
-                    comparison = a.name.localeCompare(b.name, undefined, { numeric: true });
+                    comparison = a.name.localeCompare(b.name);
                     break;
                 case 'size':
                     comparison = a.size - b.size;
@@ -169,40 +162,189 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     comparison = a.modified.localeCompare(b.modified);
                     break;
             }
-
             return sortOrder === 'asc' ? comparison : -comparison;
         });
 
-        // 目录排在前面（如果按名称排序）
-        if (sortField === 'name') {
-            filtered.sort((a, b) => {
-                if (a.type === 'directory' && b.type !== 'directory') return -1;
-                if (a.type !== 'directory' && b.type === 'directory') return 1;
-                return 0;
-            });
-        }
-
         return filtered;
-    }, [deferredFiles, deferredSearchTerm, sortField, sortOrder, files.length, searchTerm]);
+    }, [files, searchTerm, sortField, sortOrder]);
 
-    // 虚拟化文件列表配置 - 高性能优化，减少overscan
-    const rowVirtualizer = useVirtualizer({
-        count: filteredFiles.length,
-        getScrollElement: () => scrollElementRef.current,
-        estimateSize: () => 48, // 固定行高
-        overscan: 3, // 减少预留渲染项目，提高性能（上下各3个）
-        measureElement: undefined, // 禁用动态测量
-        scrollMargin: 8, // 减少滚动边距，降低资源消耗
-        getItemKey: (index) => {
-            const file = filteredFiles[index];
-            return file ? `${file.name}_${file.type}_${file.size}` : index;
+    // 分页数据处理
+    const paginatedFiles = useMemo(() => {
+        const startIndex = (currentPage - 1) * pageSize;
+        const endIndex = startIndex + pageSize;
+        return filteredFiles.slice(startIndex, endIndex);
+    }, [filteredFiles, currentPage, pageSize]);
+
+    // 表格列配置
+    const columns = [
+        {
+            title: (
+                <Checkbox
+                    id="file-browser-select-all"
+                    name="selectAll"
+                    checked={selectedFiles.length === filteredFiles.length && filteredFiles.length > 0}
+                    indeterminate={selectedFiles.length > 0 && selectedFiles.length < filteredFiles.length}
+                    onChange={(e) => {
+                        if (e.target.checked) {
+                            setSelectedFiles(filteredFiles.map(f => f.name));
+                        } else {
+                            setSelectedFiles([]);
+                        }
+                    }}
+                />
+            ),
+            dataIndex: 'select',
+            key: 'select',
+            width: 35,
+            render: (_: any, record: FileItem, index: number) => (
+                <Checkbox
+                    id={`file-checkbox-${index}-${record.name}`}
+                    name={`fileSelect_${index}`}
+                    checked={selectedFiles.includes(record.name)}
+                    onChange={(e) => {
+                        const checked = e.target.checked;
+                        setSelectedFiles(prev =>
+                            checked
+                                ? [...prev, record.name]
+                                : prev.filter(f => f !== record.name)
+                        );
+                    }}
+                />
+            ),
         },
-        debug: false,
-        // 高性能配置
-        initialRect: { width: 0, height: 0 },
-        paddingStart: 0,
-        paddingEnd: 0,
-    });
+        {
+            title: '文件名',
+            dataIndex: 'name',
+            key: 'name',
+            sorter: true,
+            ellipsis: true,
+            render: (name: string, record: FileItem) => (
+                <Space>
+                    {getFileIcon(record)}
+                    <span
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => {
+                            if (record.type === 'directory') {
+                                enterDirectory(record.name);
+                            } else {
+                                viewFile(record.name);
+                            }
+                        }}
+                        title={record.type === 'directory' ? `点击进入文件夹: ${name}` : `点击打开文件: ${name}`}
+                    >
+                        {name}
+                    </span>
+                </Space>
+            ),
+        },
+        {
+            title: '大小',
+            dataIndex: 'size',
+            key: 'size',
+            width: 70,
+            sorter: true,
+            render: (size: number, record: FileItem) =>
+                record.type === 'file' ? formatFileSize(size) : '-',
+        },
+        {
+            title: '权限',
+            dataIndex: 'permissions',
+            key: 'permissions',
+            width: 80,
+            ellipsis: true,
+        },
+        {
+            title: '修改时间',
+            dataIndex: 'modified',
+            key: 'modified',
+            width: 100,
+            sorter: true,
+            ellipsis: true,
+        },
+        {
+            title: '操作',
+            key: 'actions',
+            width: 110,
+            render: (_: any, record: FileItem) => {
+                const isArchive = (() => {
+                    const extension = record.name.toLowerCase().split('.').pop() || '';
+                    return ['zip', 'tar', 'gz', 'tgz', 'rar', '7z', 'bz2', 'xz'].includes(extension) ||
+                        record.name.toLowerCase().includes('.tar.');
+                })();
+
+                return (
+                    <Space size={2}>
+                        {/* 查看/进入按钮 */}
+                        {record.type === 'directory' ? (
+                            <Tooltip title="进入文件夹">
+                                <Button
+                                    type="text"
+                                    size="small"
+                                    icon={<FolderOutlined />}
+                                    onClick={() => enterDirectory(record.name)}
+                                />
+                            </Tooltip>
+                        ) : isArchive ? (
+                            <Tooltip title="压缩包管理">
+                                <Button
+                                    type="text"
+                                    size="small"
+                                    icon={<FileZipOutlined />}
+                                    onClick={() => viewFile(record.name)}
+                                />
+                            </Tooltip>
+                        ) : (
+                            <Tooltip title="查看文件">
+                                <Button
+                                    type="text"
+                                    size="small"
+                                    icon={<EyeOutlined />}
+                                    onClick={() => viewFile(record.name)}
+                                />
+                            </Tooltip>
+                        )}
+
+                        {/* 下载按钮 - 只对文件显示 */}
+                        {record.type === 'file' && (
+                            <Tooltip title="下载">
+                                <Button
+                                    type="text"
+                                    size="small"
+                                    icon={<DownloadOutlined />}
+                                    onClick={() => downloadFile(record.name)}
+                                />
+                            </Tooltip>
+                        )}
+
+                        {/* 重命名按钮 */}
+                        <Tooltip title="重命名">
+                            <Button
+                                type="text"
+                                size="small"
+                                icon={<EditOutlined />}
+                                onClick={() => {
+                                    setRenameTarget(record.name);
+                                    setNewName(record.name);
+                                    setRenameVisible(true);
+                                }}
+                            />
+                        </Tooltip>
+
+                        {/* 删除按钮 */}
+                        <Tooltip title="删除">
+                            <Button
+                                type="text"
+                                size="small"
+                                icon={<DeleteOutlined />}
+                                onClick={() => deleteItem(record.name)}
+                                danger
+                            />
+                        </Tooltip>
+                    </Space>
+                );
+            },
+        },
+    ];
 
     // 生成用于localStorage的唯一键
     const getStorageKey = useCallback(() => {
@@ -678,7 +820,25 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     const jsonData = JSON.parse(completeData);
                     if (jsonData.type === 'file_list_response' && jsonData.data.files) {
                         console.log(`📂 解析文件列表成功，共 ${jsonData.data.files.length} 个文件`);
-                        setFiles(jsonData.data.files);
+
+                        // 处理文件列表，确保每个文件都有正确的path属性
+                        const processedFiles = jsonData.data.files.map((file: FileItem) => {
+                            // 如果文件没有path属性或path为空，则根据当前目录生成完整路径
+                            if (!file.path) {
+                                // 使用当前目录状态来生成完整路径
+                                const currentDir = currentDirectoryRef.current || currentDirectory;
+                                const fullPath = currentDir === '/'
+                                    ? `/${file.name}`
+                                    : `${currentDir}/${file.name}`;
+                                return {
+                                    ...file,
+                                    path: fullPath
+                                };
+                            }
+                            return file;
+                        });
+
+                        setFiles(processedFiles);
                         setLoading(false);
                         setIsWaitingForLs(false);
                         currentRequestRef.current = null;
@@ -867,12 +1027,75 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             return;
         }
 
-        // TODO: 实现后端JSON格式的创建目录操作
-        message.info('创建目录功能正在开发中，将通过后端API实现');
+        if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            message.error('WebSocket连接未建立');
+            return;
+        }
 
-        setNewFolderVisible(false);
-        setNewFolderName('');
-    }, [newFolderName]);
+        const requestId = `folder_create_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const folderPath = currentDirectory === '/'
+            ? `/${newFolderName}`
+            : `${currentDirectory}/${newFolderName}`;
+
+        const request = {
+            type: 'folder_create',
+            data: {
+                path: folderPath,
+                requestId: requestId
+            }
+        };
+
+        console.log('📁 发送创建文件夹请求:', request);
+
+        try {
+            webSocketRef.current.send(JSON.stringify(request));
+            setNewFolderVisible(false);
+            setNewFolderName('');
+            message.loading('正在创建文件夹...');
+        } catch (error) {
+            console.error('发送创建文件夹请求失败:', error);
+            message.error('发送请求失败');
+        }
+    }, [newFolderName, webSocketRef, currentDirectory]);
+
+    // 创建文件
+    const createFile = useCallback(() => {
+        if (!newFileName.trim()) {
+            message.error('请输入文件名称');
+            return;
+        }
+
+        if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            message.error('WebSocket连接未建立');
+            return;
+        }
+
+        const requestId = `file_create_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const filePath = currentDirectory === '/'
+            ? `/${newFileName}`
+            : `${currentDirectory}/${newFileName}`;
+
+        const request = {
+            type: 'file_create',
+            data: {
+                path: filePath,
+                content: '', // 创建空文件
+                requestId: requestId
+            }
+        };
+
+        console.log('📄 发送创建文件请求:', request);
+
+        try {
+            webSocketRef.current.send(JSON.stringify(request));
+            setNewFileVisible(false);
+            setNewFileName('');
+            message.loading('正在创建文件...');
+        } catch (error) {
+            console.error('发送创建文件请求失败:', error);
+            message.error('发送请求失败');
+        }
+    }, [newFileName, webSocketRef, currentDirectory]);
 
     // 重命名文件或目录
     const renameItem = useCallback(() => {
@@ -902,6 +1125,14 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             return;
         }
 
+        console.log('📄 viewFile 调用 - 文件信息:', {
+            fileName: file.name,
+            filePath: file.path,
+            fileSize: file.size,
+            fileType: file.type,
+            currentDirectory: currentDirectory
+        });
+
         // 检查是否是压缩包文件
         const archiveExtensions = ['zip', 'tar', 'gz', 'tgz', 'tar.gz', 'rar', '7z', 'bz2', 'xz'];
         const fileExtension = fileName.toLowerCase().split('.').pop() || '';
@@ -909,14 +1140,16 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
         if (isArchive) {
             // 如果是压缩包，打开压缩包管理器
+            console.log('📄 打开压缩包管理器:', fileName);
             setSelectedFileForView(file);
             setArchiveManagerVisible(true);
         } else {
             // 如果是普通文件，打开文件查看器
+            console.log('📄 打开文件查看器:', fileName, 'path:', file.path);
             setSelectedFileForView(file);
             setFileViewerVisible(true);
         }
-    }, [files]);
+    }, [files, currentDirectory]);
 
     // 下载文件
     const downloadFile = useCallback((fileName: string) => {
@@ -1187,205 +1420,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
 
 
-    // 高性能文件行组件 - 优化memo策略和渲染性能
-    const VirtualFileRow = React.memo(({
-        index,
-        style,
-        file
-    }: {
-        index: number;
-        style: React.CSSProperties;
-        file: FileItem;
-    }) => {
-        const isSelected = selectedFiles.includes(file.name);
-
-        // 单击行为：文件夹进入，文件打开，不再默认选中
-        const handleRowClick = useCallback((e: React.MouseEvent) => {
-            e.stopPropagation();
-
-            // 如果点击的是操作按钮区域，不处理行点击
-            if ((e.target as HTMLElement).closest('.file-actions')) {
-                return;
-            }
-
-            // 如果按住Ctrl键，则进行选择操作
-            if (e.ctrlKey || e.metaKey) {
-                handleFileAction('select', file, e);
-                return;
-            }
-
-            // 正常点击：文件夹进入，文件打开
-            if (file.type === 'directory') {
-                enterDirectory(file.name);
-            } else {
-                viewFile(file.name);
-            }
-        }, [file.name, file.type]); // 简化依赖
-
-        // 双击行为保持不变（兼容性）
-        const handleRowDoubleClick = useCallback((e: React.MouseEvent) => {
-            e.stopPropagation();
-
-            if ((e.target as HTMLElement).closest('.file-actions')) {
-                return;
-            }
-
-            if (file.type === 'directory') {
-                enterDirectory(file.name);
-            } else {
-                viewFile(file.name);
-            }
-        }, [file.name, file.type]); // 简化依赖
-
-        const handleCheckboxChange = useCallback((e: any) => {
-            e.stopPropagation();
-            handleFileSelection(file.name, e.target.checked);
-        }, [file.name]); // 简化依赖
-
-        // 优化的操作按钮 - 检查是否是压缩包
-        const isArchive = useMemo(() => {
-            const archiveExtensions = ['zip', 'tar', 'gz', 'tgz', 'tar.gz', 'rar', '7z', 'bz2', 'xz'];
-            const fileExtension = file.name.toLowerCase().split('.').pop() || '';
-            return archiveExtensions.includes(fileExtension) || file.name.toLowerCase().includes('.tar.');
-        }, [file.name]);
-
-        // 优化的文件操作处理器
-        const handleAction = useCallback((action: string) => {
-            return (e: React.MouseEvent) => {
-                handleFileAction(action, file, e);
-            };
-        }, [file]);
-
-        return (
-            <div
-                style={style}
-                className={`virtual-file-row ${isSelected ? 'selected' : ''} ${file.type === 'directory' ? 'directory' : 'file'}`}
-                onClick={handleRowClick}
-                onDoubleClick={handleRowDoubleClick}
-                title={file.type === 'directory' ? `点击进入文件夹: ${file.name}` : `点击打开文件: ${file.name}`}
-            >
-                <div className="file-row-content">
-                    {/* 选择框 */}
-                    <div className="file-checkbox">
-                        <Checkbox
-                            id={`file-checkbox-${index}`}
-                            name={`fileCheckbox_${file.name}`}
-                            checked={isSelected}
-                            onChange={handleCheckboxChange}
-                        />
-                    </div>
-
-                    {/* 文件图标和名称 */}
-                    <div className="file-info">
-                        <div className="file-icon">
-                            {getFileIcon(file)}
-                        </div>
-                        <div className="file-name" title={file.name}>
-                            {file.name}
-                        </div>
-                    </div>
-
-                    {/* 文件大小 */}
-                    <div className="file-size">
-                        {file.type === 'file' ? formatFileSize(file.size) : '-'}
-                    </div>
-
-                    {/* 权限 */}
-                    <div className="file-permissions">
-                        {file.permissions}
-                    </div>
-
-                    {/* 修改时间 */}
-                    <div className="file-modified">
-                        {file.modified}
-                    </div>
-
-                    {/* 优化的操作按钮 - 使用缓存的事件处理器 */}
-                    <div className="file-actions">
-                        <Space size={2}>
-                            {/* 查看/进入按钮 */}
-                            {file.type === 'directory' ? (
-                                <Tooltip title="进入文件夹">
-                                    <Button
-                                        type="text"
-                                        size="small"
-                                        icon={<FolderOutlined />}
-                                        onClick={handleAction('enter')}
-                                    />
-                                </Tooltip>
-                            ) : isArchive ? (
-                                <Tooltip title="压缩包管理">
-                                    <Button
-                                        type="text"
-                                        size="small"
-                                        icon={<FileZipOutlined />}
-                                        onClick={handleAction('view')}
-                                    />
-                                </Tooltip>
-                            ) : (
-                                <Tooltip title="查看文件">
-                                    <Button
-                                        type="text"
-                                        size="small"
-                                        icon={<EyeOutlined />}
-                                        onClick={handleAction('view')}
-                                    />
-                                </Tooltip>
-                            )}
-
-                            {/* 下载按钮 - 只对文件显示 */}
-                            {file.type === 'file' && (
-                                <Tooltip title="下载">
-                                    <Button
-                                        type="text"
-                                        size="small"
-                                        icon={<DownloadOutlined />}
-                                        onClick={handleAction('download')}
-                                    />
-                                </Tooltip>
-                            )}
-
-                            {/* 重命名按钮 */}
-                            <Tooltip title="重命名">
-                                <Button
-                                    type="text"
-                                    size="small"
-                                    icon={<EditOutlined />}
-                                    onClick={handleAction('rename')}
-                                />
-                            </Tooltip>
-
-                            {/* 删除按钮 */}
-                            <Tooltip title="删除">
-                                <Button
-                                    type="text"
-                                    size="small"
-                                    icon={<DeleteOutlined />}
-                                    onClick={handleAction('delete')}
-                                    danger
-                                />
-                            </Tooltip>
-                        </Space>
-                    </div>
-                </div>
-            </div>
-        );
-    }, (prevProps, nextProps) => {
-        // 高性能比较策略 - 只比较关键属性
-        const prevFile = prevProps.file;
-        const nextFile = nextProps.file;
-
-        return (
-            prevFile.name === nextFile.name &&
-            prevFile.type === nextFile.type &&
-            prevFile.size === nextFile.size &&
-            prevFile.modified === nextFile.modified &&
-            prevProps.index === nextProps.index &&
-            // 检查style对象的关键属性
-            prevProps.style.transform === nextProps.style.transform &&
-            prevProps.style.height === nextProps.style.height
-        );
-    });
+    // VirtualFileRow 组件已移除，改用 Ant Design Table
 
     // 统一的初始化逻辑，防止多次请求
     useEffect(() => {
@@ -1453,267 +1488,174 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             return;
         }
 
-        console.log('FileBrowser: 设置高性能WebSocket消息监听器');
+        console.log('FileBrowser: 设置WebSocket消息监听器');
 
-        // 高性能消息队列系统
-        let allMessageQueue: MessageEvent[] = [];
-        let segmentMessageQueue: MessageEvent[] = [];
-        let processingTimer: NodeJS.Timeout | null = null;
-        let segmentProcessingTimer: NodeJS.Timeout | null = null;
-        let isProcessing = false; // 防止重复处理
-
-        // 消息统计和性能监控
+        // 消息统计
         let messageStats = {
-            total: 0,
-            segments: 0,
-            processed: 0,
-            dropped: 0,
-            avgProcessTime: 0,
-            lastProcessTime: 0
+            total: 0
         };
 
         const handleMessage = (event: MessageEvent) => {
-            // 快速类型检查
-            if (typeof event.data !== 'string') {
+            // 基本类型检查
+            if (typeof event.data !== 'string' || event.data.length < 10) {
                 return;
             }
 
-            const startTime = performance.now();
+            console.log('📨 FileBrowser收到WebSocket消息:', event.data.substring(0, 100) + '...');
             messageStats.total++;
 
-            // 添加到消息队列
-            allMessageQueue.push(event);
-
-            // 极速分段消息检测和处理
             try {
-                const quickCheck = event.data.substring(0, 150); // 减少检查长度
-                if (quickCheck.includes('"file_list_segment"')) {
-                    segmentMessageQueue.push(event);
-                    messageStats.segments++;
+                const data = JSON.parse(event.data);
+                console.log('📨 解析后的消息类型:', data.type);
 
-                    // 立即处理分段消息，但使用更智能的策略
-                    if (!isProcessing && segmentProcessingTimer) {
-                        clearTimeout(segmentProcessingTimer);
-                    }
-
-                    if (!isProcessing) {
-                        segmentProcessingTimer = setTimeout(() => {
-                            processSegmentMessagesAsync();
-                        }, 1); // 1ms极速处理
-                    }
-                }
-            } catch (e) {
-                // 忽略解析错误
-            }
-
-            // 更激进的防抖策略处理普通消息
-            if (processingTimer) {
-                clearTimeout(processingTimer);
-            }
-            processingTimer = setTimeout(() => {
-                processNormalMessagesAsync();
-            }, 100); // 提升到100ms防抖，减少处理频率
-
-            const endTime = performance.now();
-            messageStats.lastProcessTime = endTime - startTime;
-            messageStats.avgProcessTime = (messageStats.avgProcessTime + messageStats.lastProcessTime) / 2;
-        };
-
-        // 异步处理分段消息 - 使用requestIdleCallback
-        const processSegmentMessagesAsync = () => {
-            if (isProcessing || segmentMessageQueue.length === 0) return;
-
-            isProcessing = true;
-            console.log(`📨 异步处理分段消息队列，队列长度: ${segmentMessageQueue.length}`);
-
-            // 使用requestIdleCallback在浏览器空闲时处理
-            const processChunk = (deadline: IdleDeadline) => {
-                while (deadline.timeRemaining() > 0 && segmentMessageQueue.length > 0) {
-                    const event = segmentMessageQueue.shift();
-                    if (!event) break;
-
-                    try {
-                        const data = JSON.parse(event.data);
-                        if (data.type === 'file_list_segment') {
-                            handleSegmentedFileList({
-                                requestId: data.data.requestId,
-                                segmentId: data.data.segmentId,
-                                totalSegments: data.data.totalSegments,
-                                data: data.data.data,
-                                isComplete: data.data.isComplete
-                            });
-                            messageStats.processed++;
-                        }
-                    } catch (error) {
-                        console.error('❌ 异步处理分段消息失败:', error);
-                        messageStats.dropped++;
-                    }
+                // 只处理FileBrowser相关的消息类型
+                if (data.type === 'file_list_response') {
+                    console.log('📨 处理文件列表响应，requestId:', data.data?.requestId, '当前请求ID:', currentRequestRef.current);
+                    processFileListMessageAsync(event);
+                    return;
                 }
 
-                // 如果还有消息未处理，继续在下个空闲时间处理
-                if (segmentMessageQueue.length > 0) {
-                    requestIdleCallback(processChunk, { timeout: 1000 });
-                } else {
-                    isProcessing = false;
-                    console.log(`📊 分段消息处理完成 - 已处理: ${messageStats.processed}, 丢失: ${messageStats.dropped}`);
-                }
-            };
-
-            requestIdleCallback(processChunk, { timeout: 500 });
-        };
-
-        // 异步处理普通消息 - 大幅减少处理频率
-        const processNormalMessagesAsync = () => {
-            // 更严格的防抖检查
-            const currentTime = Date.now();
-            if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 200) {
-                return;
-            }
-
-            isUpdatingRef.current = true;
-            lastUpdateTimeRef.current = currentTime;
-
-            // 使用requestIdleCallback处理普通消息
-            requestIdleCallback((deadline) => {
-                try {
-                    const relevantMessages = allMessageQueue.filter(msg => {
-                        try {
-                            const data = JSON.parse(msg.data);
-                            return data.type === 'file_list_response';
-                        } catch {
-                            return false;
-                        }
+                // 处理分段消息
+                if (data.type === 'file_list_segment') {
+                    console.log('📨 处理分段消息');
+                    handleSegmentedFileList({
+                        requestId: data.data.requestId,
+                        segmentId: data.data.segmentId,
+                        totalSegments: data.data.totalSegments,
+                        data: data.data.data,
+                        isComplete: data.data.isComplete
                     });
-
-                    if (relevantMessages.length > 0 && deadline.timeRemaining() > 5) {
-                        const latestMessage = relevantMessages[relevantMessages.length - 1];
-                        processFileListMessageAsync(latestMessage);
-                    }
-
-                } finally {
-                    allMessageQueue = [];
-                    processingTimer = null;
-
-                    // 延迟重置更新标志
-                    setTimeout(() => {
-                        isUpdatingRef.current = false;
-                    }, 50);
+                    return;
                 }
-            }, { timeout: 1000 });
+
+                // 处理文件创建响应
+                if (data.type === 'file_create_response') {
+                    console.log('📄 处理文件创建响应:', data.data);
+                    if (data.data.success) {
+                        message.success('文件创建成功');
+                        // 刷新文件列表
+                        setTimeout(() => refreshDirectory(), 500);
+                    } else {
+                        message.error(`文件创建失败: ${data.data.error || '未知错误'}`);
+                    }
+                    return;
+                }
+
+                // 处理文件夹创建响应
+                if (data.type === 'folder_create_response') {
+                    console.log('📁 处理文件夹创建响应:', data.data);
+                    if (data.data.success) {
+                        message.success('文件夹创建成功');
+                        // 刷新文件列表
+                        setTimeout(() => refreshDirectory(), 500);
+                    } else {
+                        message.error(`文件夹创建失败: ${data.data.error || '未知错误'}`);
+                    }
+                    return;
+                }
+
+                // 对于其他消息类型（如file_view_response），不做任何处理
+                // 让它们能够被其他组件的监听器正常处理
+                // 这里什么都不做，事件会继续冒泡给其他监听器
+                console.log('📨 忽略消息类型:', data.type, '- 让其他组件处理');
+            } catch (error) {
+                console.error('❌ 解析WebSocket消息失败:', error);
+            }
         };
 
-        // 异步处理文件列表消息 - 使用React 19优化
+
+
+        // 直接处理文件列表消息
         const processFileListMessageAsync = (event: MessageEvent) => {
             try {
                 const data = JSON.parse(event.data);
+                console.log('📁 processFileListMessageAsync - 数据类型:', data.type);
 
                 if (data.type === 'file_list_response') {
+                    console.log('📁 请求ID检查:', {
+                        responseRequestId: data.data.requestId,
+                        currentRequestId: currentRequestRef.current,
+                        match: data.data.requestId === currentRequestRef.current
+                    });
+
                     if (data.data.requestId !== currentRequestRef.current) {
+                        console.log('📁 请求ID不匹配，忽略响应');
                         return;
                     }
 
-                    // 使用React.startTransition进行低优先级更新
-                    React.startTransition(() => {
-                        if (requestTimeoutRef.current) {
-                            clearTimeout(requestTimeoutRef.current);
-                            requestTimeoutRef.current = null;
-                        }
+                    console.log('📁 开始处理文件列表响应');
 
-                        setLoading(false);
-                        setIsWaitingForLs(false);
-                        currentRequestRef.current = null;
-
-                        if (data.data.error) {
-                            message.error(`获取文件列表失败: ${data.data.error}`);
-                            return;
-                        }
-
-                        if (data.data.files && Array.isArray(data.data.files)) {
-                            // 对于大量文件，分批更新状态
-                            if (data.data.files.length > 1000) {
-                                console.log(`📦 大文件列表检测 (${data.data.files.length}个)，启用分批处理`);
-                                processBatchFiles(data.data.files);
-                            } else {
-                                setFiles(data.data.files);
-                            }
-                        } else {
-                            setFiles([]);
-                        }
-                    });
-                }
-
-            } catch (error) {
-                React.startTransition(() => {
+                    // 清理超时和状态
                     if (requestTimeoutRef.current) {
                         clearTimeout(requestTimeoutRef.current);
                         requestTimeoutRef.current = null;
                     }
+
                     setLoading(false);
                     setIsWaitingForLs(false);
                     currentRequestRef.current = null;
-                });
+
+                    if (data.data.error) {
+                        console.error('📁 文件列表错误:', data.data.error);
+                        message.error(`获取文件列表失败: ${data.data.error}`);
+                        return;
+                    }
+
+                    if (data.data.files && Array.isArray(data.data.files)) {
+                        console.log(`📁 收到文件列表，共 ${data.data.files.length} 个文件`);
+
+                        // 处理文件列表，确保每个文件都有正确的path属性
+                        const processedFiles = data.data.files.map((file: FileItem) => {
+                            // 如果文件没有path属性或path为空，则根据当前目录生成完整路径
+                            if (!file.path) {
+                                // 使用当前目录状态来生成完整路径
+                                const currentDir = currentDirectoryRef.current || currentDirectory;
+                                const fullPath = currentDir === '/'
+                                    ? `/${file.name}`
+                                    : `${currentDir}/${file.name}`;
+                                return {
+                                    ...file,
+                                    path: fullPath
+                                };
+                            }
+                            return file;
+                        });
+
+                        // 设置处理后的文件列表
+                        setFiles(processedFiles);
+                    } else {
+                        console.log('📁 文件列表为空或无效');
+                        setFiles([]);
+                    }
+                }
+
+            } catch (error) {
+                console.error('❌ processFileListMessageAsync 错误:', error);
+
+                // 清理状态
+                if (requestTimeoutRef.current) {
+                    clearTimeout(requestTimeoutRef.current);
+                    requestTimeoutRef.current = null;
+                }
+                setLoading(false);
+                setIsWaitingForLs(false);
+                currentRequestRef.current = null;
             }
         };
 
-        // 分批处理大量文件数据
-        const processBatchFiles = (allFiles: FileItem[]) => {
-            const batchSize = 500;
-            let currentIndex = 0;
 
-            const processBatch = () => {
-                const batch = allFiles.slice(currentIndex, currentIndex + batchSize);
-
-                if (batch.length > 0) {
-                    React.startTransition(() => {
-                        if (currentIndex === 0) {
-                            setFiles(batch); // 第一批直接设置
-                        } else {
-                            setFiles(prev => [...prev, ...batch]); // 后续批次追加
-                        }
-                    });
-
-                    currentIndex += batchSize;
-
-                    // 在浏览器空闲时处理下一批
-                    if (currentIndex < allFiles.length) {
-                        requestIdleCallback(() => {
-                            processBatch();
-                        }, { timeout: 100 });
-                    } else {
-                        console.log(`📦 分批处理完成，共处理 ${allFiles.length} 个文件`);
-                    }
-                }
-            };
-
-            processBatch();
-        };
 
         const ws = webSocketRef.current;
         ws.addEventListener('message', handleMessage);
 
         return () => {
-            console.log('FileBrowser: 移除高性能WebSocket消息监听器');
-            console.log(`📊 最终性能统计:`, {
-                ...messageStats,
-                efficiency: messageStats.processed / Math.max(messageStats.total, 1) * 100
-            });
-
-            if (processingTimer) {
-                clearTimeout(processingTimer);
-            }
-            if (segmentProcessingTimer) {
-                clearTimeout(segmentProcessingTimer);
-            }
-
-            isProcessing = false;
-            allMessageQueue = [];
-            segmentMessageQueue = [];
+            console.log('FileBrowser: 移除WebSocket消息监听器');
 
             if (ws && ws.readyState !== WebSocket.CLOSED) {
                 ws.removeEventListener('message', handleMessage);
             }
         };
-    }, [webSocketRef, visible]);
+    }, [webSocketRef, visible, currentDirectory, handleSegmentedFileList]);
 
     // 清理effect，在组件卸载时清除所有超时
     useEffect(() => {
@@ -1767,12 +1709,25 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         }
     }, [viewFile, downloadFile, deleteItem, enterDirectory, selectedFiles, handleFileSelection]);
 
-    // 键盘事件处理 - 阻止事件冒泡到终端
+    // 全局键盘事件处理 - 阻止所有事件冒泡到终端
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         // 阻止所有键盘事件冒泡到父组件（终端）
         e.stopPropagation();
 
-        // 处理文件浏览器特定的快捷键
+        // 如果是在输入框中，大部分按键都应该被阻止传播
+        const target = e.target as HTMLElement;
+        const isInputElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true';
+
+        if (isInputElement) {
+            // 在输入框中时，只允许少数特殊按键进行处理
+            if (e.key === 'Escape' && onClose) {
+                e.preventDefault();
+                onClose();
+            }
+            return; // 其他所有按键都直接返回，不进行任何处理
+        }
+
+        // 处理文件浏览器特定的快捷键（仅在非输入元素时）
         switch (e.key) {
             case 'F5':
                 e.preventDefault();
@@ -1834,6 +1789,25 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         }
     }, [refreshDirectory, onClose, selectedFiles, files, filteredFiles, enterDirectory, viewFile, goToParent]);
 
+    // 输入事件处理 - 专门处理输入相关事件
+    const handleInput = useCallback((e: React.FormEvent) => {
+        e.stopPropagation();
+    }, []);
+
+    // 组合输入事件处理
+    const handleCompositionStart = useCallback((e: React.CompositionEvent) => {
+        e.stopPropagation();
+    }, []);
+
+    const handleCompositionEnd = useCallback((e: React.CompositionEvent) => {
+        e.stopPropagation();
+    }, []);
+
+    // 粘贴事件处理
+    const handlePaste = useCallback((e: React.ClipboardEvent) => {
+        e.stopPropagation();
+    }, []);
+
     // 鼠标事件处理 - 阻止不必要的事件冒泡
     const handleMouseEvent = useCallback((e: React.MouseEvent) => {
         // 阻止鼠标事件冒泡，防止影响终端的鼠标处理
@@ -1845,16 +1819,30 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         e.stopPropagation();
     }, []);
 
+    // 完全移除滚动处理，让虚拟化库自己处理
+
     if (!visible) return null;
 
     return (
         <div
             className="file-browser"
             onKeyDown={handleKeyDown}
+            onKeyUp={(e) => e.stopPropagation()}
+            onKeyPress={(e) => e.stopPropagation()}
+            onInput={handleInput}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+            onPaste={handlePaste}
+            onCut={(e) => e.stopPropagation()}
+            onCopy={(e) => e.stopPropagation()}
             onMouseDown={handleMouseEvent}
             onMouseUp={handleMouseEvent}
             onMouseMove={handleMouseEvent}
+            onClick={handleMouseEvent}
+            onDoubleClick={handleMouseEvent}
+            onContextMenu={handleMouseEvent}
             onFocus={handleFocus}
+            onBlur={(e) => e.stopPropagation()}
             tabIndex={-1} // 使div可以接收键盘事件但不参与tab导航
             style={{
                 animation: 'none !important',
@@ -1914,6 +1902,12 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                             onClick={() => setNewFolderVisible(true)}
                         >
                             新建文件夹
+                        </Button>
+                        <Button
+                            icon={<FileOutlined />}
+                            onClick={() => setNewFileVisible(true)}
+                        >
+                            新建文件
                         </Button>
                         <Upload
                             beforeUpload={handleFileUpload}
@@ -2001,10 +1995,18 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             onSearch={(value) => setSearchTerm(value)}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            onKeyUp={(e) => e.stopPropagation()}
+                            onKeyPress={(e) => e.stopPropagation()}
+                            onInput={(e) => e.stopPropagation()}
+                            onCompositionStart={(e) => e.stopPropagation()}
+                            onCompositionEnd={(e) => e.stopPropagation()}
+                            onPaste={(e) => e.stopPropagation()}
+                            onFocus={(e) => e.stopPropagation()}
+                            onBlur={(e) => e.stopPropagation()}
                             allowClear
                             enterButton="搜索"
-                            size="large"
-                            style={{ marginBottom: 16 }}
+                            size="middle"
                         />
                     </div>
 
@@ -2063,144 +2065,30 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                 )}
                             </div>
                         ) : (
-                            <div
-                                ref={parentRef}
-                                className="virtual-file-container"
-                                style={{
-                                    flex: 1,
-                                    overflow: 'hidden',
-                                    position: 'relative',
-                                    minHeight: 0, // 确保能够收缩
-                                    animation: 'none !important',
-                                    transition: 'none !important',
-                                    willChange: 'auto !important'
+                            <Table
+                                columns={columns}
+                                dataSource={filteredFiles}
+                                rowKey="name"
+                                loading={loading}
+                                pagination={{
+                                    current: currentPage,
+                                    pageSize: pageSize,
+                                    total: filteredFiles.length,
+                                    showSizeChanger: true,
+                                    showQuickJumper: true,
+                                    showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 条`,
+                                    pageSizeOptions: ['20', '50', '100', '200'],
+                                    onChange: (page, size) => {
+                                        setCurrentPage(page);
+                                        if (size !== pageSize) {
+                                            setPageSize(size);
+                                            setCurrentPage(1); // 重置到第一页
+                                        }
+                                    },
                                 }}
-                            >
-                                {/* 虚拟化列表表头 */}
-                                <div className="virtual-file-header">
-                                    <div className="header-checkbox">
-                                        <Checkbox
-                                            id="file-browser-select-all"
-                                            name="selectAll"
-                                            checked={selectedFiles.length === filteredFiles.length && filteredFiles.length > 0}
-                                            indeterminate={selectedFiles.length > 0 && selectedFiles.length < filteredFiles.length}
-                                            onChange={(e) => {
-                                                if (e.target.checked) {
-                                                    setSelectedFiles(filteredFiles.map(f => f.name));
-                                                } else {
-                                                    setSelectedFiles([]);
-                                                }
-                                            }}
-                                        />
-                                    </div>
-                                    <div
-                                        className="header-name"
-                                        onClick={() => handleSort('name')}
-                                        style={{ cursor: 'pointer' }}
-                                    >
-                                        名称
-                                        {sortField === 'name' && (
-                                            sortOrder === 'asc' ? <UpOutlined style={{ marginLeft: 4 }} /> : <DownOutlined style={{ marginLeft: 4 }} />
-                                        )}
-                                    </div>
-                                    <div
-                                        className="header-size"
-                                        onClick={() => handleSort('size')}
-                                        style={{ cursor: 'pointer' }}
-                                    >
-                                        大小
-                                        {sortField === 'size' && (
-                                            sortOrder === 'asc' ? <UpOutlined style={{ marginLeft: 4 }} /> : <DownOutlined style={{ marginLeft: 4 }} />
-                                        )}
-                                    </div>
-                                    <div className="header-permissions">权限</div>
-                                    <div
-                                        className="header-modified"
-                                        onClick={() => handleSort('modified')}
-                                        style={{ cursor: 'pointer' }}
-                                    >
-                                        修改时间
-                                        {sortField === 'modified' && (
-                                            sortOrder === 'asc' ? <UpOutlined style={{ marginLeft: 4 }} /> : <DownOutlined style={{ marginLeft: 4 }} />
-                                        )}
-                                    </div>
-                                    <div className="header-actions" style={{ width: '120px' }}>操作</div>
-                                </div>
-
-                                {/* 虚拟化列表内容 */}
-                                <div
-                                    ref={scrollElementRef}
-                                    className="virtual-file-scroll-container"
-                                    style={{
-                                        flex: 1,
-                                        overflow: 'auto',
-                                        minHeight: 0, // 确保flex子元素能够收缩
-                                    }}
-                                >
-                                    <div
-                                        style={{
-                                            height: `${rowVirtualizer.getTotalSize()}px`,
-                                            width: '100%',
-                                            position: 'relative',
-                                            // 添加最小高度确保滚动区域稳定
-                                            minHeight: filteredFiles.length * 48,
-                                        }}
-                                    >
-                                        {rowVirtualizer.getVirtualItems().map((virtualItem) => {
-                                            const file = filteredFiles[virtualItem.index];
-
-                                            // 如果文件不存在，渲染占位符防止空白
-                                            if (!file) {
-                                                return (
-                                                    <div
-                                                        key={virtualItem.key}
-                                                        style={{
-                                                            position: 'absolute',
-                                                            top: 0,
-                                                            left: 0,
-                                                            width: '100%',
-                                                            height: `${virtualItem.size}px`,
-                                                            transform: `translateY(${virtualItem.start}px)`,
-                                                            background: '#f9f9f9',
-                                                            borderBottom: '1px solid #f0f0f0',
-                                                        }}
-                                                    >
-                                                        <div style={{
-                                                            padding: '12px',
-                                                            color: '#d9d9d9',
-                                                            fontSize: '12px'
-                                                        }}>
-                                                            加载中...
-                                                        </div>
-                                                    </div>
-                                                );
-                                            }
-
-                                            return (
-                                                <VirtualFileRow
-                                                    key={virtualItem.key}
-                                                    index={virtualItem.index}
-                                                    style={{
-                                                        position: 'absolute',
-                                                        top: 0,
-                                                        left: 0,
-                                                        width: '100%',
-                                                        height: `${virtualItem.size}px`,
-                                                        transform: `translateY(${virtualItem.start}px)`,
-                                                        // 确保渲染优先级
-                                                        zIndex: 1,
-                                                        // 禁用动画但保持流畅性
-                                                        transition: 'none',
-                                                        animation: 'none',
-                                                        willChange: 'auto',
-                                                    }}
-                                                    file={file}
-                                                />
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            </div>
+                                size="small"
+                                style={{ flex: 1, height: '100%' }}
+                            />
                         )}
                     </div>
                 </div>
@@ -2263,6 +2151,47 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     value={newFolderName}
                     onChange={(e) => setNewFolderName(e.target.value)}
                     onPressEnter={createDirectory}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    onKeyUp={(e) => e.stopPropagation()}
+                    onKeyPress={(e) => e.stopPropagation()}
+                    onInput={(e) => e.stopPropagation()}
+                    onCompositionStart={(e) => e.stopPropagation()}
+                    onCompositionEnd={(e) => e.stopPropagation()}
+                    onPaste={(e) => e.stopPropagation()}
+                    onFocus={(e) => e.stopPropagation()}
+                    onBlur={(e) => e.stopPropagation()}
+                    autoFocus
+                />
+            </Modal>
+
+            {/* 新建文件模态框 */}
+            <Modal
+                title="新建文件"
+                open={newFileVisible}
+                onOk={createFile}
+                onCancel={() => {
+                    setNewFileVisible(false);
+                    setNewFileName('');
+                }}
+                okText="创建"
+                cancelText="取消"
+            >
+                <Input
+                    id="new-file-name-input"
+                    name="newFileName"
+                    placeholder="请输入文件名称（如: index.html, config.txt）"
+                    value={newFileName}
+                    onChange={(e) => setNewFileName(e.target.value)}
+                    onPressEnter={createFile}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    onKeyUp={(e) => e.stopPropagation()}
+                    onKeyPress={(e) => e.stopPropagation()}
+                    onInput={(e) => e.stopPropagation()}
+                    onCompositionStart={(e) => e.stopPropagation()}
+                    onCompositionEnd={(e) => e.stopPropagation()}
+                    onPaste={(e) => e.stopPropagation()}
+                    onFocus={(e) => e.stopPropagation()}
+                    onBlur={(e) => e.stopPropagation()}
                     autoFocus
                 />
             </Modal>
@@ -2287,6 +2216,15 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
                     onPressEnter={renameItem}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    onKeyUp={(e) => e.stopPropagation()}
+                    onKeyPress={(e) => e.stopPropagation()}
+                    onInput={(e) => e.stopPropagation()}
+                    onCompositionStart={(e) => e.stopPropagation()}
+                    onCompositionEnd={(e) => e.stopPropagation()}
+                    onPaste={(e) => e.stopPropagation()}
+                    onFocus={(e) => e.stopPropagation()}
+                    onBlur={(e) => e.stopPropagation()}
                     autoFocus
                 />
             </Modal>

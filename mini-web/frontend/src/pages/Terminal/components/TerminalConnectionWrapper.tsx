@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-09 18:05:28
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 09:09:19
+ * @LastEditTime: 2025-06-01 17:39:57
  * @Description: 终端连接包装器组件
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
@@ -216,7 +216,6 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
               // 修复1: 处理多余的花括号
               if (processedData.endsWith('}}') && processedData.split('{').length === processedData.split('}').length) {
                 processedData = processedData.slice(0, -1);
-                console.log(`修复了多余的花括号: ${tabKey}`);
               }
 
               // 修复2: 处理"datta"拼写错误

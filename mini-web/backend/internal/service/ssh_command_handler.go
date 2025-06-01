@@ -45,6 +45,15 @@ type FileListResponse struct {
 	Error string     `json:"error,omitempty"`
 }
 
+// FileViewResponse 文件查看响应
+type FileViewResponse struct {
+	FileType string `json:"fileType"`
+	Content  string `json:"content"`
+	Encoding string `json:"encoding,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
 // NewSSHCommandHandler 创建SSH命令处理器
 func NewSSHCommandHandler(client *ssh.Client) (*SSHCommandHandler, error) {
 	// 不立即创建会话，而是在需要时创建一次性会话
@@ -222,6 +231,518 @@ func (h *SSHCommandHandler) parseLsOutput(path string, lines []string) (*FileLis
 	}
 
 	return response, nil
+}
+
+// ExecuteFileViewCommand 执行文件查看命令
+func (h *SSHCommandHandler) ExecuteFileViewCommand(path string, fileType string, maxSize int64) (*FileViewResponse, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	log.Printf("开始执行文件查看命令，路径: %s, 文件类型: %s, 最大大小: %d", path, fileType, maxSize)
+
+	// 创建一次性会话
+	session, err := h.client.NewSession()
+	if err != nil {
+		log.Printf("创建SSH会话失败: %v", err)
+		return &FileViewResponse{
+			FileType: fileType,
+			Error:    "无法创建SSH会话",
+		}, nil
+	}
+	defer func() {
+		log.Printf("关闭SSH会话")
+		session.Close()
+	}()
+
+	// 设置默认最大大小 (10MB)
+	if maxSize <= 0 {
+		maxSize = 10 * 1024 * 1024
+	}
+
+	// 首先检查文件是否存在和大小
+	checkCmd := fmt.Sprintf("stat -c '%%s' '%s'", path)
+	log.Printf("执行文件大小检查命令: %s", checkCmd)
+
+	sizeOutput, err := session.CombinedOutput(checkCmd)
+	if err != nil {
+		log.Printf("检查文件大小失败: %v", err)
+		return &FileViewResponse{
+			FileType: fileType,
+			Error:    "文件不存在或无法访问",
+		}, nil
+	}
+
+	// 解析文件大小
+	var fileSize int64
+	if _, err := fmt.Sscanf(string(sizeOutput), "%d", &fileSize); err != nil {
+		log.Printf("解析文件大小失败: %v", err)
+		return &FileViewResponse{
+			FileType: fileType,
+			Error:    "无法获取文件大小",
+		}, nil
+	}
+
+	log.Printf("文件大小: %d 字节, 最大限制: %d 字节", fileSize, maxSize)
+
+	// 检查文件大小是否超过限制
+	if fileSize > maxSize {
+		return &FileViewResponse{
+			FileType: fileType,
+			Error:    fmt.Sprintf("文件过大 (%d 字节)，超过最大限制 (%d 字节)", fileSize, maxSize),
+		}, nil
+	}
+
+	// 重新创建会话（因为上面的会话已经使用过了）
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return &FileViewResponse{
+			FileType: fileType,
+			Error:    "无法创建SSH会话",
+		}, nil
+	}
+
+	// 根据文件类型选择合适的读取命令
+	var cmd string
+	var encoding string
+	var mimeType string
+
+	switch fileType {
+	case "text":
+		// 文本文件，使用cat命令
+		cmd = fmt.Sprintf("cat '%s'", path)
+		encoding = "utf-8"
+		mimeType = "text/plain"
+	case "image":
+		// 图片文件，使用base64编码
+		cmd = fmt.Sprintf("base64 '%s'", path)
+		encoding = "base64"
+		// 根据文件扩展名设置MIME类型
+		if strings.HasSuffix(strings.ToLower(path), ".png") {
+			mimeType = "image/png"
+		} else if strings.HasSuffix(strings.ToLower(path), ".jpg") || strings.HasSuffix(strings.ToLower(path), ".jpeg") {
+			mimeType = "image/jpeg"
+		} else if strings.HasSuffix(strings.ToLower(path), ".gif") {
+			mimeType = "image/gif"
+		} else if strings.HasSuffix(strings.ToLower(path), ".webp") {
+			mimeType = "image/webp"
+		} else {
+			mimeType = "image/octet-stream"
+		}
+	default:
+		// 其他类型，尝试作为文本读取
+		cmd = fmt.Sprintf("cat '%s'", path)
+		encoding = "utf-8"
+		mimeType = "application/octet-stream"
+	}
+
+	log.Printf("执行文件读取命令: %s", cmd)
+
+	// 设置超时
+	done := make(chan struct{})
+	var output []byte
+	var cmdErr error
+
+	go func() {
+		defer close(done)
+		output, cmdErr = session.CombinedOutput(cmd)
+		log.Printf("文件读取命令执行完成，输出长度: %d, 错误: %v", len(output), cmdErr)
+	}()
+
+	// 等待命令完成或超时
+	select {
+	case <-done:
+		log.Printf("文件读取命令正常完成")
+	case <-time.After(30 * time.Second): // 增加超时时间，因为文件可能较大
+		log.Printf("文件读取命令执行超时")
+		session.Close()
+		return &FileViewResponse{
+			FileType: fileType,
+			Error:    "文件读取超时",
+		}, nil
+	}
+
+	if cmdErr != nil {
+		log.Printf("执行文件读取命令失败: %v", cmdErr)
+		return &FileViewResponse{
+			FileType: fileType,
+			Error:    fmt.Sprintf("文件读取失败: %v", cmdErr),
+		}, nil
+	}
+
+	// 检查输出内容
+	if len(output) == 0 {
+		log.Printf("文件内容为空")
+		return &FileViewResponse{
+			FileType: fileType,
+			Content:  "",
+			Encoding: encoding,
+			MimeType: mimeType,
+		}, nil
+	}
+
+	content := string(output)
+	log.Printf("成功读取文件内容，长度: %d 字符", len(content))
+
+	return &FileViewResponse{
+		FileType: fileType,
+		Content:  content,
+		Encoding: encoding,
+		MimeType: mimeType,
+	}, nil
+}
+
+// ExecuteFileSaveCommand 执行文件保存命令
+func (h *SSHCommandHandler) ExecuteFileSaveCommand(path string, content string, encoding string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	log.Printf("开始执行文件保存命令，路径: %s, 内容长度: %d, 编码: %s", path, len(content), encoding)
+
+	// 创建一次性会话
+	session, err := h.client.NewSession()
+	if err != nil {
+		log.Printf("创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+	defer func() {
+		log.Printf("关闭SSH会话")
+		session.Close()
+	}()
+
+	// 使用cat命令写入文件内容
+	// 使用heredoc方式避免特殊字符问题
+	cmd := fmt.Sprintf("cat > '%s'", path)
+	log.Printf("执行文件保存命令: %s", cmd)
+
+	// 获取stdin
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		log.Printf("获取stdin失败: %v", err)
+		return fmt.Errorf("获取stdin失败: %v", err)
+	}
+
+	// 设置超时
+	done := make(chan error, 1)
+
+	go func() {
+		defer close(done)
+		defer stdin.Close()
+
+		// 启动命令
+		if err := session.Start(cmd); err != nil {
+			log.Printf("启动保存命令失败: %v", err)
+			done <- fmt.Errorf("启动命令失败: %v", err)
+			return
+		}
+
+		// 写入内容
+		_, err := stdin.Write([]byte(content))
+		if err != nil {
+			log.Printf("写入文件内容失败: %v", err)
+			done <- fmt.Errorf("写入内容失败: %v", err)
+			return
+		}
+
+		// 关闭stdin触发保存
+		stdin.Close()
+
+		// 等待命令完成
+		if err := session.Wait(); err != nil {
+			log.Printf("保存命令执行失败: %v", err)
+			done <- fmt.Errorf("保存失败: %v", err)
+			return
+		}
+
+		done <- nil
+	}()
+
+	// 等待命令完成或超时
+	select {
+	case err := <-done:
+		if err != nil {
+			log.Printf("文件保存失败: %v", err)
+			return err
+		}
+		log.Printf("文件保存成功: %s", path)
+		return nil
+	case <-time.After(30 * time.Second):
+		log.Printf("文件保存超时")
+		session.Close()
+		return fmt.Errorf("文件保存超时")
+	}
+}
+
+// ExecuteFileCreateCommand 执行文件创建命令
+func (h *SSHCommandHandler) ExecuteFileCreateCommand(path string, content string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	log.Printf("开始执行文件创建命令，路径: %s, 内容长度: %d", path, len(content))
+
+	// 创建一次性会话
+	session, err := h.client.NewSession()
+	if err != nil {
+		log.Printf("创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+	defer func() {
+		log.Printf("关闭SSH会话")
+		session.Close()
+	}()
+
+	// 1. 首先检查父目录是否存在，如果不存在则创建
+	parentDir := strings.TrimSuffix(path, "/"+path[strings.LastIndex(path, "/")+1:])
+	if parentDir != "" && parentDir != path {
+		checkParentCmd := fmt.Sprintf("test -d '%s' || mkdir -p '%s'", parentDir, parentDir)
+		log.Printf("检查并创建父目录: %s", checkParentCmd)
+
+		parentOutput, err := session.CombinedOutput(checkParentCmd)
+		if err != nil {
+			log.Printf("创建父目录失败: %v, 输出: %s", err, string(parentOutput))
+			return fmt.Errorf("无法创建父目录: %v", err)
+		}
+	}
+
+	// 重新创建会话
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+
+	// 2. 检查文件是否已存在
+	checkCmd := fmt.Sprintf("test -e '%s' && echo 'exists' || echo 'not_exists'", path)
+	checkOutput, err := session.CombinedOutput(checkCmd)
+	if err != nil {
+		log.Printf("检查文件是否存在失败: %v", err)
+		return fmt.Errorf("检查文件失败: %v", err)
+	}
+
+	if strings.TrimSpace(string(checkOutput)) == "exists" {
+		return fmt.Errorf("文件已存在")
+	}
+
+	// 重新创建会话（因为上面的会话已经使用过了）
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+
+	// 3. 检查目标目录的写权限
+	targetDir := strings.TrimSuffix(path, "/"+path[strings.LastIndex(path, "/")+1:])
+	if targetDir == "" {
+		targetDir = "."
+	}
+	permCmd := fmt.Sprintf("test -w '%s' && echo 'writable' || echo 'not_writable'", targetDir)
+	permOutput, err := session.CombinedOutput(permCmd)
+	if err != nil {
+		log.Printf("检查目录权限失败: %v", err)
+		return fmt.Errorf("检查目录权限失败: %v", err)
+	}
+
+	if strings.TrimSpace(string(permOutput)) != "writable" {
+		log.Printf("目录没有写权限: %s", targetDir)
+		return fmt.Errorf("目录没有写权限: %s", targetDir)
+	}
+
+	// 重新创建会话
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+
+	// 4. 使用touch命令创建空文件，然后写入内容（如果有）
+	var cmd string
+	if content == "" {
+		// 如果没有内容，直接使用touch创建空文件
+		cmd = fmt.Sprintf("touch '%s'", path)
+		log.Printf("执行文件创建命令（touch）: %s", cmd)
+
+		output, err := session.CombinedOutput(cmd)
+		if err != nil {
+			log.Printf("touch命令执行失败: %v, 输出: %s", err, string(output))
+			return fmt.Errorf("创建文件失败: %v", err)
+		}
+
+		log.Printf("文件创建成功: %s", path)
+		return nil
+	} else {
+		// 如果有内容，使用cat命令写入
+		cmd = fmt.Sprintf("cat > '%s'", path)
+		log.Printf("执行文件创建命令（cat）: %s", cmd)
+
+		// 获取stdin
+		stdin, err := session.StdinPipe()
+		if err != nil {
+			log.Printf("获取stdin失败: %v", err)
+			return fmt.Errorf("获取stdin失败: %v", err)
+		}
+
+		// 设置超时
+		done := make(chan error, 1)
+
+		go func() {
+			defer close(done)
+			defer stdin.Close()
+
+			// 启动命令
+			if err := session.Start(cmd); err != nil {
+				log.Printf("启动创建命令失败: %v", err)
+				done <- fmt.Errorf("启动命令失败: %v", err)
+				return
+			}
+
+			// 写入内容
+			_, err := stdin.Write([]byte(content))
+			if err != nil {
+				log.Printf("写入文件内容失败: %v", err)
+				done <- fmt.Errorf("写入内容失败: %v", err)
+				return
+			}
+
+			// 关闭stdin触发创建
+			stdin.Close()
+
+			// 等待命令完成
+			if err := session.Wait(); err != nil {
+				log.Printf("创建命令执行失败: %v", err)
+				done <- fmt.Errorf("创建失败: %v", err)
+				return
+			}
+
+			done <- nil
+		}()
+
+		// 等待命令完成或超时
+		select {
+		case err := <-done:
+			if err != nil {
+				log.Printf("文件创建失败: %v", err)
+				return err
+			}
+			log.Printf("文件创建成功: %s", path)
+			return nil
+		case <-time.After(30 * time.Second):
+			log.Printf("文件创建超时")
+			session.Close()
+			return fmt.Errorf("文件创建超时")
+		}
+	}
+}
+
+// ExecuteFolderCreateCommand 执行文件夹创建命令
+func (h *SSHCommandHandler) ExecuteFolderCreateCommand(path string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	log.Printf("开始执行文件夹创建命令，路径: %s", path)
+
+	// 创建一次性会话
+	session, err := h.client.NewSession()
+	if err != nil {
+		log.Printf("创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+	defer func() {
+		log.Printf("关闭SSH会话")
+		session.Close()
+	}()
+
+	// 1. 首先检查文件夹是否已存在
+	checkCmd := fmt.Sprintf("test -d '%s' && echo 'exists' || echo 'not_exists'", path)
+	checkOutput, err := session.CombinedOutput(checkCmd)
+	if err != nil {
+		log.Printf("检查文件夹是否存在失败: %v", err)
+		return fmt.Errorf("检查文件夹失败: %v", err)
+	}
+
+	if strings.TrimSpace(string(checkOutput)) == "exists" {
+		log.Printf("文件夹已存在: %s", path)
+		return fmt.Errorf("文件夹已存在")
+	}
+
+	// 重新创建会话
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+
+	// 2. 检查父目录的写权限
+	parentDir := strings.TrimSuffix(path, "/"+path[strings.LastIndex(path, "/")+1:])
+	if parentDir == "" {
+		parentDir = "."
+	}
+	permCmd := fmt.Sprintf("test -w '%s' && echo 'writable' || echo 'not_writable'", parentDir)
+	permOutput, err := session.CombinedOutput(permCmd)
+	if err != nil {
+		log.Printf("检查父目录权限失败: %v", err)
+		return fmt.Errorf("检查父目录权限失败: %v", err)
+	}
+
+	if strings.TrimSpace(string(permOutput)) != "writable" {
+		log.Printf("父目录没有写权限: %s", parentDir)
+		return fmt.Errorf("父目录没有写权限: %s", parentDir)
+	}
+
+	// 重新创建会话
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+
+	// 3. 使用mkdir命令创建文件夹，-p参数确保父目录存在
+	cmd := fmt.Sprintf("mkdir -p '%s'", path)
+	log.Printf("执行文件夹创建命令: %s", cmd)
+
+	// 设置超时
+	done := make(chan error, 1)
+
+	go func() {
+		defer close(done)
+		output, err := session.CombinedOutput(cmd)
+		if err != nil {
+			log.Printf("创建文件夹命令执行失败: %v, 输出: %s", err, string(output))
+			// 检查是否是因为文件夹已存在（虽然前面已经检查过，但可能有竞态条件）
+			if strings.Contains(string(output), "File exists") || strings.Contains(string(output), "already exists") {
+				done <- fmt.Errorf("文件夹已存在")
+			} else if strings.Contains(string(output), "Permission denied") {
+				done <- fmt.Errorf("权限被拒绝")
+			} else if strings.Contains(string(output), "No space left") {
+				done <- fmt.Errorf("磁盘空间不足")
+			} else {
+				done <- fmt.Errorf("创建失败: %s", string(output))
+			}
+			return
+		}
+		log.Printf("文件夹创建命令执行完成")
+		done <- nil
+	}()
+
+	// 等待命令完成或超时
+	select {
+	case err := <-done:
+		if err != nil {
+			log.Printf("文件夹创建失败: %v", err)
+			return err
+		}
+		log.Printf("文件夹创建成功: %s", path)
+		return nil
+	case <-time.After(15 * time.Second):
+		log.Printf("文件夹创建超时")
+		session.Close()
+		return fmt.Errorf("文件夹创建超时")
+	}
 }
 
 // Close 关闭命令处理器

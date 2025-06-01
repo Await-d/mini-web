@@ -1,24 +1,192 @@
-/* 文件查看器样式 */
+/* FileViewer.css - 文件查看器组件样式 */
+
+/* 文本内容样式 */
 .file-text-content {
-    max-height: 70vh;
-    overflow: auto;
+    width: 100%;
 }
 
 .file-text-content pre {
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    font-size: 14px;
-    line-height: 1.5;
-    tab-size: 4;
+    font-family: 'Fira Code', 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Courier New', monospace !important;
+    line-height: 1.6 !important;
+    tab-size: 2;
+    -moz-tab-size: 2;
+    word-wrap: break-word;
+    white-space: pre-wrap;
 }
 
+/* 图片内容样式 */
 .file-image-content {
-    max-height: 70vh;
-    overflow: auto;
+    width: 100%;
 }
 
 .file-image-content .ant-image {
-    max-width: 100%;
-    height: auto;
+    transition: transform 0.2s ease-in-out;
+}
+
+.file-image-content .ant-image:hover {
+    cursor: pointer;
+}
+
+/* 文件信息卡片样式 */
+.file-info-card {
+    border: 1px solid #e8e8e8;
+    border-radius: 6px;
+}
+
+/* 预览容器样式 */
+.file-preview-container {
+    border: 1px solid #e8e8e8;
+    border-radius: 6px;
+    background: #fafafa;
+    overflow: hidden;
+}
+
+/* 工具栏样式 */
+.file-toolbar {
+    background: #f5f5f5;
+    border-bottom: 1px solid #e8e8e8;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* 错误状态样式 */
+.file-error-state {
+    text-align: center;
+    padding: 50px;
+    color: #ff4d4f;
+}
+
+/* 加载状态样式 */
+.file-loading-state {
+    text-align: center;
+    padding: 50px;
+    color: #666;
+}
+
+/* 空状态样式 */
+.file-empty-state {
+    text-align: center;
+    padding: 50px;
+    color: #999;
+}
+
+/* 文件类型标签样式 */
+.file-type-tag {
+    font-size: 11px !important;
+    padding: 0 6px !important;
+    height: 20px !important;
+    line-height: 18px !important;
+}
+
+/* 视频文件样式 */
+.file-video-placeholder {
+    text-align: center;
+    padding: 50px;
+    background: #fafafa;
+    border: 1px solid #e8e8e8;
+    border-radius: 6px;
+}
+
+.file-video-icon {
+    font-size: 48px;
+    color: #ccc;
+    margin-bottom: 16px;
+    display: block;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .file-text-content pre {
+        font-size: 12px;
+        padding: 12px;
+    }
+    
+    .file-toolbar {
+        flex-direction: column;
+        gap: 8px;
+        align-items: stretch;
+    }
+    
+    .file-toolbar .ant-space {
+        justify-content: center;
+    }
+}
+
+/* 滚动条样式 */
+.file-text-content pre::-webkit-scrollbar,
+.file-image-content > div::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.file-text-content pre::-webkit-scrollbar-track,
+.file-image-content > div::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+.file-text-content pre::-webkit-scrollbar-thumb,
+.file-image-content > div::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 3px;
+}
+
+.file-text-content pre::-webkit-scrollbar-thumb:hover,
+.file-image-content > div::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* 文件统计信息样式 */
+.file-stats {
+    font-size: 12px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.file-stats .ant-tag {
+    margin: 0;
+}
+
+/* 图片缩放控制样式 */
+.image-scale-controls {
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.image-scale-controls .ant-btn {
+    margin: 0;
+}
+
+/* 图片容器样式 */
+.image-container {
+    overflow: auto;
+    max-height: 60vh;
+    border: 1px solid #e8e8e8;
+    border-radius: 6px;
+    padding: 16px;
+    background: #fafafa;
+    text-align: center;
+}
+
+/* 文件元信息样式 */
+.file-meta-info {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #666;
+    text-align: center;
+}
+
+.file-meta-info span {
+    margin: 0 8px;
 }
 
 /* 语法高亮样式 */
@@ -57,15 +225,6 @@
     color: #fd971f;
 }
 
-/* 文件信息卡片样式 */
-.file-info-card {
-    margin-bottom: 16px;
-}
-
-.file-info-card .ant-card-body {
-    padding: 16px;
-}
-
 /* 图片查看器控制按钮 */
 .image-controls {
     margin-bottom: 16px;
@@ -74,19 +233,6 @@
 
 .image-controls .ant-btn {
     margin: 0 4px;
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-    .file-text-content pre {
-        font-size: 12px;
-        padding: 12px;
-    }
-    
-    .image-controls .ant-btn {
-        margin: 2px;
-        padding: 4px 8px;
-    }
 }
 
 /* 滚动条样式 */

@@ -1,699 +1,602 @@
-/* 文件浏览器样式 */
+/* FileBrowser.css - 文件浏览器组件样式 */
 
+/* 主容器 */
 .file-browser {
-    height: 100%;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    background: #fafafa;
-    overflow: hidden; /* 防止外部溢出 */
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #e8e8e8;
+  overflow: hidden;
+  position: relative;
 }
 
+/* Card组件样式优化 */
 .file-browser .ant-card {
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
+.file-browser .ant-card-head {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  min-height: 40px;
+}
+
+.file-browser .ant-card-body {
+  flex: 1;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* 拖拽覆盖层 */
+.drag-drop-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(22, 119, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed #1677ff;
+  border-radius: 6px;
+  z-index: 1000;
+  transition: all 0.2s ease;
+}
+
+.drag-drop-overlay::before {
+  content: '📁 拖放文件到此处上传';
+  font-size: 16px;
+  color: #1677ff;
+  font-weight: 500;
+  padding: 16px 24px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* 工具栏 */
 .file-browser-toolbar {
-    padding: 16px;
-    background: #fff;
-    border-bottom: 1px solid #f0f0f0;
-    border-radius: 8px 8px 0 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fafafa;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 44px;
 }
 
 .file-browser-toolbar .ant-btn {
-    border-radius: 6px;
-    font-weight: 500;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 
-.file-browser-toolbar .ant-btn-primary {
-    background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
-    border: none;
-    box-shadow: 0 2px 4px rgba(24, 144, 255, 0.3);
+.file-browser-toolbar .ant-btn-sm {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
-.file-browser-toolbar .ant-btn-primary:hover {
-    background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(24, 144, 255, 0.4);
-}
-
-.file-browser-content {
-    flex: 1;
-    padding: 16px;
-    background: #fff;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    min-height: 0; /* 确保能够收缩 */
-}
-
-.file-browser-breadcrumb {
-    margin-bottom: 16px;
-    padding: 8px 12px;
-    background: #f8f9fa;
-    border-radius: 6px;
-    border: 1px solid #e9ecef;
-}
-
-.file-browser-breadcrumb .ant-breadcrumb-link {
-    color: #1890ff;
-    font-weight: 500;
-    transition: all 0.2s;
-}
-
-.file-browser-breadcrumb .ant-breadcrumb-link:hover {
-    color: #40a9ff;
-    background: rgba(24, 144, 255, 0.1);
-    padding: 2px 6px;
-    border-radius: 4px;
-}
-
-.file-browser-table {
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    min-height: 0; /* 确保能够收缩 */
-}
-
-.file-browser-table .ant-table {
-    border-radius: 6px;
-    overflow: hidden;
-}
-
-.file-browser-table .ant-table-thead > tr > th {
-    background: #fafafa;
-    border-bottom: 2px solid #f0f0f0;
-    font-weight: 600;
-    color: #262626;
-}
-
-.file-browser-table .ant-table-tbody > tr {
-    transition: all 0.2s;
-}
-
-.file-browser-table .ant-table-tbody > tr:hover {
-    background: #f0f9ff !important;
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.file-browser-table .ant-table-tbody > tr:nth-child(even) {
-    background: #fafafa;
-}
-
-.file-browser-table .ant-table-tbody > tr.ant-table-row-selected {
-    background: #e6f7ff !important;
-}
-
-.file-item {
-    display: flex;
-    align-items: center;
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 4px;
-    transition: all 0.2s;
-}
-
-.file-item:hover {
-    background: rgba(24, 144, 255, 0.1);
-}
-
-.file-item.selected {
-    background: rgba(24, 144, 255, 0.2);
-    color: #1890ff;
-}
-
-.file-item-icon {
-    margin-right: 8px;
-    font-size: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-}
-
-.file-item-name {
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.file-size {
-    font-family: 'Monaco', 'Consolas', monospace;
-    color: #666;
-    font-size: 12px;
-}
-
-.file-permissions {
-    font-family: 'Monaco', 'Consolas', monospace;
-    font-size: 12px;
-    background: #f5f5f5;
-    padding: 2px 6px;
-    border-radius: 3px;
-    color: #595959;
-}
-
-.file-time {
-    color: #8c8c8c;
-    font-size: 12px;
-}
-
-.file-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    width: 120px;
-    justify-content: center;
-    padding: 4px;
-}
-
-.header-actions {
-    width: 120px;
-    text-align: center;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-
-.file-actions .ant-btn {
-    border-radius: 4px;
-    border: none;
-    background: transparent;
-    color: #8c8c8c;
-    transition: all 0.2s;
-}
-
-.file-actions .ant-btn:hover {
-    background: #f0f0f0;
-    color: #1890ff;
-}
-
+/* 上传进度 */
 .upload-progress {
-    margin-left: 12px;
-    min-width: 150px;
+  min-width: 200px;
+  padding: 8px 12px;
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  border-radius: 4px;
 }
 
-.upload-progress .ant-progress-line {
-    margin: 0;
-}
-
-.empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 200px;
-    color: #8c8c8c;
-}
-
-.empty-state-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-    color: #d9d9d9;
-}
-
-.loading-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(255, 255, 255, 0.8);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-}
-
-.search-box {
-    margin-bottom: 16px;
-}
-
-.search-box .ant-input {
-    border-radius: 6px;
-}
-
-.search-box .ant-input-affix-wrapper {
-    border-radius: 6px;
-}
-
-.batch-actions {
-    margin-bottom: 16px;
-    padding: 12px;
-    background: #e6f7ff;
-    border: 1px solid #91d5ff;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.batch-actions-info {
-    color: #1890ff;
-    font-weight: 500;
-}
-
-.batch-actions-buttons {
-    display: flex;
-    gap: 8px;
-}
-
-.context-menu {
-    background: #fff;
-    border: 1px solid #d9d9d9;
-    border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    padding: 4px 0;
-    z-index: 1000;
-}
-
-.context-menu-item {
-    padding: 8px 16px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    font-size: 14px;
-    transition: all 0.2s;
-}
-
-.context-menu-item:hover {
-    background: #f0f0f0;
-}
-
-.context-menu-item.danger:hover {
-    background: #fff2f0;
-    color: #ff4d4f;
-}
-
-.context-menu-icon {
-    margin-right: 8px;
-    width: 16px;
-    text-align: center;
-}
-
-.drag-drop-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(24, 144, 255, 0.1);
-    border: 2px dashed #1890ff;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 20;
-    font-size: 18px;
-    font-weight: 500;
-    color: #1890ff;
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-    .file-browser-toolbar {
-        padding: 12px;
-    }
-    
-    .file-browser-toolbar .ant-space {
-        flex-wrap: wrap;
-    }
-    
-    .file-browser-content {
-        padding: 12px;
-    }
-    
-    .file-browser-table .ant-table-scroll {
-        overflow-x: auto;
-    }
-}
-
-/* 滚动条美化 */
-.file-browser-table ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-}
-
-.file-browser-table ::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 3px;
-}
-
-.file-browser-table ::-webkit-scrollbar-thumb {
-    background: #c1c1c1;
-    border-radius: 3px;
-}
-
-.file-browser-table ::-webkit-scrollbar-thumb:hover {
-    background: #a8a8a8;
-}
-
-/* 动画效果 */
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
+/* 主内容区域 */
 .file-browser-content {
-    animation: fadeIn 0.3s ease-out;
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 8px 12px 12px 12px;
+  overflow: hidden !important;
+  min-height: 0 !important;
+  height: 100% !important;
 }
 
-@keyframes pulse {
-    0% {
-        transform: scale(1);
-    }
-    50% {
-        transform: scale(1.05);
-    }
-    100% {
-        transform: scale(1);
-    }
-}
-
-.loading-overlay .ant-spin {
-    animation: pulse 2s infinite;
-}
-
-/* 面包屑导航样式 */
+/* 面包屑容器 */
 .breadcrumb-container {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-    padding: 12px 16px;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border-radius: 8px;
-    border: 1px solid #dee2e6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: #f5f5f5;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 36px;
 }
 
-.file-browser-breadcrumb {
-    margin-bottom: 16px;
-    padding: 12px 16px;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border-radius: 8px;
-    border: 1px solid #dee2e6;
+.breadcrumb-container .ant-breadcrumb {
+  flex: 1;
+  min-width: 200px;
 }
 
-/* 路径记录指示器样式 */
 .path-record-indicator {
-    display: flex;
-    align-items: center;
+  display: flex;
+  align-items: center;
 }
 
 .saved-path-hint {
-    font-size: 12px;
-    color: #6c757d;
-    background: rgba(40, 167, 69, 0.1);
-    padding: 4px 8px;
-    border-radius: 12px;
-    border: 1px solid rgba(40, 167, 69, 0.2);
-    cursor: help;
-    transition: all 0.2s ease-in-out;
+  font-size: 12px;
+  color: #52c41a;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  border-radius: 3px;
 }
 
-.saved-path-hint:hover {
-    background: rgba(40, 167, 69, 0.15);
-    border-color: rgba(40, 167, 69, 0.3);
-    transform: scale(1.05);
+/* 搜索框 */
+.search-box {
+  margin-bottom: 8px;
 }
 
-/* 虚拟化文件列表样式 */
-.virtual-file-container {
-    border: 1px solid #d9d9d9;
-    border-radius: 6px;
-    overflow: hidden;
-    background: white;
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0; /* 确保能够收缩 */
+.search-box .ant-input-search {
+  border-radius: 6px;
 }
 
-.virtual-file-header {
-    display: grid;
-    grid-template-columns: 40px 1fr 100px 120px 180px 120px;
-    align-items: center;
-    padding: 8px 12px;
-    background: #fafafa;
-    border-bottom: 1px solid #d9d9d9;
-    font-weight: 600;
-    color: #262626;
-    flex-shrink: 0;
-    height: 40px; /* 固定表头高度 */
-    min-height: 40px;
+.search-box .ant-input-search-button {
+  height: 32px;
 }
 
-.virtual-file-scroll-container {
-    height: 100%;
-    overflow: auto;
-    flex: 1;
-    position: relative;
-    
-    /* 性能优化 - 启用硬件加速 */
-    will-change: scroll-position;
-    transform: translateZ(0);
-    backface-visibility: hidden;
-    perspective: 1000px;
-    
-    /* 优化滚动行为 - 平衡性能和用户体验 */
-    scroll-behavior: auto;
-    -webkit-overflow-scrolling: touch; /* iOS平滑滚动 */
-    
-    /* 减少重排重绘但保持流畅性 */
-    contain: layout style paint;
-    
-    /* 增加渲染缓冲区，减少滚动空白 */
-    overflow-anchor: auto; /* 启用滚动锚定 */
+/* 批量操作 */
+.batch-actions {
+  background: #e6f7ff;
+  border: 1px solid #91d5ff;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 36px;
 }
 
-.virtual-file-scroll-container::-webkit-scrollbar {
-    width: 10px;
+.batch-actions-info {
+  color: #1677ff;
+  font-weight: 500;
 }
 
-.virtual-file-scroll-container::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 5px;
-    margin: 2px;
+.batch-actions-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.virtual-file-scroll-container::-webkit-scrollbar-thumb {
-    background: #c1c1c1;
-    border-radius: 5px;
-    border: 2px solid #f1f1f1;
+/* 文件表格容器 */
+.file-browser-table {
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  background: #ffffff;
+  min-height: 200px !important;
+  height: 100% !important;
 }
 
-.virtual-file-scroll-container::-webkit-scrollbar-thumb:hover {
-    background: #a8a8a8;
+/* 强制表格高度适应 */
+.file-browser-table .ant-spin-nested-loading,
+.file-browser-table .ant-spin-container {
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 !important;
+  min-height: 0 !important;
 }
 
-/* Firefox 滚动条样式 */
-.virtual-file-scroll-container {
-    scrollbar-width: thin;
-    scrollbar-color: #c1c1c1 #f1f1f1;
+/* 删除重复的规则，使用上面更强制的规则 */
+
+.file-browser-table .ant-table-thead > tr > th {
+  background: #fafafa;
+  border-bottom: 1px solid #e8e8e8;
+  font-weight: 600;
+  color: #262626;
+  padding: 6px 8px;
+  font-size: 12px;
+  height: 36px;
 }
 
-.virtual-file-header > div {
-    padding: 0 4px;
-    display: flex;
-    align-items: center;
+.file-browser-table .ant-table-tbody > tr {
+  transition: all 0.2s ease;
+  cursor: pointer;
 }
 
-.virtual-file-header > div:hover {
-    color: #1890ff;
+.file-browser-table .ant-table-tbody > tr:hover {
+  background: #f5f5f5;
 }
 
-.virtual-file-row {
-    position: relative;
-    height: 48px;
-    border-bottom: 1px solid #f0f0f0;
-    display: flex;
-    align-items: center;
-    cursor: pointer;
-    user-select: none;
-    transition: none; /* 移除transition以提高性能 */
-    background: #fff;
-    
-    /* 性能优化 */
-    contain: layout style paint;
-    will-change: auto; /* 移除will-change，让浏览器优化 */
-    transform: translateZ(0); /* 硬件加速 */
-    backface-visibility: hidden;
-    
-    /* 禁用动画以提高性能 */
-    animation: none !important;
+.file-browser-table .ant-table-tbody > tr.ant-table-row-selected {
+  background: #e6f7ff;
 }
 
-/* 移除原生hover效果，使用JavaScript控制的类 */
-.virtual-file-row:hover {
-    /* 不设置任何样式，完全通过JavaScript控制 */
+.file-browser-table .ant-table-tbody > tr.ant-table-row-selected:hover {
+  background: #bae7ff;
 }
 
-/* 完全禁用hover效果，避免跳动 */
-.virtual-file-row.row-hovered {
-    background-color: #f0f9ff !important;
-    transition: none !important;
-    animation: none !important;
-    will-change: auto !important;
+.file-browser-table .ant-table-tbody > tr > td {
+  padding: 4px 8px;
+  vertical-align: middle;
+  border-bottom: 1px solid #f5f5f5;
+  height: 32px;
+  font-size: 12px;
 }
 
-/* 确保选中状态优先级更高 */
-.virtual-file-row.selected {
-    background-color: #e6f7ff !important;
-    transition: none !important;
-    animation: none !important;
-    will-change: auto !important;
+.file-browser-table .ant-table-tbody > tr:last-child > td {
+  border-bottom: none;
 }
 
-.virtual-file-row.selected.row-hovered {
-    background-color: #d6f2ff !important;
-    transition: none !important;
-    animation: none !important;
-    will-change: auto !important;
-}
-
-.virtual-file-row.selected {
-    background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%);
-    border-color: #1890ff;
-}
-
-.virtual-file-row.directory {
-    font-weight: 500;
-}
-
-.file-row-content {
-    display: grid;
-    grid-template-columns: 40px 1fr 100px 120px 180px 120px;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    padding: 0 8px;
-}
-
-.file-checkbox {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 32px;
-    height: 32px;
-}
-
-.file-info {
-    display: flex;
-    align-items: center;
-    min-width: 0; /* 允许文字溢出处理 */
-    padding-right: 8px;
-}
-
+/* 文件图标样式 */
 .file-icon {
-    margin-right: 8px;
-    font-size: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
+  margin-right: 6px;
+  font-size: 14px;
+  color: #1677ff;
 }
 
+.file-icon.directory {
+  color: #faad14;
+}
+
+.file-icon.executable {
+  color: #52c41a;
+}
+
+.file-icon.archive {
+  color: #722ed1;
+}
+
+.file-icon.image {
+  color: #eb2f96;
+}
+
+.file-icon.document {
+  color: #1677ff;
+}
+
+.file-icon.text {
+  color: #13c2c2;
+}
+
+.file-icon.video {
+  color: #fa541c;
+}
+
+.file-icon.audio {
+  color: #a0d911;
+}
+
+/* 文件名样式 */
 .file-name {
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
 }
 
+.file-name.directory {
+  font-weight: 500;
+  color: #262626;
+}
+
+.file-name.executable {
+  color: #389e0d;
+  font-weight: 500;
+}
+
+.file-name-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 150px;
+  font-size: 12px;
+}
+
+/* 文件大小样式 */
 .file-size {
-    font-family: 'Monaco', 'Consolas', monospace;
-    color: #666;
-    font-size: 12px;
-    text-align: right;
-    padding-right: 8px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  color: #666;
+  text-align: right;
+  font-size: 11px;
 }
 
+/* 权限样式 */
 .file-permissions {
-    font-family: 'Monaco', 'Consolas', monospace;
-    font-size: 12px;
-    background: #f5f5f5;
-    padding: 2px 6px;
-    border-radius: 3px;
-    color: #595959;
-    text-align: center;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-size: 10px;
+  color: #8c8c8c;
+  background: #f5f5f5;
+  padding: 1px 4px;
+  border-radius: 2px;
+  min-width: 70px;
+  text-align: center;
 }
 
+/* 修改时间样式 */
 .file-modified {
-    color: #8c8c8c;
-    font-size: 12px;
-    text-align: center;
+  color: #8c8c8c;
+  font-size: 11px;
 }
 
+/* 操作按钮组 */
 .file-actions {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    width: 100%;
-    padding: 4px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.file-browser-table .ant-table-tbody > tr:hover .file-actions {
+  opacity: 1;
 }
 
 .file-actions .ant-btn {
-    border: none !important;
-    background: transparent !important;
-    color: #8c8c8c !important;
-    opacity: 0.7;
-    transition: none !important;
-    width: 26px;
-    height: 26px;
-    min-width: 26px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px !important;
+  padding: 2px 4px;
+  height: auto;
+  font-size: 11px;
+  border-radius: 3px;
+  min-width: 24px;
 }
 
-.file-actions .ant-btn:hover,
-.file-actions .ant-btn:focus {
-    opacity: 1 !important;
-    background: rgba(24, 144, 255, 0.1) !important;
-    color: #1890ff !important;
-    transform: scale(1.1);
-    box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2);
+/* 加载覆盖层 */
+.loading-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background: #fafafa;
+  border-radius: 6px;
+  color: #666;
+  font-size: 14px;
+  min-height: 200px;
+  flex: 1;
 }
 
-.virtual-file-row:hover .file-actions .ant-btn {
-    opacity: 1;
+.loading-overlay .anticon {
+  color: #1677ff;
+  font-size: 24px;
+  margin-bottom: 12px;
 }
 
-/* 确保下拉菜单层级正确 - 使用合理的 zIndex 值 */
-.ant-dropdown {
-    z-index: 1050 !important; /* 比默认的 1000 稍高，但不会过高 */
+/* 空状态 */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #999;
+  font-size: 14px;
+  background: #fafafa;
+  border-radius: 6px;
+  min-height: 200px;
+  flex: 1;
+}
+
+.empty-state-icon {
+  font-size: 48px;
+  color: #d9d9d9;
+  margin-bottom: 16px;
+}
+
+/* 表格高度自适应 */
+.file-browser-table .ant-table-wrapper {
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  flex: 1 !important;
+}
+
+.file-browser-table .ant-table {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  flex: 1 !important;
+  min-height: 0 !important;
+}
+
+.file-browser-table .ant-table-container {
+  flex: 1 !important;
+  overflow: hidden !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.file-browser-table .ant-table-header {
+  flex-shrink: 0 !important;
+  overflow: hidden !important;
+}
+
+.file-browser-table .ant-table-body {
+  flex: 1 !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  max-height: none !important;
+}
+
+.file-browser-table .ant-pagination {
+  margin: 8px 0 0 0;
+  padding: 0 12px;
+  flex-shrink: 0 !important;
+  border-top: 1px solid #f0f0f0;
+  background: #fafafa;
+  min-height: 40px;
+  display: flex !important;
+  align-items: center !important;
+}
+
+/* 紧凑的分页样式 */
+.file-browser-table .ant-pagination .ant-pagination-item {
+  margin: 0 2px;
+  min-width: 28px;
+  height: 28px;
+  line-height: 26px;
+}
+
+.file-browser-table .ant-pagination .ant-pagination-prev,
+.file-browser-table .ant-pagination .ant-pagination-next {
+  min-width: 28px;
+  height: 28px;
+  line-height: 26px;
 }
 
 /* 响应式设计 */
 @media (max-width: 768px) {
-    .virtual-file-header,
-    .virtual-file-row {
-        grid-template-columns: 30px 1fr 80px 50px;
-    }
-    
-    .file-permissions,
-    .file-modified {
-        display: none;
-    }
-    
-    .virtual-file-header .header-permissions,
-    .virtual-file-header .header-modified {
-        display: none;
-    }
-} 
+  .file-browser-toolbar {
+    padding: 6px 8px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .breadcrumb-container {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 4px 8px;
+  }
+  
+  .batch-actions {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+    padding: 6px 8px;
+  }
+  
+  .batch-actions-buttons {
+    justify-content: center;
+  }
+  
+  .file-browser-content {
+    padding: 6px 8px 8px 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .file-browser {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+  
+  .file-browser-content {
+    padding: 12px;
+  }
+}
+
+/* 滚动条样式 */
+.file-browser-table .ant-table-container::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.file-browser-table .ant-table-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.file-browser-table .ant-table-container::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.file-browser-table .ant-table-container::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* 确保表格内容完全填充可用空间 */
+.file-browser-table .ant-table-tbody {
+  overflow-y: auto !important;
+  flex: 1 !important;
+  min-height: 0 !important;
+}
+
+/* 处理表格滚动视图 */
+.file-browser-table .ant-table-content {
+  overflow: auto !important;
+  flex: 1 !important;
+  min-height: 0 !important;
+}
+
+/* 确保表格行显示正确 */
+.file-browser-table .ant-table-measure-row {
+  visibility: hidden !important;
+  position: absolute !important;
+}
+
+/* 强制表格占满可用高度 */
+.file-browser-table > .ant-spin-nested-loading > .ant-spin-container > .ant-table-wrapper > .ant-table > .ant-table-container {
+  height: 100% !important;
+  max-height: none !important;
+  overflow: hidden !important;
+}
+
+/* 最终的表格体滚动设置 */
+.file-browser-table .ant-table-wrapper .ant-table .ant-table-container .ant-table-body {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  height: 100% !important;
+  max-height: none !important;
+  flex: 1 !important;
+  min-height: 100px !important;
+}
+
+/* 强制表格不出现横向滚动 */
+.file-browser-table .ant-table {
+  width: 100% !important;
+  table-layout: fixed !important;
+}
+
+.file-browser-table .ant-table-thead > tr > th,
+.file-browser-table .ant-table-tbody > tr > td {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* 确保文件名列能够自适应剩余空间 */
+.file-browser-table .ant-table-thead > tr > th:nth-child(2),
+.file-browser-table .ant-table-tbody > tr > td:nth-child(2) {
+  width: auto !important;
+  min-width: 120px !important;
+}
+
+/* 调整按钮间距 */
+.file-actions {
+  gap: 2px !important;
+}
+
+/* 紧凑的Space组件 */
+.file-name {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}

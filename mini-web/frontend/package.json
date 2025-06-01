@@ -12,15 +12,11 @@
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
     "@ant-design/v5-patch-for-react-19": "^1.0.3",
-    "@tanstack/react-virtual": "^3.0.0",
-    "@types/react-window": "^1.8.8",
     "antd": "^5.25.2",
     "axios": "^1.6.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^6.21.1",
-    "react-window": "^1.8.11",
-    "react-window-infinite-loader": "^1.0.10"
+    "react-router-dom": "^6.21.1"
   },
   "devDependencies": {
     "@ant-design/compatible": "^5.1.4",
