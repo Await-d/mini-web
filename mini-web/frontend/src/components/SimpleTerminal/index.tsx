@@ -2,14 +2,24 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 09:03:53
+ * @LastEditTime: 2025-06-01 18:47:07
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Spin, Button, Tooltip } from 'antd';
-import { FolderOutlined, FileOutlined, ExpandOutlined, ShrinkOutlined } from '@ant-design/icons';
+import { Spin, Button, Tooltip, message, Modal } from 'antd';
+import {
+    FolderOutlined,
+    FileOutlined,
+    ExpandOutlined,
+    ShrinkOutlined,
+    ThunderboltOutlined,
+    BlockOutlined,
+    QuestionCircleOutlined
+} from '@ant-design/icons';
 import FileBrowser from './FileBrowser';
+import BatchCommands from '../BatchCommands';
+import QuickCommands from '../QuickCommands';
 import './styles.css';
 import { parseTerminalOutput, ansiToHtml } from '../../pages/Terminal/utils/terminalUtils';
 
@@ -57,6 +67,11 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     // 文件浏览器状态
     const [fileBrowserVisible, setFileBrowserVisible] = useState(false);
     const [showSplitView, setShowSplitView] = useState(false);
+
+    // 快捷功能状态
+    const [batchCommandsVisible, setBatchCommandsVisible] = useState(false);
+    const [quickCommandsVisible, setQuickCommandsVisible] = useState(false);
+    const [helpVisible, setHelpVisible] = useState(false);
 
     // 提示符正则表达式 - 更宽松的匹配模式
     const promptRegex = /.*[@].*[$#]\s*$/;
@@ -366,8 +381,110 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         };
     }, [webSocketRef, processServerData]);
 
-    // 处理键盘输入 - 本地回显模式
+    // 发送单个命令到终端
+    const sendCommand = useCallback((command: string) => {
+        if (!webSocketRef?.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            setError('终端连接已断开，无法发送命令');
+            message.error('终端连接已断开');
+            return;
+        }
+
+        try {
+            // 显示命令（本地回显）
+            const cleanPrompt = currentPrompt.split('\n').pop() || currentPrompt;
+            if (cleanPrompt) {
+                const fullCommand = `${cleanPrompt}${command}`;
+                setOutput(prev => [...prev, fullCommand]);
+            }
+
+            // 记录发送的命令
+            setLastSentCommand(command);
+
+            // 发送到服务器
+            webSocketRef.current.send(command + '\r\n');
+
+            message.success(`已发送命令: ${command}`);
+            scrollToBottom();
+        } catch (e) {
+            console.error('发送命令失败:', e);
+            message.error('发送命令失败');
+        }
+    }, [webSocketRef, currentPrompt, scrollToBottom, setLastSentCommand]);
+
+    // 发送批量命令
+    const sendBatchCommands = useCallback((commands: string[]) => {
+        if (!webSocketRef?.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            setError('终端连接已断开，无法发送命令');
+            message.error('终端连接已断开');
+            return;
+        }
+
+        try {
+            message.info(`开始执行 ${commands.length} 条批量命令`);
+
+            commands.forEach((command, index) => {
+                setTimeout(() => {
+                    sendCommand(command);
+                    if (index === commands.length - 1) {
+                        message.success('批量命令执行完成');
+                    }
+                }, index * 500); // 每个命令间隔500ms
+            });
+        } catch (e) {
+            console.error('批量命令执行失败:', e);
+            message.error('批量命令执行失败');
+        }
+    }, [sendCommand, webSocketRef]);
+
+    // 处理键盘输入 - 本地回显模式和快捷键
     const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+        // 如果有弹窗打开，只处理ESC关闭弹窗，其他键盘事件不处理
+        if (batchCommandsVisible || quickCommandsVisible || helpVisible) {
+            // ESC - 关闭所有弹窗
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                setBatchCommandsVisible(false);
+                setQuickCommandsVisible(false);
+                setHelpVisible(false);
+            }
+            // 其他所有键盘事件都不处理，让模态框内的输入框正常工作
+            return;
+        }
+
+        // 快捷键处理 (不阻止默认行为)
+        if (e.ctrlKey || e.altKey) {
+            // Ctrl+Shift+B - 打开批量命令
+            if (e.ctrlKey && e.shiftKey && e.key === 'B') {
+                e.preventDefault();
+                setBatchCommandsVisible(true);
+                return;
+            }
+
+            // Ctrl+Shift+Q - 打开快速命令
+            if (e.ctrlKey && e.shiftKey && e.key === 'Q') {
+                e.preventDefault();
+                setQuickCommandsVisible(true);
+                return;
+            }
+
+            // Ctrl+Shift+F - 打开文件浏览器
+            if (e.ctrlKey && e.shiftKey && e.key === 'F') {
+                e.preventDefault();
+                setFileBrowserVisible(!fileBrowserVisible);
+                if (!fileBrowserVisible) {
+                    setShowSplitView(true);
+                }
+                return;
+            }
+
+            // Ctrl+Shift+H 或 F1 - 显示帮助
+            if ((e.ctrlKey && e.shiftKey && e.key === 'H') || e.key === 'F1') {
+                e.preventDefault();
+                setHelpVisible(true);
+                return;
+            }
+        }
+
         e.preventDefault();
 
         // 检查WebSocket连接状态
@@ -539,10 +656,14 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
 
     // 聚焦终端
     const focusTerminal = useCallback(() => {
+        // 如果有弹窗打开，不聚焦终端
+        if (batchCommandsVisible || quickCommandsVisible || helpVisible) {
+            return;
+        }
         if (terminalRef.current) {
             terminalRef.current.focus();
         }
-    }, []);
+    }, [batchCommandsVisible, quickCommandsVisible, helpVisible]);
 
     // 获取连接状态文本
     const getConnectionStatusText = () => {
@@ -609,7 +730,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             {/* 工具栏 */}
             <div className="terminal-toolbar">
                 <div className="toolbar-buttons">
-                    <Tooltip title="文件浏览器">
+                    <Tooltip title="文件浏览器 (Ctrl+Shift+F)">
                         <Button
                             icon={<FolderOutlined />}
                             size="small"
@@ -625,16 +746,46 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                         </Button>
                     </Tooltip>
                     {fileBrowserVisible && (
-                        <>
-                            <Tooltip title={showSplitView ? '收起分屏' : '展开分屏'}>
-                                <Button
-                                    icon={showSplitView ? <ShrinkOutlined /> : <ExpandOutlined />}
-                                    size="small"
-                                    onClick={() => setShowSplitView(!showSplitView)}
-                                />
-                            </Tooltip>
-                        </>
+                        <Tooltip title={showSplitView ? '收起分屏' : '展开分屏'}>
+                            <Button
+                                icon={showSplitView ? <ShrinkOutlined /> : <ExpandOutlined />}
+                                size="small"
+                                onClick={() => setShowSplitView(!showSplitView)}
+                            />
+                        </Tooltip>
                     )}
+
+                    <Tooltip title="快速命令 (Ctrl+Shift+Q)">
+                        <Button
+                            icon={<ThunderboltOutlined />}
+                            size="small"
+                            type={quickCommandsVisible ? 'primary' : 'default'}
+                            onClick={() => setQuickCommandsVisible(true)}
+                        >
+                            快速
+                        </Button>
+                    </Tooltip>
+
+                    <Tooltip title="批量命令 (Ctrl+Shift+B)">
+                        <Button
+                            icon={<BlockOutlined />}
+                            size="small"
+                            type={batchCommandsVisible ? 'primary' : 'default'}
+                            onClick={() => setBatchCommandsVisible(true)}
+                        >
+                            批量
+                        </Button>
+                    </Tooltip>
+
+                    <Tooltip title="快捷键帮助 (F1 或 Ctrl+Shift+H)">
+                        <Button
+                            icon={<QuestionCircleOutlined />}
+                            size="small"
+                            onClick={() => setHelpVisible(true)}
+                        >
+                            帮助
+                        </Button>
+                    </Tooltip>
                 </div>
             </div>
 
@@ -722,6 +873,26 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 </div>
             )}
 
+            {/* 批量命令模态框 */}
+            <BatchCommands
+                visible={batchCommandsVisible}
+                onClose={() => setBatchCommandsVisible(false)}
+                onSendCommands={sendBatchCommands}
+            />
+
+            {/* 快速命令模态框 */}
+            <QuickCommands
+                visible={quickCommandsVisible}
+                onClose={() => setQuickCommandsVisible(false)}
+                onSendCommand={sendCommand}
+            />
+
+            {/* 快捷键帮助模态框 */}
+            <ShortcutHelpModal
+                visible={helpVisible}
+                onClose={() => setHelpVisible(false)}
+            />
+
             <div
                 ref={terminalRef}
                 className="terminal-input-focus"
@@ -731,10 +902,126 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     position: 'absolute',
                     left: '-9999px',
                     opacity: 0,
-                    pointerEvents: 'none'
+                    pointerEvents: batchCommandsVisible || quickCommandsVisible || helpVisible ? 'none' : 'auto'
                 }}
             />
         </div>
+    );
+};
+
+// 快捷键帮助模态框组件
+const ShortcutHelpModal: React.FC<{ visible: boolean; onClose: () => void }> = ({ visible, onClose }) => {
+    const shortcuts = [
+        {
+            category: "基本功能",
+            items: [
+                { key: "Ctrl + Shift + F", desc: "打开/关闭文件浏览器" },
+                { key: "Ctrl + Shift + Q", desc: "打开快速命令面板" },
+                { key: "Ctrl + Shift + B", desc: "打开批量命令面板" },
+                { key: "F1 / Ctrl + Shift + H", desc: "显示快捷键帮助" },
+                { key: "Esc", desc: "关闭所有弹窗" }
+            ]
+        },
+        {
+            category: "终端操作",
+            items: [
+                { key: "Enter", desc: "执行命令" },
+                { key: "↑ / ↓", desc: "浏览命令历史" },
+                { key: "Tab", desc: "命令自动补全" },
+                { key: "Ctrl + C", desc: "中断当前命令" },
+                { key: "Ctrl + D", desc: "发送EOF信号" },
+                { key: "Ctrl + Z", desc: "暂停当前进程" },
+                { key: "Ctrl + R", desc: "反向搜索历史命令" }
+            ]
+        },
+        {
+            category: "文本编辑",
+            items: [
+                { key: "Home", desc: "光标移动到行首" },
+                { key: "End", desc: "光标移动到行末" },
+                { key: "← / →", desc: "移动光标" },
+                { key: "Backspace", desc: "删除光标前字符" },
+                { key: "Delete", desc: "删除光标后字符" }
+            ]
+        }
+    ];
+
+    return (
+        <Modal
+            title="快捷键帮助"
+            open={visible}
+            onCancel={onClose}
+            footer={[
+                <Button key="close" onClick={onClose}>
+                    关闭
+                </Button>
+            ]}
+            width={600}
+        >
+            <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                {shortcuts.map((category, index) => (
+                    <div key={index} style={{ marginBottom: 24 }}>
+                        <h4 style={{
+                            fontSize: 16,
+                            fontWeight: 'bold',
+                            marginBottom: 16,
+                            color: '#1890ff',
+                            borderBottom: '1px solid #f0f0f0',
+                            paddingBottom: 8
+                        }}>
+                            {category.category}
+                        </h4>
+                        {category.items.map((item, idx) => (
+                            <div
+                                key={idx}
+                                style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    padding: '8px 0',
+                                    borderBottom: idx < category.items.length - 1 ? '1px solid #f5f5f5' : 'none'
+                                }}
+                            >
+                                <code style={{
+                                    backgroundColor: '#f6f8fa',
+                                    padding: '2px 8px',
+                                    borderRadius: 4,
+                                    fontFamily: 'Monaco, Consolas, "Courier New", monospace',
+                                    fontSize: 12,
+                                    border: '1px solid #e1e4e8'
+                                }}>
+                                    {item.key}
+                                </code>
+                                <span style={{
+                                    marginLeft: 16,
+                                    color: '#666',
+                                    flex: 1,
+                                    textAlign: 'left',
+                                    paddingLeft: 16
+                                }}>
+                                    {item.desc}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                ))}
+                <div style={{
+                    marginTop: 24,
+                    padding: 16,
+                    backgroundColor: '#f6ffed',
+                    borderRadius: 6,
+                    border: '1px solid #b7eb8f'
+                }}>
+                    <h5 style={{ color: '#52c41a', marginBottom: 8 }}>💡 小贴士：</h5>
+                    <ul style={{ margin: 0, paddingLeft: 20, color: '#666' }}>
+                        <li>快速命令：保存常用命令，一键执行</li>
+                        <li>批量命令：按顺序执行多条命令，支持保存命令集</li>
+                        <li>文件浏览器：支持上传、下载、编辑文件</li>
+                        <li>命令历史：使用上下箭头键快速回调历史命令</li>
+                    </ul>
+                </div>
+            </div>
+        </Modal>
     );
 };
 

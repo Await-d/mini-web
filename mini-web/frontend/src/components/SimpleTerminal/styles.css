@@ -625,4 +625,233 @@
   z-index: 1000;
   overflow: hidden;
   border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+/* 确保模态框有足够高的z-index */
+.ant-modal-root {
+  z-index: 1050 !important;
+}
+
+.ant-modal-mask {
+  z-index: 1040 !important;
+}
+
+.ant-modal-wrap {
+  z-index: 1050 !important;
+}
+
+.ant-modal {
+  z-index: 1050 !important;
+}
+
+.ant-modal-content {
+  z-index: 1051 !important;
+}
+
+/* 确保模态框输入框可以正常工作 */
+.ant-modal .ant-input,
+.ant-modal .ant-input-affix-wrapper,
+.ant-modal textarea {
+  z-index: 1052 !important;
+  position: relative;
+}
+
+/* 快捷键相关样式 */
+.shortcut-key {
+  background: linear-gradient(135deg, #f6f8fa 0%, #e1e4e8 100%);
+  color: #24292e;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #d1d5da;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  display: inline-block;
+  min-width: 24px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.shortcut-help-category {
+  border-bottom: 2px solid #f0f0f0;
+  padding-bottom: 12px;
+  margin-bottom: 20px;
+}
+
+.shortcut-help-category h4 {
+  color: #1890ff;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shortcut-help-category h4::before {
+  content: '';
+  width: 4px;
+  height: 16px;
+  background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
+  border-radius: 2px;
+}
+
+.shortcut-help-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #f5f5f5;
+  transition: background-color 0.2s ease;
+}
+
+.shortcut-help-item:hover {
+  background-color: #fafafa;
+  border-radius: 4px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.shortcut-help-item:last-child {
+  border-bottom: none;
+}
+
+.shortcut-help-key {
+  background: linear-gradient(135deg, #f6f8fa 0%, #e9ecef 100%);
+  color: #495057;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #dee2e6;
+  box-shadow: 
+    0 2px 4px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  display: inline-block;
+  min-width: 60px;
+  text-align: center;
+  letter-spacing: 0.5px;
+  position: relative;
+}
+
+.shortcut-help-key::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 2px;
+  right: 2px;
+  height: 1px;
+  background: #adb5bd;
+  border-radius: 1px;
+}
+
+.shortcut-help-desc {
+  color: #6c757d;
+  flex: 1;
+  margin-left: 20px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.shortcut-help-tips {
+  background: linear-gradient(135deg, #f6ffed 0%, #f0f9e8 100%);
+  border: 1px solid #b7eb8f;
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 24px;
+}
+
+.shortcut-help-tips h5 {
+  color: #52c41a;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shortcut-help-tips ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #666;
+}
+
+.shortcut-help-tips li {
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+.shortcut-help-tips li:last-child {
+  margin-bottom: 0;
+}
+
+/* 工具栏按钮增强样式 */
+.toolbar-buttons .ant-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.toolbar-buttons .ant-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s ease;
+}
+
+.toolbar-buttons .ant-btn:hover::before {
+  left: 100%;
+}
+
+.toolbar-buttons .ant-btn-primary {
+  background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
+  border: none;
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.3);
+}
+
+.toolbar-buttons .ant-btn-primary:hover {
+  background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%);
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+/* 快捷键指示器 */
+.shortcut-indicator {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: #ff4d4f;
+  color: white;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  box-shadow: 0 2px 4px rgba(255, 77, 79, 0.3);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 } 
