@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-31 21:39:16
+ * @LastEditTime: 2025-06-01 09:10:29
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -548,7 +548,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         }
     }, []);
 
-    // 处理分段文件列表数据
+    // 处理分段文件列表数据 - 增强版本，添加重试机制
     const handleSegmentedFileList = useCallback((segmentData: {
         requestId: string;
         segmentId: number;
@@ -589,19 +589,34 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
         const newTimeout = setTimeout(() => {
             console.log(`⏰ 分段接收超时，请求ID: ${requestId}`);
+            // 检查缺失的分段
+            const missingSegments: number[] = [];
+            for (let i = 0; i < totalSegments; i++) {
+                if (!segmentBuffer.segments.has(i)) {
+                    missingSegments.push(i);
+                }
+            }
+
+            if (missingSegments.length > 0) {
+                console.log(`❌ 检测到缺失分段: ${missingSegments.join(', ')}`);
+                message.error(`文件列表传输不完整，缺失 ${missingSegments.length} 个分段，请重试`);
+            }
+
             clearSegmentState(requestId);
             if (currentRequestRef.current === requestId) {
                 setLoading(false);
                 setIsWaitingForLs(false);
                 currentRequestRef.current = null;
-                message.error('文件列表接收超时，请重试');
             }
         }, 30000); // 30秒超时
 
         segmentTimeoutRef.current.set(requestId, newTimeout);
 
         // 检查是否所有分段都已接收完成
-        if (segmentBuffer.segments.size === totalSegments || isComplete) {
+        const receivedSegments = segmentBuffer.segments.size;
+        const allReceived = receivedSegments === totalSegments;
+
+        if (allReceived || isComplete) {
             console.log(`✅ 所有分段接收完成，开始拼接数据...`);
 
             // 清除超时
@@ -609,18 +624,43 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             segmentTimeoutRef.current.delete(requestId);
 
             try {
+                // 检查缺失的分段
+                const missingSegments: number[] = [];
+                for (let i = 0; i < totalSegments; i++) {
+                    if (!segmentBuffer.segments.has(i)) {
+                        missingSegments.push(i);
+                    }
+                }
+
+                if (missingSegments.length > 0) {
+                    console.error(`❌ 检测到缺失分段: ${missingSegments.join(', ')}`);
+                    message.error(`文件列表传输不完整，缺失分段: ${missingSegments.join(', ')}，请重试`);
+
+                    // 清除分段状态并重置
+                    clearSegmentState(requestId);
+                    if (currentRequestRef.current === requestId) {
+                        setLoading(false);
+                        setIsWaitingForLs(false);
+                        currentRequestRef.current = null;
+                    }
+                    return;
+                }
+
                 // 按顺序拼接所有分段
                 let completeData = '';
                 for (let i = 0; i < totalSegments; i++) {
                     const segmentData = segmentBuffer.segments.get(i);
                     if (segmentData) {
                         completeData += segmentData;
-                    } else {
-                        console.warn(`⚠️ 分段 ${i} 数据缺失`);
                     }
                 }
 
                 console.log(`🔧 拼接完成，总数据长度: ${completeData.length}`);
+                console.log(`📋 分段分布详情:`);
+                for (let i = 0; i < totalSegments; i++) {
+                    const segment = segmentBuffer.segments.get(i);
+                    console.log(`  分段 ${i}: ${segment ? segment.length + '字符' : '❌缺失'}`);
+                }
 
                 // 清除分段状态
                 clearSegmentState(requestId);
@@ -638,6 +678,9 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     }
                 } catch (jsonError) {
                     console.error('❌ JSON解析失败，尝试作为ls输出处理:', jsonError);
+                    console.log('📄 数据前1000字符:', completeData.substring(0, 1000));
+                    console.log('📄 数据后1000字符:', completeData.substring(Math.max(0, completeData.length - 1000)));
+
                     // 如果JSON解析失败，作为普通ls输出处理
                     handleLsResult(completeData);
                     return;
@@ -656,8 +699,12 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     message.error('文件列表数据处理失败');
                 }
             }
+        } else {
+            // 还未完全接收，显示进度
+            const progress = Math.round((receivedSegments / totalSegments) * 100);
+            console.log(`📊 接收进度: ${receivedSegments}/${totalSegments} (${progress}%)`);
         }
-    }, [clearSegmentState]);
+    }, [clearSegmentState, handleLsResult]);
 
     // 重置所有状态的辅助函数
     const resetAllStates = useCallback(() => {
@@ -1379,71 +1426,134 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         };
     }, []);
 
-    // 优化后的WebSocket消息监听 - 减少处理时间和频率
+    // 优化后的WebSocket消息监听 - 增强消息队列防止丢失
     useEffect(() => {
         if (!webSocketRef.current || !visible) {
             return;
         }
 
-        console.log('FileBrowser: 设置WebSocket消息监听器 (性能优化版)');
+        console.log('FileBrowser: 设置WebSocket消息监听器 (增强版消息队列)');
 
-        // 使用防抖和批处理优化性能
-        let messageQueue: MessageEvent[] = [];
+        // 消息队列系统
+        let allMessageQueue: MessageEvent[] = []; // 所有消息队列
+        let segmentMessageQueue: MessageEvent[] = []; // 专门的分段消息队列
         let processingTimer: NodeJS.Timeout | null = null;
+        let segmentProcessingTimer: NodeJS.Timeout | null = null;
+
+        // 消息统计
+        let messageStats = {
+            total: 0,
+            segments: 0,
+            processed: 0,
+            dropped: 0
+        };
 
         const handleMessage = (event: MessageEvent) => {
-            // 快速类型检查，立即返回不相关消息
+            // 快速类型检查
             if (typeof event.data !== 'string') {
                 return;
             }
 
-            // 添加到消息队列而不是立即处理
-            messageQueue.push(event);
+            messageStats.total++;
 
-            // 如果已有处理定时器，取消它
+            // 添加到总消息队列
+            allMessageQueue.push(event);
+
+            // 快速检查是否为分段消息，如果是则加入专门队列
+            try {
+                const quickCheck = event.data.substring(0, 200); // 只检查前200字符
+                if (quickCheck.includes('"type":"file_list_segment"')) {
+                    segmentMessageQueue.push(event);
+                    messageStats.segments++;
+
+                    // 立即处理分段消息，使用更短的延迟
+                    if (segmentProcessingTimer) {
+                        clearTimeout(segmentProcessingTimer);
+                    }
+                    segmentProcessingTimer = setTimeout(processSegmentMessages, 5); // 5ms快速处理
+                }
+            } catch (e) {
+                // 忽略解析错误，继续正常流程
+            }
+
+            // 处理其他消息
             if (processingTimer) {
                 clearTimeout(processingTimer);
             }
+            processingTimer = setTimeout(processNormalMessages, 16);
+        };
 
-            // 使用批处理，延迟处理消息队列
-            processingTimer = setTimeout(() => {
-                // 防抖检查，避免过于频繁的更新
-                const currentTime = Date.now();
-                if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 50) {
-                    return;
-                }
+        // 专门处理分段消息的函数
+        const processSegmentMessages = () => {
+            if (segmentMessageQueue.length === 0) return;
 
-                isUpdatingRef.current = true;
-                lastUpdateTimeRef.current = currentTime;
+            console.log(`📨 处理分段消息队列，队列长度: ${segmentMessageQueue.length}`);
 
+            // 一次性处理所有分段消息，确保不丢失
+            const segmentMessages = [...segmentMessageQueue];
+            segmentMessageQueue = []; // 清空队列
+
+            segmentMessages.forEach((event, index) => {
                 try {
-                    // 批量处理所有排队的消息
-                    const relevantMessages = messageQueue.filter(msg => {
-                        try {
-                            const data = JSON.parse(msg.data);
-                            return data.type === 'file_list_response' || data.type === 'file_list_segment';
-                        } catch {
-                            return false;
-                        }
-                    });
-
-                    // 只处理最新的相关消息
-                    if (relevantMessages.length > 0) {
-                        const latestMessage = relevantMessages[relevantMessages.length - 1];
-                        processFileListMessage(latestMessage);
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'file_list_segment') {
+                        console.log(`📦 处理分段消息 ${index + 1}/${segmentMessages.length}: 分段=${data.data.segmentId}/${data.data.totalSegments}`);
+                        handleSegmentedFileList({
+                            requestId: data.data.requestId,
+                            segmentId: data.data.segmentId,
+                            totalSegments: data.data.totalSegments,
+                            data: data.data.data,
+                            isComplete: data.data.isComplete
+                        });
+                        messageStats.processed++;
                     }
-
-                } finally {
-                    // 清空消息队列
-                    messageQueue = [];
-                    processingTimer = null;
-
-                    // 短暂延迟后重置更新标志
-                    setTimeout(() => {
-                        isUpdatingRef.current = false;
-                    }, 16); // 使用一帧的时间
+                } catch (error) {
+                    console.error('❌ 处理分段消息失败:', error);
+                    messageStats.dropped++;
                 }
-            }, 16); // 约60fps的更新频率
+            });
+
+            console.log(`📊 消息统计 - 总计: ${messageStats.total}, 分段: ${messageStats.segments}, 已处理: ${messageStats.processed}, 丢失: ${messageStats.dropped}`);
+        };
+
+        // 处理普通消息的函数
+        const processNormalMessages = () => {
+            // 防抖检查
+            const currentTime = Date.now();
+            if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 50) {
+                return;
+            }
+
+            isUpdatingRef.current = true;
+            lastUpdateTimeRef.current = currentTime;
+
+            try {
+                // 过滤出非分段的相关消息
+                const relevantMessages = allMessageQueue.filter(msg => {
+                    try {
+                        const data = JSON.parse(msg.data);
+                        return data.type === 'file_list_response'; // 只处理完整响应
+                    } catch {
+                        return false;
+                    }
+                });
+
+                // 只处理最新的相关消息
+                if (relevantMessages.length > 0) {
+                    const latestMessage = relevantMessages[relevantMessages.length - 1];
+                    processFileListMessage(latestMessage);
+                }
+
+            } finally {
+                // 清空普通消息队列
+                allMessageQueue = [];
+                processingTimer = null;
+
+                // 短暂延迟后重置更新标志
+                setTimeout(() => {
+                    isUpdatingRef.current = false;
+                }, 16);
+            }
         };
 
         // 消息处理函数
@@ -1480,16 +1590,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     });
                 }
 
-                if (data.type === 'file_list_segment') {
-                    handleSegmentedFileList({
-                        requestId: data.data.requestId,
-                        segmentId: data.data.segmentId,
-                        totalSegments: data.data.totalSegments,
-                        data: data.data.data,
-                        isComplete: data.data.isComplete
-                    });
-                }
-
             } catch (error) {
                 React.startTransition(() => {
                     if (requestTimeoutRef.current) {
@@ -1507,11 +1607,19 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         ws.addEventListener('message', handleMessage);
 
         return () => {
-            console.log('FileBrowser: 移除WebSocket消息监听器 (优化版)');
+            console.log('FileBrowser: 移除WebSocket消息监听器 (增强版)');
+            console.log(`📊 最终消息统计 - 总计: ${messageStats.total}, 分段: ${messageStats.segments}, 已处理: ${messageStats.processed}, 丢失: ${messageStats.dropped}`);
+
             if (processingTimer) {
                 clearTimeout(processingTimer);
             }
-            messageQueue = [];
+            if (segmentProcessingTimer) {
+                clearTimeout(segmentProcessingTimer);
+            }
+
+            allMessageQueue = [];
+            segmentMessageQueue = [];
+
             if (ws && ws.readyState !== WebSocket.CLOSED) {
                 ws.removeEventListener('message', handleMessage);
             }

@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-09 18:05:28
  * @LastEditors: Await
- * @LastEditTime: 2025-05-25 19:53:33
+ * @LastEditTime: 2025-06-01 09:09:19
  * @Description: 终端连接包装器组件
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
@@ -223,9 +223,6 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
               processedData = processedData.replace(/"datta":/g, '"data":');
 
               const jsonData = JSON.parse(processedData);
-              // 处理JSON数据
-              console.log(`收到WebSocket消息(JSON): ${tabKey}`, jsonData);
-
               // 在这里处理特定类型的消息
               if (jsonData.type === 'terminal_data') {
                 // 处理终端数据
@@ -242,9 +239,6 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
                 }
               }));
             } catch (jsonError) {
-              // 如果不是JSON格式，按照原始文本处理
-              console.log(`收到WebSocket消息(文本): ${tabKey}`, data);
-
               // 触发消息处理事件，让终端组件处理
               window.dispatchEvent(new CustomEvent('terminal-message', {
                 detail: {

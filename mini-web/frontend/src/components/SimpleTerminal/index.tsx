@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-31 19:59:15
+ * @LastEditTime: 2025-06-01 09:03:53
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -124,7 +124,6 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
 
     // 处理服务器返回的数据
     const processServerData = useCallback((text: string) => {
-        console.log('收到WebSocket消息(文本):', text);
 
         // 检查是否是反向搜索消息
         if (text.includes('[A[A[26P(reverse-i-search)')) {
