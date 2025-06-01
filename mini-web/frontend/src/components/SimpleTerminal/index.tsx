@@ -2,12 +2,12 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 18:47:07
+ * @LastEditTime: 2025-06-01 19:09:40
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Spin, Button, Tooltip, message, Modal } from 'antd';
+import { Spin, Button, Tooltip, Modal, App } from 'antd';
 import {
     FolderOutlined,
     FileOutlined,
@@ -40,6 +40,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     onReconnectRequest,
     tabKey
 }) => {
+    const { message } = App.useApp();
     // 基本状态
     const [output, setOutput] = useState<string[]>([]);
     const [error, setError] = useState<string | null>(null);

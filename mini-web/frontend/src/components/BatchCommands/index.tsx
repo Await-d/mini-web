@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Input, Modal, Space, message } from 'antd';
+import { Button, Input, Modal, Space, App } from 'antd';
 import {
   SendOutlined,
   DeleteOutlined,
@@ -20,6 +20,7 @@ const BatchCommands: React.FC<BatchCommandsProps> = ({
   onClose,
   onSendCommands
 }) => {
+  const { message } = App.useApp();
   const [commands, setCommands] = useState<string[]>([]);
   const [currentCommand, setCurrentCommand] = useState('');
   const [commandSets, setCommandSets] = useState<{ name: string, commands: string[] }[]>([]);

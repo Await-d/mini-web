@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useReducer, useEffect, createRef, useCallback } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import { type Connection, sessionAPI } from '../services/api';
+import { App } from 'antd';
 
 // 跟踪已关闭或正在关闭的会话，避免重复关闭请求
 const closingSessionsSet = new Set<number>();
@@ -286,6 +287,7 @@ const isTabClosingActive = (): boolean => {
 
 // 创建Provider组件
 export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { message } = App.useApp();
   // 定义reducer函数
   const reducer = (state: TerminalContextState, action: TerminalAction): TerminalContextState => {
     let newState: TerminalContextState = state;
@@ -963,6 +965,25 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     dispatch({ type: 'CLOSE_TAB', payload: key });
   };
+
+  // 添加全局WebSocket错误处理
+  useEffect(() => {
+    const handleWebSocketError = (event: CustomEvent) => {
+      const { error, tabKey } = event.detail || {};
+      if (error) {
+        console.error(`WebSocket连接错误 [${tabKey}]: ${error}`);
+        message.error(`终端连接错误: ${error}`);
+      }
+    };
+
+    // 添加事件监听器
+    window.addEventListener('websocket-error', handleWebSocketError as EventListener);
+
+    // 清理事件监听器
+    return () => {
+      window.removeEventListener('websocket-error', handleWebSocketError as EventListener);
+    };
+  }, [message]);
 
   const setActiveTab = useCallback((key: string) => {
     if (state.activeTabKey === key && state.tabs.some(t => t.key === key)) return;
