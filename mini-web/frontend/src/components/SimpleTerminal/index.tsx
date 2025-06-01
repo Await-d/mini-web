@@ -322,7 +322,18 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     const isPasswordLine = passwordMode && /\*+/.test(trimmedLine);
                     if (isPasswordLine) {
                         console.log('检测到密码行:', trimmedLine);
-                        outputLines.push(`<span class="password-input-line">${line}</span>`);
+
+                        // 限制显示的星号数量，避免显示过长
+                        let displayLine = line;
+                        if (trimmedLine.length > 50) {
+                            // 如果星号太多，只显示合理数量的星号
+                            const maxStars = 20; // 最多显示20个星号
+                            const maskedPortion = '*'.repeat(maxStars);
+                            displayLine = line.replace(/\*+/, maskedPortion);
+                            console.log('密码行过长，已截短显示:', displayLine);
+                        }
+
+                        outputLines.push(`<span class="password-input-line">${displayLine}</span>`);
                         continue;
                     }
 
