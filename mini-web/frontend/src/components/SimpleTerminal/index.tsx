@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 19:13:49
+ * @LastEditTime: 2025-06-01 19:21:17
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -74,8 +74,45 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     const [quickCommandsVisible, setQuickCommandsVisible] = useState(false);
     const [helpVisible, setHelpVisible] = useState(false);
 
+    // 密码输入模式状态
+    const [passwordMode, setPasswordMode] = useState(false);
+    const [lastPasswordPrompt, setLastPasswordPrompt] = useState('');
+
     // 提示符正则表达式 - 更宽松的匹配模式
     const promptRegex = /.*[@].*[$#]\s*$/;
+
+    // 检查是否是密码提示
+    const isPasswordPrompt = useCallback((text: string) => {
+        const passwordPrompts = [
+            'password:',
+            'password for',
+            'enter password',
+            '请输入密码',
+            '[sudo] password for',
+            'Password:',
+            'Password for'
+        ];
+
+        const lowercaseText = text.toLowerCase().trim();
+        return passwordPrompts.some(prompt => lowercaseText.includes(prompt));
+    }, []);
+
+    // 检查是否是成功登录的指示器
+    const isSuccessIndicator = useCallback((text: string) => {
+        const successIndicators = [
+            '$',
+            '#',
+            '>',
+            'welcome',
+            'login successful',
+            'authentication successful',
+            'root@',
+            '~'
+        ];
+
+        const lowercaseText = text.toLowerCase().trim();
+        return successIndicators.some(indicator => lowercaseText.includes(indicator));
+    }, []);
 
     // 检查是否是系统消息
     const isSystemMessage = useCallback((text: string) => {
@@ -226,9 +263,28 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     continue;
                 }
 
+                // 检查是否是密码提示
+                if (isPasswordPrompt(line)) {
+                    setPasswordMode(true);
+                    setLastPasswordPrompt(line);
+                    outputLines.push(`<span class="password-prompt">🔐 ${line}</span>`);
+                    continue;
+                }
+
+                // 检查是否退出密码模式
+                if (passwordMode && isSuccessIndicator(line)) {
+                    setPasswordMode(false);
+                    setLastPasswordPrompt('');
+                }
+
                 if (promptRegex.test(line)) {
                     // 这是一个提示符
                     newPrompt = line;
+                    // 如果收到提示符，也退出密码模式
+                    if (passwordMode) {
+                        setPasswordMode(false);
+                        setLastPasswordPrompt('');
+                    }
                 } else if (line.trim()) {
                     // 检查是否是服务器返回的控制字符回显，如果是则忽略
                     const trimmedLine = line.trim();
@@ -271,7 +327,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
 
             scrollToBottom();
         }
-    }, [promptRegex, scrollToBottom, isSystemMessage, cleanSystemMessages, lastSentCommand]);
+    }, [promptRegex, scrollToBottom, isSystemMessage, cleanSystemMessages, lastSentCommand, passwordMode, isPasswordPrompt, isSuccessIndicator]);
 
     // 光标闪烁效果
     useEffect(() => {
@@ -702,20 +758,35 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         const atCursor = localInput.slice(cursorPosition, cursorPosition + 1) || ' ';
         const afterCursor = localInput.slice(cursorPosition + 1);
 
-        // 确保空格字符正确显示
-        const displayBeforeCursor = beforeCursor;
-        const displayAtCursor = atCursor === ' ' ? '\u00A0' : atCursor; // 使用不间断空格
-        const displayAfterCursor = afterCursor;
+        // 在密码模式下将输入替换为星号
+        let displayBeforeCursor = beforeCursor;
+        let displayAtCursor = atCursor === ' ' ? '\u00A0' : atCursor; // 使用不间断空格
+        let displayAfterCursor = afterCursor;
+
+        if (passwordMode) {
+            displayBeforeCursor = '*'.repeat(beforeCursor.length);
+            displayAtCursor = atCursor === ' ' ? '\u00A0' : '*';
+            displayAfterCursor = '*'.repeat(afterCursor.length);
+        }
+
+        const inputLineClass = passwordMode ? 'terminal-input-line password-mode' : 'terminal-input-line';
 
         return (
-            <div className="terminal-input-line">
+            <div className={inputLineClass}>
+                {passwordMode && (
+                    <span className="password-indicator">🔐</span>
+                )}
                 <span
                     className="terminal-prompt"
                     dangerouslySetInnerHTML={{ __html: ansiToHtml(cleanPrompt) }}
                 />
-                <span className="terminal-input-before">{displayBeforeCursor}</span>
+                <span className={passwordMode ? "terminal-input-before password-input" : "terminal-input-before"}>
+                    {displayBeforeCursor}
+                </span>
                 <span className={`terminal-cursor ${cursorVisible ? 'visible' : ''}`}>{displayAtCursor}</span>
-                <span className="terminal-input-after">{displayAfterCursor}</span>
+                <span className={passwordMode ? "terminal-input-after password-input" : "terminal-input-after"}>
+                    {displayAfterCursor}
+                </span>
             </div>
         );
     };
@@ -730,6 +801,20 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         >
             {/* 工具栏 */}
             <div className="terminal-toolbar">
+                {/* 密码模式指示器 */}
+                {passwordMode && (
+                    <div style={{
+                        color: '#faad14',
+                        fontWeight: 'bold',
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                    }}>
+                        <span className="password-indicator">🔐</span>
+                        <span>密码输入模式</span>
+                    </div>
+                )}
                 <div className="toolbar-buttons">
                     <Tooltip title="文件浏览器 (Ctrl+Shift+F)">
                         <Button
@@ -830,8 +915,24 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                                 line.includes('如有问题') ||
                                 (line.includes('='.repeat(30)));
 
+                            // 检查是否为密码相关行
+                            const isPasswordLine = line.includes('password-prompt') ||
+                                line.includes('🔐') ||
+                                isPasswordPrompt(line);
+
+                            // 检查是否为错误信息
+                            const isErrorLine = line.toLowerCase().includes('sorry') ||
+                                line.toLowerCase().includes('incorrect') ||
+                                line.toLowerCase().includes('failed') ||
+                                line.toLowerCase().includes('wrong');
+
+                            let lineClass = 'terminal-line';
+                            if (isWelcomeLine) lineClass += ' welcome-line';
+                            if (isPasswordLine) lineClass += ' password-mode';
+                            if (isErrorLine) lineClass += ' error-line';
+
                             return (
-                                <div key={index} className={`terminal-line ${isWelcomeLine ? 'welcome-line' : ''}`}>
+                                <div key={index} className={lineClass}>
                                     <span dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }} />
                                 </div>
                             );

@@ -693,6 +693,35 @@
   100% { transform: rotate(360deg); }
 }
 
+/* 错误行样式 */
+.error-line {
+  background-color: rgba(255, 77, 79, 0.1);
+  border-left: 3px solid #ff4d4f;
+  padding-left: 8px;
+  color: #ff7875 !important;
+  animation: shake 0.5s ease-in-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+/* 密码模式下的输入行增强 */
+.terminal-input-line.password-mode {
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { 
+    box-shadow: 0 0 5px rgba(250, 173, 20, 0.3);
+  }
+  50% { 
+    box-shadow: 0 0 15px rgba(250, 173, 20, 0.6);
+  }
+}
+
 /* 快捷键相关样式 */
 .shortcut-key {
   background: linear-gradient(135deg, #f6f8fa 0%, #e1e4e8 100%);
