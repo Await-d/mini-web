@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 09:10:29
+ * @LastEditTime: 2025-06-01 09:16:09
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -132,13 +132,21 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     const isUpdatingRef = useRef(false);
     const lastUpdateTimeRef = useRef(0);
 
-    // 搜索和过滤文件 - 直接使用计算值，避免状态循环
+    // 使用React.useDeferredValue优化大数据处理
+    const deferredFiles = React.useDeferredValue(files);
+    const deferredSearchTerm = React.useDeferredValue(searchTerm);
+
+    // 搜索和过滤文件 - 优化大数据处理
     const filteredFiles = useMemo(() => {
-        let filtered = [...files];
+        // 对于大数据集，使用延迟值避免阻塞UI
+        const sourceFiles = files.length > 1000 ? deferredFiles : files;
+        const sourceSearchTerm = files.length > 1000 ? deferredSearchTerm : searchTerm;
+
+        let filtered = [...sourceFiles];
 
         // 搜索过滤
-        if (searchTerm.trim()) {
-            const term = searchTerm.toLowerCase();
+        if (sourceSearchTerm.trim()) {
+            const term = sourceSearchTerm.toLowerCase();
             filtered = filtered.filter(file =>
                 file.name.toLowerCase().includes(term) ||
                 file.type.toLowerCase().includes(term) ||
@@ -175,23 +183,23 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         }
 
         return filtered;
-    }, [files, searchTerm, sortField, sortOrder]);
+    }, [deferredFiles, deferredSearchTerm, sortField, sortOrder, files.length, searchTerm]);
 
-    // 虚拟化文件列表配置 - 优化预留渲染防止空白
+    // 虚拟化文件列表配置 - 高性能优化，减少overscan
     const rowVirtualizer = useVirtualizer({
         count: filteredFiles.length,
         getScrollElement: () => scrollElementRef.current,
         estimateSize: () => 48, // 固定行高
-        overscan: 8, // 增加预留渲染项目，防止滚动空白（上下各8个）
+        overscan: 3, // 减少预留渲染项目，提高性能（上下各3个）
         measureElement: undefined, // 禁用动态测量
-        scrollMargin: 16, // 增加滚动边距，提前触发渲染
+        scrollMargin: 8, // 减少滚动边距，降低资源消耗
         getItemKey: (index) => {
             const file = filteredFiles[index];
             return file ? `${file.name}_${file.type}_${file.size}` : index;
         },
         debug: false,
-        // 启用滚动时的平滑预渲染
-        initialRect: { width: 0, height: 0 }, // 让虚拟化器自动计算
+        // 高性能配置
+        initialRect: { width: 0, height: 0 },
         paddingStart: 0,
         paddingEnd: 0,
     });
@@ -1179,7 +1187,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
 
 
-    // 优化的文件行组件 - 修改点击行为：文件夹进入，文件打开
+    // 高性能文件行组件 - 优化memo策略和渲染性能
     const VirtualFileRow = React.memo(({
         index,
         style,
@@ -1212,7 +1220,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             } else {
                 viewFile(file.name);
             }
-        }, [file, enterDirectory, viewFile, handleFileAction]);
+        }, [file.name, file.type]); // 简化依赖
 
         // 双击行为保持不变（兼容性）
         const handleRowDoubleClick = useCallback((e: React.MouseEvent) => {
@@ -1227,19 +1235,26 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             } else {
                 viewFile(file.name);
             }
-        }, [file.name, file.type, enterDirectory, viewFile]);
+        }, [file.name, file.type]); // 简化依赖
 
         const handleCheckboxChange = useCallback((e: any) => {
             e.stopPropagation();
             handleFileSelection(file.name, e.target.checked);
-        }, [file.name, handleFileSelection]);
+        }, [file.name]); // 简化依赖
 
-        // 简化的操作按钮 - 检查是否是压缩包
+        // 优化的操作按钮 - 检查是否是压缩包
         const isArchive = useMemo(() => {
             const archiveExtensions = ['zip', 'tar', 'gz', 'tgz', 'tar.gz', 'rar', '7z', 'bz2', 'xz'];
             const fileExtension = file.name.toLowerCase().split('.').pop() || '';
             return archiveExtensions.includes(fileExtension) || file.name.toLowerCase().includes('.tar.');
         }, [file.name]);
+
+        // 优化的文件操作处理器
+        const handleAction = useCallback((action: string) => {
+            return (e: React.MouseEvent) => {
+                handleFileAction(action, file, e);
+            };
+        }, [file]);
 
         return (
             <div
@@ -1285,7 +1300,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                         {file.modified}
                     </div>
 
-                    {/* 简化的操作按钮 - 使用单独按钮而不是下拉菜单 */}
+                    {/* 优化的操作按钮 - 使用缓存的事件处理器 */}
                     <div className="file-actions">
                         <Space size={2}>
                             {/* 查看/进入按钮 */}
@@ -1295,7 +1310,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                         type="text"
                                         size="small"
                                         icon={<FolderOutlined />}
-                                        onClick={(e) => handleFileAction('enter', file, e)}
+                                        onClick={handleAction('enter')}
                                     />
                                 </Tooltip>
                             ) : isArchive ? (
@@ -1304,7 +1319,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                         type="text"
                                         size="small"
                                         icon={<FileZipOutlined />}
-                                        onClick={(e) => handleFileAction('view', file, e)}
+                                        onClick={handleAction('view')}
                                     />
                                 </Tooltip>
                             ) : (
@@ -1313,7 +1328,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                         type="text"
                                         size="small"
                                         icon={<EyeOutlined />}
-                                        onClick={(e) => handleFileAction('view', file, e)}
+                                        onClick={handleAction('view')}
                                     />
                                 </Tooltip>
                             )}
@@ -1325,7 +1340,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                         type="text"
                                         size="small"
                                         icon={<DownloadOutlined />}
-                                        onClick={(e) => handleFileAction('download', file, e)}
+                                        onClick={handleAction('download')}
                                     />
                                 </Tooltip>
                             )}
@@ -1336,7 +1351,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                     type="text"
                                     size="small"
                                     icon={<EditOutlined />}
-                                    onClick={(e) => handleFileAction('rename', file, e)}
+                                    onClick={handleAction('rename')}
                                 />
                             </Tooltip>
 
@@ -1346,7 +1361,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                     type="text"
                                     size="small"
                                     icon={<DeleteOutlined />}
-                                    onClick={(e) => handleFileAction('delete', file, e)}
+                                    onClick={handleAction('delete')}
                                     danger
                                 />
                             </Tooltip>
@@ -1356,13 +1371,19 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             </div>
         );
     }, (prevProps, nextProps) => {
-        // 简化比较逻辑
+        // 高性能比较策略 - 只比较关键属性
+        const prevFile = prevProps.file;
+        const nextFile = nextProps.file;
+
         return (
-            prevProps.file.name === nextProps.file.name &&
-            prevProps.file.type === nextProps.file.type &&
-            prevProps.file.size === nextProps.file.size &&
-            prevProps.file.modified === nextProps.file.modified &&
-            prevProps.index === nextProps.index
+            prevFile.name === nextFile.name &&
+            prevFile.type === nextFile.type &&
+            prevFile.size === nextFile.size &&
+            prevFile.modified === nextFile.modified &&
+            prevProps.index === nextProps.index &&
+            // 检查style对象的关键属性
+            prevProps.style.transform === nextProps.style.transform &&
+            prevProps.style.height === nextProps.style.height
         );
     });
 
@@ -1426,26 +1447,29 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         };
     }, []);
 
-    // 优化后的WebSocket消息监听 - 增强消息队列防止丢失
+    // 高性能WebSocket消息监听 - 使用requestIdleCallback和激进优化
     useEffect(() => {
         if (!webSocketRef.current || !visible) {
             return;
         }
 
-        console.log('FileBrowser: 设置WebSocket消息监听器 (增强版消息队列)');
+        console.log('FileBrowser: 设置高性能WebSocket消息监听器');
 
-        // 消息队列系统
-        let allMessageQueue: MessageEvent[] = []; // 所有消息队列
-        let segmentMessageQueue: MessageEvent[] = []; // 专门的分段消息队列
+        // 高性能消息队列系统
+        let allMessageQueue: MessageEvent[] = [];
+        let segmentMessageQueue: MessageEvent[] = [];
         let processingTimer: NodeJS.Timeout | null = null;
         let segmentProcessingTimer: NodeJS.Timeout | null = null;
+        let isProcessing = false; // 防止重复处理
 
-        // 消息统计
+        // 消息统计和性能监控
         let messageStats = {
             total: 0,
             segments: 0,
             processed: 0,
-            dropped: 0
+            dropped: 0,
+            avgProcessTime: 0,
+            lastProcessTime: 0
         };
 
         const handleMessage = (event: MessageEvent) => {
@@ -1454,110 +1478,132 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 return;
             }
 
+            const startTime = performance.now();
             messageStats.total++;
 
-            // 添加到总消息队列
+            // 添加到消息队列
             allMessageQueue.push(event);
 
-            // 快速检查是否为分段消息，如果是则加入专门队列
+            // 极速分段消息检测和处理
             try {
-                const quickCheck = event.data.substring(0, 200); // 只检查前200字符
-                if (quickCheck.includes('"type":"file_list_segment"')) {
+                const quickCheck = event.data.substring(0, 150); // 减少检查长度
+                if (quickCheck.includes('"file_list_segment"')) {
                     segmentMessageQueue.push(event);
                     messageStats.segments++;
 
-                    // 立即处理分段消息，使用更短的延迟
-                    if (segmentProcessingTimer) {
+                    // 立即处理分段消息，但使用更智能的策略
+                    if (!isProcessing && segmentProcessingTimer) {
                         clearTimeout(segmentProcessingTimer);
                     }
-                    segmentProcessingTimer = setTimeout(processSegmentMessages, 5); // 5ms快速处理
+
+                    if (!isProcessing) {
+                        segmentProcessingTimer = setTimeout(() => {
+                            processSegmentMessagesAsync();
+                        }, 1); // 1ms极速处理
+                    }
                 }
             } catch (e) {
-                // 忽略解析错误，继续正常流程
+                // 忽略解析错误
             }
 
-            // 处理其他消息
+            // 更激进的防抖策略处理普通消息
             if (processingTimer) {
                 clearTimeout(processingTimer);
             }
-            processingTimer = setTimeout(processNormalMessages, 16);
+            processingTimer = setTimeout(() => {
+                processNormalMessagesAsync();
+            }, 100); // 提升到100ms防抖，减少处理频率
+
+            const endTime = performance.now();
+            messageStats.lastProcessTime = endTime - startTime;
+            messageStats.avgProcessTime = (messageStats.avgProcessTime + messageStats.lastProcessTime) / 2;
         };
 
-        // 专门处理分段消息的函数
-        const processSegmentMessages = () => {
-            if (segmentMessageQueue.length === 0) return;
+        // 异步处理分段消息 - 使用requestIdleCallback
+        const processSegmentMessagesAsync = () => {
+            if (isProcessing || segmentMessageQueue.length === 0) return;
 
-            console.log(`📨 处理分段消息队列，队列长度: ${segmentMessageQueue.length}`);
+            isProcessing = true;
+            console.log(`📨 异步处理分段消息队列，队列长度: ${segmentMessageQueue.length}`);
 
-            // 一次性处理所有分段消息，确保不丢失
-            const segmentMessages = [...segmentMessageQueue];
-            segmentMessageQueue = []; // 清空队列
+            // 使用requestIdleCallback在浏览器空闲时处理
+            const processChunk = (deadline: IdleDeadline) => {
+                while (deadline.timeRemaining() > 0 && segmentMessageQueue.length > 0) {
+                    const event = segmentMessageQueue.shift();
+                    if (!event) break;
 
-            segmentMessages.forEach((event, index) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'file_list_segment') {
-                        console.log(`📦 处理分段消息 ${index + 1}/${segmentMessages.length}: 分段=${data.data.segmentId}/${data.data.totalSegments}`);
-                        handleSegmentedFileList({
-                            requestId: data.data.requestId,
-                            segmentId: data.data.segmentId,
-                            totalSegments: data.data.totalSegments,
-                            data: data.data.data,
-                            isComplete: data.data.isComplete
-                        });
-                        messageStats.processed++;
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'file_list_segment') {
+                            handleSegmentedFileList({
+                                requestId: data.data.requestId,
+                                segmentId: data.data.segmentId,
+                                totalSegments: data.data.totalSegments,
+                                data: data.data.data,
+                                isComplete: data.data.isComplete
+                            });
+                            messageStats.processed++;
+                        }
+                    } catch (error) {
+                        console.error('❌ 异步处理分段消息失败:', error);
+                        messageStats.dropped++;
                     }
-                } catch (error) {
-                    console.error('❌ 处理分段消息失败:', error);
-                    messageStats.dropped++;
                 }
-            });
 
-            console.log(`📊 消息统计 - 总计: ${messageStats.total}, 分段: ${messageStats.segments}, 已处理: ${messageStats.processed}, 丢失: ${messageStats.dropped}`);
+                // 如果还有消息未处理，继续在下个空闲时间处理
+                if (segmentMessageQueue.length > 0) {
+                    requestIdleCallback(processChunk, { timeout: 1000 });
+                } else {
+                    isProcessing = false;
+                    console.log(`📊 分段消息处理完成 - 已处理: ${messageStats.processed}, 丢失: ${messageStats.dropped}`);
+                }
+            };
+
+            requestIdleCallback(processChunk, { timeout: 500 });
         };
 
-        // 处理普通消息的函数
-        const processNormalMessages = () => {
-            // 防抖检查
+        // 异步处理普通消息 - 大幅减少处理频率
+        const processNormalMessagesAsync = () => {
+            // 更严格的防抖检查
             const currentTime = Date.now();
-            if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 50) {
+            if (isUpdatingRef.current || (currentTime - lastUpdateTimeRef.current) < 200) {
                 return;
             }
 
             isUpdatingRef.current = true;
             lastUpdateTimeRef.current = currentTime;
 
-            try {
-                // 过滤出非分段的相关消息
-                const relevantMessages = allMessageQueue.filter(msg => {
-                    try {
-                        const data = JSON.parse(msg.data);
-                        return data.type === 'file_list_response'; // 只处理完整响应
-                    } catch {
-                        return false;
+            // 使用requestIdleCallback处理普通消息
+            requestIdleCallback((deadline) => {
+                try {
+                    const relevantMessages = allMessageQueue.filter(msg => {
+                        try {
+                            const data = JSON.parse(msg.data);
+                            return data.type === 'file_list_response';
+                        } catch {
+                            return false;
+                        }
+                    });
+
+                    if (relevantMessages.length > 0 && deadline.timeRemaining() > 5) {
+                        const latestMessage = relevantMessages[relevantMessages.length - 1];
+                        processFileListMessageAsync(latestMessage);
                     }
-                });
 
-                // 只处理最新的相关消息
-                if (relevantMessages.length > 0) {
-                    const latestMessage = relevantMessages[relevantMessages.length - 1];
-                    processFileListMessage(latestMessage);
+                } finally {
+                    allMessageQueue = [];
+                    processingTimer = null;
+
+                    // 延迟重置更新标志
+                    setTimeout(() => {
+                        isUpdatingRef.current = false;
+                    }, 50);
                 }
-
-            } finally {
-                // 清空普通消息队列
-                allMessageQueue = [];
-                processingTimer = null;
-
-                // 短暂延迟后重置更新标志
-                setTimeout(() => {
-                    isUpdatingRef.current = false;
-                }, 16);
-            }
+            }, { timeout: 1000 });
         };
 
-        // 消息处理函数
-        const processFileListMessage = (event: MessageEvent) => {
+        // 异步处理文件列表消息 - 使用React 19优化
+        const processFileListMessageAsync = (event: MessageEvent) => {
             try {
                 const data = JSON.parse(event.data);
 
@@ -1566,7 +1612,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                         return;
                     }
 
-                    // 使用React 19的批处理更新
+                    // 使用React.startTransition进行低优先级更新
                     React.startTransition(() => {
                         if (requestTimeoutRef.current) {
                             clearTimeout(requestTimeoutRef.current);
@@ -1583,7 +1629,13 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                         }
 
                         if (data.data.files && Array.isArray(data.data.files)) {
-                            setFiles(data.data.files);
+                            // 对于大量文件，分批更新状态
+                            if (data.data.files.length > 1000) {
+                                console.log(`📦 大文件列表检测 (${data.data.files.length}个)，启用分批处理`);
+                                processBatchFiles(data.data.files);
+                            } else {
+                                setFiles(data.data.files);
+                            }
                         } else {
                             setFiles([]);
                         }
@@ -1603,12 +1655,48 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             }
         };
 
+        // 分批处理大量文件数据
+        const processBatchFiles = (allFiles: FileItem[]) => {
+            const batchSize = 500;
+            let currentIndex = 0;
+
+            const processBatch = () => {
+                const batch = allFiles.slice(currentIndex, currentIndex + batchSize);
+
+                if (batch.length > 0) {
+                    React.startTransition(() => {
+                        if (currentIndex === 0) {
+                            setFiles(batch); // 第一批直接设置
+                        } else {
+                            setFiles(prev => [...prev, ...batch]); // 后续批次追加
+                        }
+                    });
+
+                    currentIndex += batchSize;
+
+                    // 在浏览器空闲时处理下一批
+                    if (currentIndex < allFiles.length) {
+                        requestIdleCallback(() => {
+                            processBatch();
+                        }, { timeout: 100 });
+                    } else {
+                        console.log(`📦 分批处理完成，共处理 ${allFiles.length} 个文件`);
+                    }
+                }
+            };
+
+            processBatch();
+        };
+
         const ws = webSocketRef.current;
         ws.addEventListener('message', handleMessage);
 
         return () => {
-            console.log('FileBrowser: 移除WebSocket消息监听器 (增强版)');
-            console.log(`📊 最终消息统计 - 总计: ${messageStats.total}, 分段: ${messageStats.segments}, 已处理: ${messageStats.processed}, 丢失: ${messageStats.dropped}`);
+            console.log('FileBrowser: 移除高性能WebSocket消息监听器');
+            console.log(`📊 最终性能统计:`, {
+                ...messageStats,
+                efficiency: messageStats.processed / Math.max(messageStats.total, 1) * 100
+            });
 
             if (processingTimer) {
                 clearTimeout(processingTimer);
@@ -1617,6 +1705,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 clearTimeout(segmentProcessingTimer);
             }
 
+            isProcessing = false;
             allMessageQueue = [];
             segmentMessageQueue = [];
 
