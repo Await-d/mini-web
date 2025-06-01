@@ -459,17 +459,21 @@
     flex: 1;
     position: relative;
     
-    /* 性能优化 - 启用硬件加速和smooth scrolling */
+    /* 性能优化 - 启用硬件加速 */
     will-change: scroll-position;
     transform: translateZ(0);
     backface-visibility: hidden;
     perspective: 1000px;
     
-    /* 优化滚动行为 */
-    scroll-behavior: auto; /* 禁用smooth，减少性能开销 */
+    /* 优化滚动行为 - 平衡性能和用户体验 */
+    scroll-behavior: auto;
+    -webkit-overflow-scrolling: touch; /* iOS平滑滚动 */
     
-    /* 减少重排重绘 */
+    /* 减少重排重绘但保持流畅性 */
     contain: layout style paint;
+    
+    /* 增加渲染缓冲区，减少滚动空白 */
+    overflow-anchor: auto; /* 启用滚动锚定 */
 }
 
 .virtual-file-scroll-container::-webkit-scrollbar {

@@ -177,19 +177,23 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         return filtered;
     }, [files, searchTerm, sortField, sortOrder]);
 
-    // 虚拟化文件列表配置 - 进一步优化滚动性能
+    // 虚拟化文件列表配置 - 优化预留渲染防止空白
     const rowVirtualizer = useVirtualizer({
         count: filteredFiles.length,
         getScrollElement: () => scrollElementRef.current,
         estimateSize: () => 48, // 固定行高
-        overscan: 1, // 最小化overscan以提高性能
+        overscan: 8, // 增加预留渲染项目，防止滚动空白（上下各8个）
         measureElement: undefined, // 禁用动态测量
-        scrollMargin: 0,
+        scrollMargin: 16, // 增加滚动边距，提前触发渲染
         getItemKey: (index) => {
             const file = filteredFiles[index];
             return file ? `${file.name}_${file.type}_${file.size}` : index;
         },
         debug: false,
+        // 启用滚动时的平滑预渲染
+        initialRect: { width: 0, height: 0 }, // 让虚拟化器自动计算
+        paddingStart: 0,
+        paddingEnd: 0,
     });
 
     // 生成用于localStorage的唯一键
@@ -1935,18 +1939,45 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                         overflow: 'auto',
                                         minHeight: 0, // 确保flex子元素能够收缩
                                     }}
-
                                 >
                                     <div
                                         style={{
                                             height: `${rowVirtualizer.getTotalSize()}px`,
                                             width: '100%',
                                             position: 'relative',
+                                            // 添加最小高度确保滚动区域稳定
+                                            minHeight: filteredFiles.length * 48,
                                         }}
                                     >
                                         {rowVirtualizer.getVirtualItems().map((virtualItem) => {
                                             const file = filteredFiles[virtualItem.index];
-                                            if (!file) return null;
+
+                                            // 如果文件不存在，渲染占位符防止空白
+                                            if (!file) {
+                                                return (
+                                                    <div
+                                                        key={virtualItem.key}
+                                                        style={{
+                                                            position: 'absolute',
+                                                            top: 0,
+                                                            left: 0,
+                                                            width: '100%',
+                                                            height: `${virtualItem.size}px`,
+                                                            transform: `translateY(${virtualItem.start}px)`,
+                                                            background: '#f9f9f9',
+                                                            borderBottom: '1px solid #f0f0f0',
+                                                        }}
+                                                    >
+                                                        <div style={{
+                                                            padding: '12px',
+                                                            color: '#d9d9d9',
+                                                            fontSize: '12px'
+                                                        }}>
+                                                            加载中...
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
 
                                             return (
                                                 <VirtualFileRow
@@ -1958,10 +1989,13 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                                         left: 0,
                                                         width: '100%',
                                                         height: `${virtualItem.size}px`,
-                                                        transform: `translateY(${virtualItem.start}px)`, // 简化transform
-                                                        animation: 'none !important',
-                                                        transition: 'none !important',
-                                                        willChange: 'auto !important'
+                                                        transform: `translateY(${virtualItem.start}px)`,
+                                                        // 确保渲染优先级
+                                                        zIndex: 1,
+                                                        // 禁用动画但保持流畅性
+                                                        transition: 'none',
+                                                        animation: 'none',
+                                                        willChange: 'auto',
                                                     }}
                                                     file={file}
                                                 />

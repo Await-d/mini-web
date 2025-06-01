@@ -1,3 +1,10 @@
+<!--
+ * @Author: Await
+ * @Date: 2025-05-31 21:39:09
+ * @LastEditors: Await
+ * @LastEditTime: 2025-06-01 08:59:53
+ * @Description: 请填写简介
+-->
 # 文件浏览器性能优化记录
 
 ## 2024-05-31 性能修复
