@@ -45,12 +45,12 @@ func (tf *TerminalFormatter) FormatOutput(data []byte) []byte {
 		return data
 	}
 
-	// 检查是否是密码输入内容
+	// 在密码模式下，不处理用户输入的密码内容
+	// 让前端处理密码显示，后端只负责识别密码提示和退出条件
 	if tf.passwordMode && tf.isPasswordInput(text) {
-		// 替换密码为星号
-		maskedText := tf.maskPassword(text)
+		// 不替换密码，让前端处理显示
 		tf.lastLine = text
-		return []byte(maskedText)
+		return data
 	}
 
 	// 检查是否退出密码模式

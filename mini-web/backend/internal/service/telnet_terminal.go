@@ -187,13 +187,8 @@ func (t *TelnetTerminalSession) Read(p []byte) (int, error) {
 
 // Write 实现io.Writer接口
 func (t *TelnetTerminalSession) Write(p []byte) (int, error) {
-	// 如果写入的是命令，设置命令回显到格式化器
-	command := string(p)
-	if len(command) > 0 && command[len(command)-1] == '\n' {
-		// 移除换行符，设置为命令回显
-		t.formatter.SetCommandEcho(command[:len(command)-1])
-	}
-
+	// 直接写入到writer，不处理命令回显
+	// 密码输入和普通命令都直接传输
 	return t.writer.Write(p)
 }
 

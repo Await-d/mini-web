@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 19:21:17
+ * @LastEditTime: 2025-06-01 19:28:44
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -90,7 +90,13 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             '请输入密码',
             '[sudo] password for',
             'Password:',
-            'Password for'
+            'Password for',
+            'password required',
+            'enter your password',
+            'please enter password',
+            'authentication required',
+            'sudo password',
+            'user password'
         ];
 
         const lowercaseText = text.toLowerCase().trim();
@@ -265,16 +271,33 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
 
                 // 检查是否是密码提示
                 if (isPasswordPrompt(line)) {
+                    console.log('检测到密码提示:', line);
                     setPasswordMode(true);
                     setLastPasswordPrompt(line);
                     outputLines.push(`<span class="password-prompt">🔐 ${line}</span>`);
                     continue;
                 }
 
-                // 检查是否退出密码模式
-                if (passwordMode && isSuccessIndicator(line)) {
-                    setPasswordMode(false);
-                    setLastPasswordPrompt('');
+                // 检查是否退出密码模式 - 检查错误信息或成功指示器
+                if (passwordMode) {
+                    const lowercaseLine = line.toLowerCase();
+                    const isError = lowercaseLine.includes('sorry') ||
+                        lowercaseLine.includes('incorrect') ||
+                        lowercaseLine.includes('failed') ||
+                        lowercaseLine.includes('wrong') ||
+                        lowercaseLine.includes('try again');
+
+                    if (isError) {
+                        // 密码错误，保持密码模式
+                        console.log('密码错误，保持密码模式:', line);
+                        outputLines.push(`<span class="error-line">❌ ${line}</span>`);
+                        continue;
+                    } else if (isSuccessIndicator(line) || promptRegex.test(line)) {
+                        // 成功或新提示符，退出密码模式
+                        console.log('密码验证成功或收到新提示符，退出密码模式:', line);
+                        setPasswordMode(false);
+                        setLastPasswordPrompt('');
+                    }
                 }
 
                 if (promptRegex.test(line)) {
@@ -317,6 +340,12 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 // 收到新提示符说明命令执行完成，清除lastSentCommand
                 if (lastSentCommand) {
                     setLastSentCommand('');
+                }
+                // 收到新提示符时退出密码模式
+                if (passwordMode) {
+                    console.log('收到新提示符，退出密码模式:', newPrompt);
+                    setPasswordMode(false);
+                    setLastPasswordPrompt('');
                 }
             }
 
@@ -554,18 +583,31 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             if (e.key === 'Enter') {
                 // 回车键 - 发送完整命令
                 if (localInput.trim()) {
-                    // 添加到命令历史
-                    setCommandHistory(prev => [localInput, ...prev.slice(0, 19)]);
+                    // 只在非密码模式下添加到命令历史
+                    if (!passwordMode) {
+                        setCommandHistory(prev => [localInput, ...prev.slice(0, 19)]);
+                    }
 
-                    // 显示完整的命令行（只显示一行提示符+命令）
+                    // 显示完整的命令行
                     const cleanPrompt = currentPrompt.split('\n').pop() || currentPrompt;
-                    const fullCommand = `${cleanPrompt}${localInput}`;
-                    setOutput(prev => [...prev, fullCommand]);
+                    let displayCommand;
+
+                    if (passwordMode) {
+                        // 密码模式：显示星号
+                        const maskedInput = '*'.repeat(localInput.length);
+                        displayCommand = `${cleanPrompt}${maskedInput}`;
+                    } else {
+                        // 普通模式：显示明文
+                        displayCommand = `${cleanPrompt}${localInput}`;
+                    }
+
+                    setOutput(prev => [...prev, displayCommand]);
 
                     // 记录发送的命令，用于防止重复显示
                     setLastSentCommand(localInput);
 
-                    // 发送命令到服务器
+                    // 发送命令到服务器 - 无论是否为密码模式都发送原始输入
+                    console.log('发送命令:', passwordMode ? '密码输入' : localInput);
                     webSocketRef.current.send(localInput + '\r\n');
                 }
 
