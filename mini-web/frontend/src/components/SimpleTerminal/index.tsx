@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 19:28:44
+ * @LastEditTime: 2025-06-01 20:32:15
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -233,7 +233,20 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         try {
             // 尝试解析为JSON
             const data = JSON.parse(cleanedText);
-            if (data.type === 'data' && data.data) {
+            if (data.type === 'ack') {
+                // 处理确认消息
+                const ackData = JSON.parse(data.data);
+                console.log('收到确认消息:', ackData);
+
+                if (ackData.status === 'success') {
+                    console.log(`命令执行成功确认: ${ackData.messageId}`);
+                } else if (ackData.status === 'error') {
+                    console.error(`命令执行失败: ${ackData.messageId}, 错误: ${ackData.error}`);
+                    // 可以选择显示错误信息
+                    setOutput(prev => [...prev, `<span class="error-line">❌ 命令执行失败: ${ackData.error}</span>`]);
+                }
+                return; // 确认消息不需要进一步处理
+            } else if (data.type === 'data' && data.data) {
                 // 处理命令执行结果
                 const lines = data.data.split('\n').filter((line: string) => line.trim());
                 setOutput(prev => [...prev, ...lines]);
@@ -506,8 +519,18 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             // 记录发送的命令
             setLastSentCommand(command);
 
-            // 发送到服务器
-            webSocketRef.current.send(command + '\r\n');
+            // 发送到服务器 - 使用新的JSON协议
+            const inputMessage = {
+                type: 'input',
+                data: {
+                    data: command + '\r\n',
+                    messageId: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                },
+                timestamp: Date.now(),
+                messageId: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            };
+
+            webSocketRef.current.send(JSON.stringify(inputMessage));
 
             message.success(`已发送命令: ${command}`);
             scrollToBottom();
@@ -626,10 +649,39 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     // 记录发送的命令，用于防止重复显示
                     setLastSentCommand(localInput);
 
-                    // 发送命令到服务器 - 无论是否为密码模式都发送原始输入
+                    // 发送命令到服务器 - 使用新的JSON协议
                     console.log('发送命令:', passwordMode ? `密码输入(长度:${localInput.length})` : localInput);
                     console.log('当前密码模式状态:', passwordMode);
-                    webSocketRef.current.send(localInput + '\r\n');
+
+                    if (passwordMode) {
+                        // 密码模式：使用增强JSON协议
+                        const passwordMessage = {
+                            type: 'password_input',
+                            data: {
+                                password: localInput,
+                                messageId: `pwd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                            },
+                            timestamp: Date.now(),
+                            messageId: `pwd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                        };
+
+                        console.log('发送密码JSON消息:', passwordMessage);
+                        webSocketRef.current.send(JSON.stringify(passwordMessage));
+                    } else {
+                        // 普通模式：使用增强JSON协议
+                        const inputMessage = {
+                            type: 'input',
+                            data: {
+                                data: localInput + '\r\n',
+                                messageId: `inp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                            },
+                            timestamp: Date.now(),
+                            messageId: `inp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                        };
+
+                        console.log('发送普通输入JSON消息:', inputMessage);
+                        webSocketRef.current.send(JSON.stringify(inputMessage));
+                    }
                 }
 
                 // 重置输入状态
