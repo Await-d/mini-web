@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -45,20 +46,24 @@ func (tf *TerminalFormatter) FormatOutput(data []byte) []byte {
 		return data
 	}
 
+	// 检查是否退出密码模式
+	if tf.passwordMode && tf.shouldExitPasswordMode(text) {
+		tf.passwordMode = false
+		tf.passwordPrompt = ""
+		tf.lastLine = text
+		return data
+	}
+
 	// 在密码模式下，处理用户输入的密码内容
 	if tf.passwordMode && tf.isPasswordInput(text) {
 		// 替换密码为星号显示
 		maskedText := tf.maskPassword(text)
 		tf.lastLine = text
-		// 添加调试日志（生产环境请移除）
-		// log.Printf("密码处理: 原始长度=%d, 清理后长度=?, 掩码结果长度=%d", len(text), len(maskedText))
+		// 添加调试日志
+		fmt.Printf("密码处理: 原始=\"%s\"(len=%d), 掩码=\"%s\"(len=%d)\n",
+			strings.ReplaceAll(text, "\n", "\\n"), len(text),
+			strings.ReplaceAll(maskedText, "\n", "\\n"), len(maskedText))
 		return []byte(maskedText)
-	}
-
-	// 检查是否退出密码模式
-	if tf.passwordMode && tf.shouldExitPasswordMode(text) {
-		tf.passwordMode = false
-		tf.passwordPrompt = ""
 	}
 
 	// 检查是否是重复的错误消息
@@ -108,8 +113,8 @@ func (tf *TerminalFormatter) isPasswordInput(text string) bool {
 
 	trimmed := strings.TrimSpace(text)
 
-	// 排除空行
-	if trimmed == "" {
+	// 排除空行和很短的输入（通常是控制字符）
+	if trimmed == "" || len(trimmed) < 2 {
 		return false
 	}
 
@@ -147,21 +152,35 @@ func (tf *TerminalFormatter) isPasswordInput(text string) bool {
 		return false
 	}
 
-	// 检查是否可能是密码输入：包含可见字符且不是系统消息
-	if len(cleanText) > 0 {
-		// 密码通常包含字母、数字或特殊字符
-		hasValidChars := false
+	// 简化密码检测：只要是可见字符串且长度合理，就认为是密码
+	// 这样可以避免复杂的字符检测逻辑导致的误判
+	if len(cleanText) >= 3 && len(cleanText) <= 128 {
+		// 确保不是纯符号（避免误判格式字符串）
+		hasAlphaNumeric := false
 		for _, r := range cleanText {
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-				(r >= '0' && r <= '9') || strings.ContainsRune("!@#$%^&*()_+-=[]{}|;:,.<>?", r) {
-				hasValidChars = true
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+				hasAlphaNumeric = true
 				break
 			}
 		}
 
-		return hasValidChars
+		// 如果包含字母数字字符，很可能是密码
+		if hasAlphaNumeric {
+			fmt.Printf("密码检测: 识别为密码输入 - 原始=\"%s\" 清理=\"%s\"\n",
+				strings.ReplaceAll(text, "\n", "\\n"), cleanText)
+			return true
+		}
+
+		// 如果全是特殊字符但长度合理，也可能是密码
+		if len(cleanText) >= 4 {
+			fmt.Printf("密码检测: 识别为特殊字符密码 - 原始=\"%s\" 清理=\"%s\"\n",
+				strings.ReplaceAll(text, "\n", "\\n"), cleanText)
+			return true
+		}
 	}
 
+	fmt.Printf("密码检测: 未识别为密码 - 原始=\"%s\" 清理=\"%s\" (len=%d)\n",
+		strings.ReplaceAll(text, "\n", "\\n"), cleanText, len(cleanText))
 	return false
 }
 
@@ -175,20 +194,31 @@ func (tf *TerminalFormatter) maskPassword(text string) string {
 	// 移除ANSI转义序列和控制字符，只保留可见字符
 	cleanText := tf.removeAnsiSequences(trimmed)
 
-	// 如果清理后的文本为空，返回原文本
+	// 如果清理后的文本为空，返回简单的星号
 	if len(cleanText) == 0 {
-		return text
+		return "****"
 	}
 
-	// 为密码生成相应数量的星号（基于清理后的文本长度）
-	maskedPassword := strings.Repeat("*", len(cleanText))
-
-	// 如果原文本就是纯文本，直接替换
-	if cleanText == trimmed {
-		return strings.Replace(text, trimmed, maskedPassword, 1)
+	// 限制星号数量，避免显示过多
+	starCount := len(cleanText)
+	if starCount > 20 {
+		starCount = 20 // 最多显示20个星号
+	}
+	if starCount < 4 {
+		starCount = 4 // 最少显示4个星号，保护隐私
 	}
 
-	// 如果包含控制字符，返回简单的星号字符串
+	// 生成固定数量的星号
+	maskedPassword := strings.Repeat("*", starCount)
+
+	// 保持原有的换行符等格式
+	if strings.HasSuffix(text, "\n") && !strings.HasSuffix(maskedPassword, "\n") {
+		maskedPassword += "\n"
+	}
+	if strings.HasSuffix(text, "\r\n") && !strings.HasSuffix(maskedPassword, "\r\n") {
+		maskedPassword += "\r\n"
+	}
+
 	return maskedPassword
 }
 
