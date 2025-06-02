@@ -760,9 +760,24 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 									log.Printf("发送给终端的字节数据: 长度=%d, 内容=%v", len(terminalBytes), terminalBytes)
 									log.Printf("发送给终端的字符串表示: %q", contentStr)
 
+									// 检查是否是sudo密码输入（简单的方式：检查是否只包含字母数字且没有空格）
+									isSudoPassword := false
+									if !strings.Contains(cleanContentForLog, " ") &&
+										len(cleanContentForLog) > 5 &&
+										len(cleanContentForLog) < 50 &&
+										!strings.HasPrefix(cleanContentForLog, "sudo") &&
+										!strings.HasPrefix(cleanContentForLog, "su ") {
+										// 可能是密码，添加小延迟确保sudo已准备好
+										log.Printf("检测到可能的sudo密码输入，添加100ms延迟")
+										time.Sleep(100 * time.Millisecond)
+										isSudoPassword = true
+									}
+
 									// 直接将命令内容传递给终端（保留原始的\r\n）
 									if _, err := terminal.Write(terminalBytes); err != nil {
 										log.Printf("向终端写入命令失败: %v", err)
+									} else if isSudoPassword {
+										log.Printf("sudo密码已发送，等待系统处理")
 									}
 									continue
 								}

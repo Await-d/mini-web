@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-02 19:32:44
+ * @LastEditTime: 2025-06-02 20:13:35
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -77,7 +77,6 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     // 密码输入模式状态
     const [passwordMode, setPasswordMode] = useState(false);
     const [lastPasswordPrompt, setLastPasswordPrompt] = useState('');
-    const [needsPasswordDelay, setNeedsPasswordDelay] = useState(false);
 
     // 提示符正则表达式 - 更宽松的匹配模式
     const promptRegex = /.*[@].*[$#]\s*$/;
@@ -103,6 +102,9 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         const lowercaseText = text.toLowerCase().trim();
         return passwordPrompts.some(prompt => lowercaseText.includes(prompt));
     }, []);
+
+    // 密码提示就绪状态
+    const [passwordPromptReady, setPasswordPromptReady] = useState(false);
 
     // 检查是否是成功登录的指示器
     const isSuccessIndicator = useCallback((text: string) => {
@@ -276,8 +278,14 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     // 立即设置密码模式
                     setPasswordMode(true);
                     setLastPasswordPrompt(line);
-                    setNeedsPasswordDelay(true); // 标记下次密码输入需要延迟
                     outputLines.push(`<span class="password-prompt">🔐 ${line}</span>`);
+
+                    // 添加延迟确保系统完全准备好接收密码
+                    setTimeout(() => {
+                        setPasswordPromptReady(true);
+                        console.log('密码提示就绪，可以安全输入密码');
+                    }, 200); // 200ms延迟确保系统就绪
+
                     continue;
                 }
 
@@ -300,6 +308,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                         console.log('密码验证成功或收到新提示符，退出密码模式:', line);
                         setPasswordMode(false);
                         setLastPasswordPrompt('');
+                        setPasswordPromptReady(false);
                     }
                 }
 
@@ -310,6 +319,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     if (passwordMode) {
                         setPasswordMode(false);
                         setLastPasswordPrompt('');
+                        setPasswordPromptReady(false);
                     }
                 } else if (line.trim()) {
                     // 检查是否是服务器返回的控制字符回显，如果是则忽略
@@ -368,6 +378,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     console.log('收到新提示符，退出密码模式:', newPrompt);
                     setPasswordMode(false);
                     setLastPasswordPrompt('');
+                    setPasswordPromptReady(false);
                 }
             }
 
@@ -549,6 +560,13 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             return;
         }
 
+        // 如果是密码模式但还没有就绪，延迟发送
+        if (passwordMode && !passwordPromptReady) {
+            console.log('密码模式未就绪，延迟500ms后重试发送');
+            setTimeout(() => sendCommand(command), 500);
+            return;
+        }
+
         try {
             // 清理命令，去除前后空格
             const cleanCommand = command.trim();
@@ -559,13 +577,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 // 密码模式：只显示掩码，不显示提示符
                 const maskedCommand = '*'.repeat(cleanCommand.length);
                 setOutput(prev => [...prev, `<span class="password-input-line">${maskedCommand}</span>`]);
-
-                if (needsPasswordDelay) {
-                    console.log('密码模式下发送命令（延迟200ms）:', `[密码已隐藏:${cleanCommand.length}字符]`);
-                    setNeedsPasswordDelay(false); // 重置延迟标志
-                } else {
-                    console.log('密码模式下发送命令:', `[密码已隐藏:${cleanCommand.length}字符]`);
-                }
+                console.log('密码模式下发送命令:', `[密码已隐藏:${cleanCommand.length}字符]`, '就绪状态:', passwordPromptReady);
             } else {
                 // 普通模式：显示命令（本地回显）
                 const cleanPrompt = currentPrompt.split('\n').pop() || currentPrompt;
@@ -579,8 +591,8 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             setLastSentCommand(cleanCommand);
 
             // 使用二进制协议发送到服务器
-            const sendToServer = async () => {
-                if (tabKey) {
+            if (tabKey) {
+                (async () => {
                     try {
                         const { default: webSocketService } = await import('../../pages/Terminal/services/WebSocketService');
                         const commandWithCR = cleanCommand + '\r\n';
@@ -599,17 +611,10 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                         console.warn('二进制协议发送失败，使用传统方式:', error);
                         webSocketRef.current?.send(cleanCommand + '\r\n');
                     }
-                } else {
-                    // 回退到传统方式
-                    webSocketRef.current?.send(cleanCommand + '\r\n');
-                }
-            };
-
-            // 如果是密码模式且需要延迟，则延迟发送
-            if (passwordMode && needsPasswordDelay) {
-                setTimeout(sendToServer, 200); // 200ms延迟
+                })();
             } else {
-                sendToServer();
+                // 回退到传统方式
+                webSocketRef.current.send(cleanCommand + '\r\n');
             }
 
             // 成功消息也要考虑密码模式
@@ -623,19 +628,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             console.error('发送命令失败:', e);
             message.error('发送命令失败');
         }
-    }, [webSocketRef, currentPrompt, scrollToBottom, setLastSentCommand, passwordMode]);
-
-    // 延迟发送命令函数，主要用于密码输入
-    const sendCommandWithDelay = useCallback((command: string, delay: number = 0) => {
-        if (delay > 0) {
-            console.log(`延迟 ${delay}ms 后发送命令，确保终端准备就绪`);
-            setTimeout(() => {
-                sendCommand(command);
-            }, delay);
-        } else {
-            sendCommand(command);
-        }
-    }, [sendCommand]);
+    }, [webSocketRef, currentPrompt, scrollToBottom, setLastSentCommand, passwordMode, passwordPromptReady]);
 
     // 发送批量命令
     const sendBatchCommands = useCallback((commands: string[]) => {
@@ -1047,7 +1040,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 {/* 密码模式指示器 */}
                 {passwordMode && (
                     <div style={{
-                        color: '#faad14',
+                        color: passwordPromptReady ? '#52c41a' : '#faad14',
                         fontWeight: 'bold',
                         fontSize: '14px',
                         display: 'flex',
@@ -1055,7 +1048,9 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                         gap: '6px'
                     }}>
                         <span className="password-indicator">🔐</span>
-                        <span>密码输入模式</span>
+                        <span>
+                            密码输入模式 {passwordPromptReady ? '(就绪)' : '(准备中...)'}
+                        </span>
                     </div>
                 )}
                 <div className="toolbar-buttons">
@@ -1230,8 +1225,6 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 visible={quickCommandsVisible}
                 onClose={() => setQuickCommandsVisible(false)}
                 onSendCommand={sendCommand}
-                onSendCommandWithDelay={sendCommandWithDelay}
-                passwordMode={passwordMode}
             />
 
             {/* 快捷键帮助模态框 */}

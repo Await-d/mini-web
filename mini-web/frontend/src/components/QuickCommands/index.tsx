@@ -7,16 +7,12 @@ export interface QuickCommandsProps {
   visible?: boolean;
   onClose?: () => void;
   onSendCommand?: (command: string) => void;
-  onSendCommandWithDelay?: (command: string, delay: number) => void;
-  passwordMode?: boolean;
 }
 
 const QuickCommands: React.FC<QuickCommandsProps> = ({
   visible = false,
   onClose,
-  onSendCommand,
-  onSendCommandWithDelay,
-  passwordMode = false
+  onSendCommand
 }) => {
   const [commands, setCommands] = useState<string[]>([]);
   const [newCommand, setNewCommand] = useState('');
@@ -74,39 +70,12 @@ const QuickCommands: React.FC<QuickCommandsProps> = ({
     setEditIndex(index);
   };
 
-  // 检查是否是密码相关命令
-  const isPasswordCommand = (command: string) => {
-    const passwordCommands = [
-      'sudo',
-      'su -',
-      'su root',
-      'passwd',
-      'ssh',
-      'mysql -p',
-      'psql'
-    ];
-    const lowerCommand = command.toLowerCase().trim();
-    return passwordCommands.some(cmd => lowerCommand.startsWith(cmd));
-  };
-
   // 发送命令
   const handleSendCommand = (command: string) => {
-    // 清理命令前后的空格
-    const cleanCommand = command.trim();
-    console.log('QuickCommands发送命令:', `"${command}"` + ' -> ' + `"${cleanCommand}"`);
-
-    // 如果当前在密码模式下，直接发送，可能需要延迟
-    if (passwordMode && onSendCommandWithDelay) {
-      console.log('密码模式下发送命令，使用延迟发送');
-      onSendCommandWithDelay(cleanCommand, 200); // 200ms延迟
-    } else if (isPasswordCommand(cleanCommand) && onSendCommandWithDelay) {
-      // 如果是可能触发密码提示的命令，正常发送（不延迟）
-      console.log('检测到密码相关命令，正常发送');
-      if (onSendCommand) {
-        onSendCommand(cleanCommand);
-      }
-    } else if (onSendCommand) {
-      // 普通命令，正常发送
+    if (onSendCommand) {
+      // 清理命令前后的空格
+      const cleanCommand = command.trim();
+      console.log('QuickCommands发送命令:', `"${command}"` + ' -> ' + `"${cleanCommand}"`);
       onSendCommand(cleanCommand);
     }
   };
