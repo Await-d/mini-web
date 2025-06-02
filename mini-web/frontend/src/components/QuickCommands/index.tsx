@@ -73,7 +73,10 @@ const QuickCommands: React.FC<QuickCommandsProps> = ({
   // 发送命令
   const handleSendCommand = (command: string) => {
     if (onSendCommand) {
-      onSendCommand(command);
+      // 清理命令前后的空格
+      const cleanCommand = command.trim();
+      console.log('QuickCommands发送命令:', `"${command}"` + ' -> ' + `"${cleanCommand}"`);
+      onSendCommand(cleanCommand);
     }
   };
 

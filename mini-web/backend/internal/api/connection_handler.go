@@ -751,8 +751,10 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 						if msgType, hasType := jsonMap["type"]; hasType && msgType == "command" {
 							if content, hasContent := jsonMap["content"]; hasContent {
 								if contentStr, isString := content.(string); isString {
-									log.Printf("处理二进制协议命令: %s", contentStr)
-									// 直接将命令内容传递给终端
+									// 清理日志显示，但保持原始数据传递给终端
+									cleanContentForLog := strings.TrimSpace(contentStr)
+									log.Printf("处理二进制协议命令: %s", cleanContentForLog)
+									// 直接将命令内容传递给终端（保留原始的\r\n）
 									if _, err := terminal.Write([]byte(contentStr)); err != nil {
 										log.Printf("向终端写入命令失败: %v", err)
 									}

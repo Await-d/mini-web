@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-02 08:29:37
+ * @LastEditTime: 2025-06-02 18:42:39
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
@@ -204,11 +204,30 @@ export class WebSocketService {
             // 检查是否为二进制协议消息
             let processedEvent = event;
 
-            if (event.data instanceof ArrayBuffer) {
+            // 处理二进制数据（ArrayBuffer或Blob）
+            if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+                let arrayBufferData: ArrayBuffer;
+
+                // 如果是Blob，先转换为ArrayBuffer
+                if (event.data instanceof Blob) {
+                    console.log(`🔄 [${tab.key}] 收到Blob数据，大小: ${event.data.size} bytes`);
+                    arrayBufferData = await event.data.arrayBuffer();
+                } else {
+                    arrayBufferData = event.data;
+                }
+
                 // 尝试解析二进制协议消息
-                if (binaryJsonProtocol.isProtocolMessage(event.data)) {
+                if (binaryJsonProtocol.isProtocolMessage(arrayBufferData)) {
                     try {
-                        const protocolMessage = await binaryJsonProtocol.decodeMessage(event.data);
+                        const protocolMessage = await binaryJsonProtocol.decodeMessage(arrayBufferData);
+
+                        console.log(`🔍 [${tab.key}] 二进制协议消息解析:`, {
+                            messageType: protocolMessage.header.messageType,
+                            hasJsonData: !!protocolMessage.jsonData,
+                            hasBinaryData: !!protocolMessage.binaryData,
+                            jsonDataType: protocolMessage.jsonData?.type,
+                            binaryDataSize: protocolMessage.binaryData?.byteLength || 0
+                        });
 
                         // 处理心跳消息
                         if (protocolMessage.header.messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.HEARTBEAT) {
@@ -222,17 +241,74 @@ export class WebSocketService {
                             return;
                         }
 
+                        // 根据消息类型提取实际数据
+                        let actualData = protocolMessage.jsonData;
+
+                        // 如果是包含终端输出的消息，提取实际的终端数据
+                        if (protocolMessage.jsonData &&
+                            (protocolMessage.jsonData.type === 'terminal_data' || protocolMessage.jsonData.type === 'terminal-output') &&
+                            protocolMessage.binaryData) {
+                            // 将二进制数据转换为字符串（终端输出）
+                            const decoder = new TextDecoder();
+                            actualData = decoder.decode(protocolMessage.binaryData);
+                            console.log(`💾 [${tab.key}] 从二进制协议提取终端数据: ${actualData.length} 字符, 内容预览: "${actualData.substring(0, 50)}${actualData.length > 50 ? '...' : ''}"`);
+                        } else if (protocolMessage.jsonData && protocolMessage.jsonData.type === 'special_command') {
+                            // 特殊命令消息，保持JSON格式
+                            actualData = protocolMessage.jsonData;
+                            console.log(`🔥 [${tab.key}] 特殊命令消息:`, actualData);
+                        } else if (protocolMessage.binaryData && !protocolMessage.jsonData) {
+                            // 纯二进制数据，转换为字符串
+                            const decoder = new TextDecoder();
+                            actualData = decoder.decode(protocolMessage.binaryData);
+                            console.log(`📄 [${tab.key}] 纯二进制数据转换为文本: ${actualData.length} 字符, 内容预览: "${actualData.substring(0, 50)}${actualData.length > 50 ? '...' : ''}"`);
+                        } else if (protocolMessage.binaryData && protocolMessage.jsonData) {
+                            // 有二进制数据的混合消息，优先使用二进制数据
+                            const decoder = new TextDecoder();
+                            actualData = decoder.decode(protocolMessage.binaryData);
+                            console.log(`📄 [${tab.key}] 从混合消息提取二进制数据: ${actualData.length} 字符, 内容预览: "${actualData.substring(0, 50)}${actualData.length > 50 ? '...' : ''}"`);
+                        } else {
+                            console.log(`📋 [${tab.key}] 使用JSON数据:`, actualData);
+                        }
+
                         // 创建增强的事件对象
                         processedEvent = {
                             ...event,
-                            data: protocolMessage.jsonData || protocolMessage.binaryData,
+                            data: actualData,
                             protocolMessage: protocolMessage,
                             isBinaryProtocol: true
                         } as MessageEvent & { protocolMessage: ProtocolMessage; isBinaryProtocol: boolean };
 
                     } catch (error) {
                         console.warn(`解析二进制协议消息失败: ${tab.key}`, error);
-                        // 如果解析失败，按原始数据处理
+                        // 如果解析失败，尝试转换为文本
+                        try {
+                            const decoder = new TextDecoder();
+                            const textData = decoder.decode(arrayBufferData);
+                            processedEvent = {
+                                ...event,
+                                data: textData,
+                                isRawBinary: true
+                            } as MessageEvent & { isRawBinary: boolean };
+                            console.log(`📄 [${tab.key}] 作为原始二进制数据处理: ${textData.length} 字符`);
+                        } catch (decodeError) {
+                            console.warn(`解码二进制数据失败: ${tab.key}`, decodeError);
+                            // 保持原始数据
+                        }
+                    }
+                } else {
+                    // 不是二进制协议消息，尝试转换为文本
+                    try {
+                        const decoder = new TextDecoder();
+                        const textData = decoder.decode(arrayBufferData);
+                        processedEvent = {
+                            ...event,
+                            data: textData,
+                            isRawBinary: true
+                        } as MessageEvent & { isRawBinary: boolean };
+                        console.log(`📄 [${tab.key}] 作为原始文本数据处理: ${textData.length} 字符`);
+                    } catch (decodeError) {
+                        console.warn(`解码二进制数据失败: ${tab.key}`, decodeError);
+                        // 保持原始数据
                     }
                 }
             } else if (typeof event.data === 'string') {

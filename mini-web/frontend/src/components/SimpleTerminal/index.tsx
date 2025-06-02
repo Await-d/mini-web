@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-02 08:30:50
+ * @LastEditTime: 2025-06-02 19:15:34
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -470,22 +470,74 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             }
         };
 
+        // 处理来自TerminalConnectionWrapper的terminal-message事件
+        const handleTerminalMessage = (event: CustomEvent) => {
+            try {
+                const { data, dataType, tabKey: eventTabKey } = event.detail;
+
+                // 确保消息是针对当前标签页的
+                if (tabKey && eventTabKey !== tabKey) {
+                    return;
+                }
+
+                const dataPreview = typeof data === 'string' ? data.substring(0, 50) : `[${typeof data}] ${data}`;
+                console.log(`🎯 SimpleTerminal收到terminal-message事件: tabKey=${eventTabKey}, dataType=${dataType}, data预览:`, dataPreview);
+
+                if (dataType === 'terminal-output' || dataType === 'text') {
+                    // 处理终端输出数据 - 确保是字符串
+                    const textData = typeof data === 'string' ? data : String(data);
+                    processServerData(textData);
+                } else if (dataType === 'special-command') {
+                    // 处理特殊命令
+                    console.log('SimpleTerminal处理特殊命令:', data);
+                } else if (dataType === 'json' || dataType === 'object') {
+                    // 处理JSON数据（可能是状态更新等）
+                    try {
+                        const jsonData = typeof data === 'string' ? JSON.parse(data) : data;
+                        console.log('SimpleTerminal处理JSON数据:', jsonData);
+
+                        // 如果JSON数据包含终端输出，提取并处理
+                        if (jsonData && jsonData.data && typeof jsonData.data === 'string') {
+                            processServerData(jsonData.data);
+                        }
+                    } catch (e) {
+                        console.error('解析JSON数据失败:', e);
+                        // 如果JSON解析失败，尝试作为字符串处理
+                        const textData = typeof data === 'string' ? data : String(data);
+                        processServerData(textData);
+                    }
+                } else {
+                    // 其他类型的数据，尝试转换为字符串处理
+                    console.log('SimpleTerminal处理其他类型数据:', dataType, data);
+                    const textData = typeof data === 'string' ? data : String(data);
+                    processServerData(textData);
+                }
+            } catch (e) {
+                console.error('处理terminal-message事件时出错:', e);
+            }
+        };
+
         // 添加事件监听器
         ws.addEventListener('open', handleOpen);
-        ws.addEventListener('message', handleMessage);
+        // 注释掉直接的message监听，改为使用terminal-message事件
+        // ws.addEventListener('message', handleMessage);
         ws.addEventListener('close', handleClose);
         ws.addEventListener('error', handleError);
+
+        // 添加自定义terminal-message事件监听器
+        window.addEventListener('terminal-message', handleTerminalMessage as EventListener);
 
         // 清理函数
         return () => {
             if (ws) {
                 ws.removeEventListener('open', handleOpen);
-                ws.removeEventListener('message', handleMessage);
+                // ws.removeEventListener('message', handleMessage);
                 ws.removeEventListener('close', handleClose);
                 ws.removeEventListener('error', handleError);
             }
+            window.removeEventListener('terminal-message', handleTerminalMessage as EventListener);
         };
-    }, [webSocketRef, processServerData]);
+    }, [webSocketRef, processServerData, tabKey]);
 
     // 发送单个命令到终端
     const sendCommand = useCallback((command: string) => {
@@ -496,40 +548,57 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         }
 
         try {
-            // 显示命令（本地回显）
-            const cleanPrompt = currentPrompt.split('\n').pop() || currentPrompt;
-            if (cleanPrompt) {
-                const fullCommand = `${cleanPrompt}${command}`;
-                setOutput(prev => [...prev, fullCommand]);
+            // 清理命令，去除前后空格
+            const cleanCommand = command.trim();
+            console.log('原始命令:', `"${command}"`, '清理后命令:', `"${cleanCommand}"`);
+
+            // 在密码模式下特殊处理本地回显
+            if (passwordMode) {
+                // 密码模式：只显示掩码，不显示提示符
+                const maskedCommand = '*'.repeat(cleanCommand.length);
+                setOutput(prev => [...prev, `<span class="password-input-line">${maskedCommand}</span>`]);
+                console.log('密码模式下发送命令:', `[密码已隐藏:${cleanCommand.length}字符]`);
+            } else {
+                // 普通模式：显示命令（本地回显）
+                const cleanPrompt = currentPrompt.split('\n').pop() || currentPrompt;
+                if (cleanPrompt) {
+                    const fullCommand = `${cleanPrompt}${cleanCommand}`;
+                    setOutput(prev => [...prev, fullCommand]);
+                }
             }
 
             // 记录发送的命令
-            setLastSentCommand(command);
+            setLastSentCommand(cleanCommand);
 
             // 使用二进制协议发送到服务器
             if (tabKey) {
                 (async () => {
                     try {
                         const { default: webSocketService } = await import('../../pages/Terminal/services/WebSocketService');
-                        await webSocketService.sendData({ key: tabKey } as any, command + '\r\n', true);
-                        console.log('通过二进制协议发送命令:', command);
+                        await webSocketService.sendData({ key: tabKey } as any, cleanCommand + '\r\n', true);
+                        console.log('通过二进制协议发送命令:', cleanCommand);
                     } catch (error) {
                         console.warn('二进制协议发送失败，使用传统方式:', error);
-                        webSocketRef.current?.send(command + '\r\n');
+                        webSocketRef.current?.send(cleanCommand + '\r\n');
                     }
                 })();
             } else {
                 // 回退到传统方式
-                webSocketRef.current.send(command + '\r\n');
+                webSocketRef.current.send(cleanCommand + '\r\n');
             }
 
-            message.success(`已发送命令: ${command}`);
+            // 成功消息也要考虑密码模式
+            if (passwordMode) {
+                message.success(`已发送密码输入`);
+            } else {
+                message.success(`已发送命令: ${cleanCommand}`);
+            }
             scrollToBottom();
         } catch (e) {
             console.error('发送命令失败:', e);
             message.error('发送命令失败');
         }
-    }, [webSocketRef, currentPrompt, scrollToBottom, setLastSentCommand]);
+    }, [webSocketRef, currentPrompt, scrollToBottom, setLastSentCommand, passwordMode]);
 
     // 发送批量命令
     const sendBatchCommands = useCallback((commands: string[]) => {
@@ -616,10 +685,13 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         try {
             if (e.key === 'Enter') {
                 // 回车键 - 发送完整命令
-                if (localInput.trim()) {
+                const trimmedInput = localInput.trim();
+                if (trimmedInput) {
+                    console.log('键盘输入原始:', `"${localInput}"`, '清理后:', `"${trimmedInput}"`);
+
                     // 只在非密码模式下添加到命令历史
                     if (!passwordMode) {
-                        setCommandHistory(prev => [localInput, ...prev.slice(0, 19)]);
+                        setCommandHistory(prev => [trimmedInput, ...prev.slice(0, 19)]);
                     }
 
                     // 显示完整的命令行
@@ -628,36 +700,36 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
 
                     if (passwordMode) {
                         // 密码模式：显示星号
-                        const maskedInput = '*'.repeat(localInput.length);
+                        const maskedInput = '*'.repeat(trimmedInput.length);
                         displayCommand = `${cleanPrompt}${maskedInput}`;
                     } else {
                         // 普通模式：显示明文
-                        displayCommand = `${cleanPrompt}${localInput}`;
+                        displayCommand = `${cleanPrompt}${trimmedInput}`;
                     }
 
                     setOutput(prev => [...prev, displayCommand]);
 
                     // 记录发送的命令，用于防止重复显示
-                    setLastSentCommand(localInput);
+                    setLastSentCommand(trimmedInput);
 
                     // 使用二进制协议发送命令到服务器 - 无论是否为密码模式都发送原始输入
-                    console.log('发送命令:', passwordMode ? `密码输入(长度:${localInput.length})` : localInput);
+                    console.log('发送命令:', passwordMode ? `密码输入(长度:${trimmedInput.length})` : trimmedInput);
                     console.log('当前密码模式状态:', passwordMode);
 
                     if (tabKey) {
                         (async () => {
                             try {
                                 const { default: webSocketService } = await import('../../pages/Terminal/services/WebSocketService');
-                                await webSocketService.sendData({ key: tabKey } as any, localInput + '\r\n', true);
-                                console.log('通过二进制协议发送输入:', passwordMode ? `[密码已隐藏:${localInput.length}字符]` : localInput);
+                                await webSocketService.sendData({ key: tabKey } as any, trimmedInput + '\r\n', true);
+                                console.log('通过二进制协议发送输入:', passwordMode ? `[密码已隐藏:${trimmedInput.length}字符]` : trimmedInput);
                             } catch (error) {
                                 console.warn('二进制协议发送失败，使用传统方式:', error);
-                                webSocketRef.current?.send(localInput + '\r\n');
+                                webSocketRef.current?.send(trimmedInput + '\r\n');
                             }
                         })();
                     } else {
                         // 回退到传统方式
-                        webSocketRef.current.send(localInput + '\r\n');
+                        webSocketRef.current.send(trimmedInput + '\r\n');
                     }
                 }
 

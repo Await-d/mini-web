@@ -46,8 +46,10 @@ const BatchCommands: React.FC<BatchCommandsProps> = ({
 
   // 添加命令到当前批处理
   const addCommand = () => {
-    if (!currentCommand.trim()) return;
-    setCommands([...commands, currentCommand]);
+    const trimmedCommand = currentCommand.trim();
+    if (!trimmedCommand) return;
+    console.log('BatchCommands添加命令:', `"${currentCommand}"` + ' -> ' + `"${trimmedCommand}"`);
+    setCommands([...commands, trimmedCommand]);
     setCurrentCommand('');
   };
 

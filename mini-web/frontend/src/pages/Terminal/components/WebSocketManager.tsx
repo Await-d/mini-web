@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 10:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-25 20:06:32
+ * @LastEditTime: 2025-06-02 18:44:57
  * @Description: WebSocket管理器组件
  */
 
@@ -333,49 +333,11 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
                             });
                         },
                         onMessage: (event) => {
-                            // 处理消息
-                            try {
-                                let data = event.data;
+                            // 消息处理已移至TerminalConnectionWrapper，这里只做日志记录
+                            console.log(`📊 [WebSocketManager] ${tabKey} 收到消息，数据类型: ${typeof event.data}, 大小: ${event.data instanceof Blob ? event.data.size + ' bytes' : (typeof event.data === 'string' ? event.data.length + ' chars' : 'unknown')}`);
 
-                                // 如果数据是Blob类型，需要先转换为文本
-                                if (data instanceof Blob) {
-                                    // 使用FileReader API读取Blob数据
-                                    const reader = new FileReader();
-                                    reader.onload = function () {
-                                        const text = reader.result as string;
-                                        try {
-                                            // 尝试解析为JSON
-                                            const jsonData = JSON.parse(text);
-                                            console.log(`收到JSON数据: ${tabKey}`, jsonData);
-                                            // 在这里处理JSON数据
-                                        } catch (jsonError) {
-                                            // 如果不是JSON，作为普通文本处理
-                                            console.log(`收到文本数据: ${tabKey}`, text);
-                                            // 在这里处理文本数据
-                                        }
-                                    };
-                                    reader.onerror = function () {
-                                        console.error(`读取Blob数据出错: ${tabKey}`);
-                                    };
-                                    reader.readAsText(data);
-                                } else if (typeof data === 'string') {
-                                    // 如果直接是字符串，尝试解析为JSON
-                                    try {
-                                        const jsonData = JSON.parse(data);
-                                        console.log(`收到JSON数据: ${tabKey}`, jsonData);
-                                        // 在这里处理JSON数据
-                                    } catch (jsonError) {
-                                        // 如果不是JSON，作为普通文本处理
-                                        console.log(`收到文本数据: ${tabKey}`, data);
-                                        // 在这里处理文本数据
-                                    }
-                                } else {
-                                    // 其他类型数据
-                                    console.log(`收到未知类型数据: ${tabKey}`, typeof data);
-                                }
-                            } catch (error) {
-                                console.error(`处理WebSocket消息时出错: ${tabKey}`, error);
-                            }
+                            // 注意：实际的消息处理现在由TerminalConnectionWrapper的processMessage函数负责
+                            // 这里不再处理消息内容，避免与二进制协议处理冲突
                         }
                     };
 

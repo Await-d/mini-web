@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-09 18:05:28
  * @LastEditors: Await
- * @LastEditTime: 2025-06-02 09:44:09
+ * @LastEditTime: 2025-06-02 18:40:23
  * @Description: 终端连接包装器组件
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
@@ -152,9 +152,25 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
           }));
         },
 
-        onMessage: (event: MessageEvent) => {
-          // 处理消息队列
-          messageQueue.push(event.data);
+        onMessage: (event: MessageEvent & { protocolMessage?: any; isBinaryProtocol?: boolean; isLegacyJson?: boolean; isRawBinary?: boolean }) => {
+          console.log(`🎯 [${tabKey}] 接收到WebSocket消息:`, {
+            isBinaryProtocol: event.isBinaryProtocol,
+            isLegacyJson: event.isLegacyJson,
+            isRawBinary: event.isRawBinary,
+            dataType: typeof event.data,
+            protocolMessageType: event.protocolMessage?.header?.messageType
+          });
+
+          // 对于已经解析过的消息，添加标记信息
+          const messageData = {
+            data: event.data,
+            isBinaryProtocol: event.isBinaryProtocol,
+            isLegacyJson: event.isLegacyJson,
+            isRawBinary: event.isRawBinary,
+            protocolMessage: event.protocolMessage
+          };
+
+          messageQueue.push(messageData);
           processMessageQueue();
         },
 
@@ -200,36 +216,86 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
       }
 
       // 处理单条消息
-      const processMessage = async (data: any, tabKey: string) => {
+      const processMessage = async (messageData: any, tabKey: string) => {
         try {
-          // 如果数据是Blob类型，需要先转换为文本
-          if (data instanceof Blob) {
-            data = await data.text();
+          // 检查是否为新的消息格式（带有标记信息）
+          let data: any;
+          let isBinaryProtocol = false;
+          let isLegacyJson = false;
+          let isRawBinary = false;
+
+          if (messageData && typeof messageData === 'object' && messageData.data !== undefined) {
+            // 新格式：包含标记信息
+            data = messageData.data;
+            isBinaryProtocol = messageData.isBinaryProtocol;
+            isLegacyJson = messageData.isLegacyJson;
+            isRawBinary = messageData.isRawBinary;
+
+            console.log(`📨 [${tabKey}] 收到带标记的消息:`, {
+              type: typeof data,
+              isBinaryProtocol,
+              isLegacyJson,
+              isRawBinary,
+              dataPreview: typeof data === 'string' ? `"${data.substring(0, 50)}${data.length > 50 ? '...' : ''}"` : data
+            });
+          } else {
+            // 旧格式：直接数据
+            data = messageData;
+            console.log(`📨 [${tabKey}] 收到原始数据:`, {
+              type: typeof data,
+              isBlob: data instanceof Blob,
+              isArrayBuffer: data instanceof ArrayBuffer,
+              isString: typeof data === 'string',
+              isObject: typeof data === 'object',
+              data: data
+            });
           }
 
-          // 尝试解析JSON
+          // 如果数据是Blob类型，需要先转换为文本
+          if (data instanceof Blob) {
+            console.log(`🔄 [${tabKey}] 转换Blob为文本, 大小: ${data.size} bytes`);
+            data = await data.text();
+            console.log(`✅ [${tabKey}] Blob转换后的文本:`, data);
+          }
+
+          // 对于二进制协议解析后的终端数据，直接作为终端输出处理
+          if (isBinaryProtocol && typeof data === 'string') {
+            console.log(`🚀 [${tabKey}] 二进制协议终端输出, 长度: ${data.length}, 内容: "${data}"`);
+            // 直接作为终端输出，不尝试JSON解析
+            window.dispatchEvent(new CustomEvent('terminal-message', {
+              detail: {
+                tabKey,
+                data: data,
+                dataType: 'terminal-output'
+              }
+            }));
+            return;
+          }
+
+          // 处理其他类型的数据
           if (typeof data === 'string') {
+            console.log(`📝 [${tabKey}] 处理字符串数据, 长度: ${data.length}, 内容预览: "${data.substring(0, 100)}${data.length > 100 ? '...' : ''}"`);
+
+            // 字符串数据 - 可能是终端输出或JSON
             try {
-              // 预处理字符串，修复常见JSON格式错误
-              let processedData = data;
+              // 尝试解析为JSON
+              console.log(`🔍 [${tabKey}] 尝试解析为JSON...`);
+              const jsonData = JSON.parse(data);
+              console.log(`✅ [${tabKey}] 成功解析为JSON:`, jsonData);
 
-              // 修复1: 处理多余的花括号
-              if (processedData.endsWith('}}') && processedData.split('{').length === processedData.split('}').length) {
-                processedData = processedData.slice(0, -1);
+              // 处理特殊命令等JSON消息
+              if (jsonData.type === 'special_command') {
+                console.log(`🔥 [${tabKey}] 检测到特殊命令: ${jsonData.command || jsonData.message}`);
+                // 触发特殊命令事件
+                window.dispatchEvent(new CustomEvent('terminal-special-command', {
+                  detail: { tabKey, ...jsonData }
+                }));
+                console.log(`🚀 [${tabKey}] 特殊命令事件已触发`);
+                return; // 特殊命令消息不显示在终端
               }
 
-              // 修复2: 处理"datta"拼写错误
-              processedData = processedData.replace(/"datta":/g, '"data":');
-
-              const jsonData = JSON.parse(processedData);
-              // 在这里处理特定类型的消息
-              if (jsonData.type === 'terminal_data') {
-                // 处理终端数据
-              } else if (jsonData.type === 'status') {
-                // 处理状态更新
-              }
-
-              // 触发消息处理事件，让终端组件处理
+              // 其他JSON消息
+              console.log(`📤 [${tabKey}] 发送JSON消息事件:`, jsonData);
               window.dispatchEvent(new CustomEvent('terminal-message', {
                 detail: {
                   tabKey,
@@ -237,8 +303,11 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
                   dataType: 'json'
                 }
               }));
-            } catch (jsonError) {
-              // 触发消息处理事件，让终端组件处理
+            } catch (jsonError: any) {
+              console.log(`❌ [${tabKey}] JSON解析失败, 作为普通文本处理:`, jsonError?.message || jsonError);
+              console.log(`📤 [${tabKey}] 发送文本消息事件, 内容: "${data}"`);
+
+              // 不是JSON，作为普通文本处理（终端输出）
               window.dispatchEvent(new CustomEvent('terminal-message', {
                 detail: {
                   tabKey,
@@ -247,11 +316,35 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
                 }
               }));
             }
-          } else {
-            // 处理其他类型数据
-            console.log(`收到WebSocket消息(其他类型): ${tabKey}`, typeof data);
+          } else if (typeof data === 'object' && data !== null) {
+            console.log(`🔧 [${tabKey}] 处理对象数据:`, data);
 
-            // 触发消息处理事件，让终端组件处理
+            // 已解析的对象数据
+            if (data.type === 'special_command') {
+              console.log(`🔥 [${tabKey}] 检测到对象形式的特殊命令: ${data.command || data.message}`);
+              // 触发特殊命令事件
+              window.dispatchEvent(new CustomEvent('terminal-special-command', {
+                detail: { tabKey, ...data }
+              }));
+              console.log(`🚀 [${tabKey}] 特殊命令事件已触发`);
+              return; // 特殊命令消息不显示在终端
+            }
+
+            // 其他对象数据
+            console.log(`📤 [${tabKey}] 发送对象消息事件:`, data);
+            window.dispatchEvent(new CustomEvent('terminal-message', {
+              detail: {
+                tabKey,
+                data: data,
+                dataType: 'object'
+              }
+            }));
+          } else {
+            // 其他类型数据
+            console.log(`❓ [${tabKey}] 收到未知类型数据:`, {
+              type: typeof data,
+              data: data
+            });
             window.dispatchEvent(new CustomEvent('terminal-message', {
               detail: {
                 tabKey,
@@ -262,7 +355,8 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
             }));
           }
         } catch (error) {
-          console.error(`处理WebSocket消息时出错: ${tabKey}`, error);
+          console.error(`❌ [${tabKey}] 处理WebSocket消息时出错:`, error);
+          console.error(`❌ [${tabKey}] 出错时的原始数据:`, messageData);
         }
       };
 
