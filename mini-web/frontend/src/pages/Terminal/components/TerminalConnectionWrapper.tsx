@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-09 18:05:28
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 17:39:57
+ * @LastEditTime: 2025-06-02 09:44:09
  * @Description: 终端连接包装器组件
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
@@ -274,17 +274,23 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
     }
   }, [updateTab]);
 
-  // 向服务器发送数据
-  const sendDataToServer = (data: string): boolean => {
+  // 向服务器发送数据（使用二进制协议）
+  const sendDataToServer = async (data: string): Promise<boolean> => {
     const activeTab = tabs.find(tab => tab.key === activeTabKey);
-    if (!activeTab || !activeTab.webSocketRef || !activeTab.webSocketRef.current) {
-      console.error('无法发送数据: WebSocket未连接或标签不存在');
+    if (!activeTab) {
+      console.error('无法发送数据: 找不到活动标签');
       return false;
     }
 
     try {
-      activeTab.webSocketRef.current.send(data);
-      return true;
+      // 使用WebSocketService的sendData方法，自动启用二进制协议
+      const success = await webSocketService.sendData(activeTab, data, true);
+      if (success) {
+        console.log(`通过二进制协议发送数据: ${data.length} 字符`);
+      } else {
+        console.warn('二进制协议发送失败，可能回退到传统模式');
+      }
+      return success;
     } catch (error) {
       console.error('发送数据失败:', error);
       return false;

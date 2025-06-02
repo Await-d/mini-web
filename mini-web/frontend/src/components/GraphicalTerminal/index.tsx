@@ -519,7 +519,25 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
           }
         };
         console.log('发送图形终端初始化消息:', requestMessage);
-        webSocketRef.current.send(JSON.stringify(requestMessage));
+
+        // 尝试使用二进制协议发送，否则回退到传统方式
+        (async () => {
+          try {
+            // 检查是否有全局的tab信息
+            const tabDetail = window.localStorage.getItem('current-terminal-tab');
+            if (tabDetail) {
+              const tabInfo = JSON.parse(tabDetail);
+              const { default: webSocketService } = await import('../../pages/Terminal/services/WebSocketService');
+              await webSocketService.sendJsonData(tabInfo, requestMessage);
+              console.log('使用二进制协议发送初始化消息成功');
+            } else {
+              throw new Error('没有找到tab信息');
+            }
+          } catch (error) {
+            console.warn('二进制协议发送失败，使用传统方式:', error);
+            webSocketRef.current?.send(JSON.stringify(requestMessage));
+          }
+        })();
 
         // 延迟1秒后，如果还在加载状态，发送屏幕截图请求
         setTimeout(() => {

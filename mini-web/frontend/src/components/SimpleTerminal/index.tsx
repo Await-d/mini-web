@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 20:32:15
+ * @LastEditTime: 2025-06-02 08:30:50
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -233,20 +233,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
         try {
             // 尝试解析为JSON
             const data = JSON.parse(cleanedText);
-            if (data.type === 'ack') {
-                // 处理确认消息
-                const ackData = JSON.parse(data.data);
-                console.log('收到确认消息:', ackData);
-
-                if (ackData.status === 'success') {
-                    console.log(`命令执行成功确认: ${ackData.messageId}`);
-                } else if (ackData.status === 'error') {
-                    console.error(`命令执行失败: ${ackData.messageId}, 错误: ${ackData.error}`);
-                    // 可以选择显示错误信息
-                    setOutput(prev => [...prev, `<span class="error-line">❌ 命令执行失败: ${ackData.error}</span>`]);
-                }
-                return; // 确认消息不需要进一步处理
-            } else if (data.type === 'data' && data.data) {
+            if (data.type === 'data' && data.data) {
                 // 处理命令执行结果
                 const lines = data.data.split('\n').filter((line: string) => line.trim());
                 setOutput(prev => [...prev, ...lines]);
@@ -519,18 +506,22 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             // 记录发送的命令
             setLastSentCommand(command);
 
-            // 发送到服务器 - 使用新的JSON协议
-            const inputMessage = {
-                type: 'input',
-                data: {
-                    data: command + '\r\n',
-                    messageId: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-                },
-                timestamp: Date.now(),
-                messageId: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-            };
-
-            webSocketRef.current.send(JSON.stringify(inputMessage));
+            // 使用二进制协议发送到服务器
+            if (tabKey) {
+                (async () => {
+                    try {
+                        const { default: webSocketService } = await import('../../pages/Terminal/services/WebSocketService');
+                        await webSocketService.sendData({ key: tabKey } as any, command + '\r\n', true);
+                        console.log('通过二进制协议发送命令:', command);
+                    } catch (error) {
+                        console.warn('二进制协议发送失败，使用传统方式:', error);
+                        webSocketRef.current?.send(command + '\r\n');
+                    }
+                })();
+            } else {
+                // 回退到传统方式
+                webSocketRef.current.send(command + '\r\n');
+            }
 
             message.success(`已发送命令: ${command}`);
             scrollToBottom();
@@ -649,38 +640,24 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     // 记录发送的命令，用于防止重复显示
                     setLastSentCommand(localInput);
 
-                    // 发送命令到服务器 - 使用新的JSON协议
+                    // 使用二进制协议发送命令到服务器 - 无论是否为密码模式都发送原始输入
                     console.log('发送命令:', passwordMode ? `密码输入(长度:${localInput.length})` : localInput);
                     console.log('当前密码模式状态:', passwordMode);
 
-                    if (passwordMode) {
-                        // 密码模式：使用增强JSON协议
-                        const passwordMessage = {
-                            type: 'password_input',
-                            data: {
-                                password: localInput,
-                                messageId: `pwd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-                            },
-                            timestamp: Date.now(),
-                            messageId: `pwd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-                        };
-
-                        console.log('发送密码JSON消息:', passwordMessage);
-                        webSocketRef.current.send(JSON.stringify(passwordMessage));
+                    if (tabKey) {
+                        (async () => {
+                            try {
+                                const { default: webSocketService } = await import('../../pages/Terminal/services/WebSocketService');
+                                await webSocketService.sendData({ key: tabKey } as any, localInput + '\r\n', true);
+                                console.log('通过二进制协议发送输入:', passwordMode ? `[密码已隐藏:${localInput.length}字符]` : localInput);
+                            } catch (error) {
+                                console.warn('二进制协议发送失败，使用传统方式:', error);
+                                webSocketRef.current?.send(localInput + '\r\n');
+                            }
+                        })();
                     } else {
-                        // 普通模式：使用增强JSON协议
-                        const inputMessage = {
-                            type: 'input',
-                            data: {
-                                data: localInput + '\r\n',
-                                messageId: `inp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-                            },
-                            timestamp: Date.now(),
-                            messageId: `inp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-                        };
-
-                        console.log('发送普通输入JSON消息:', inputMessage);
-                        webSocketRef.current.send(JSON.stringify(inputMessage));
+                        // 回退到传统方式
+                        webSocketRef.current.send(localInput + '\r\n');
                     }
                 }
 
@@ -760,7 +737,21 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 setOutput(prev => [...prev, interruptedLine]);
 
                 // 发送中断信号
-                webSocketRef.current.send('\x03');
+                // 使用二进制协议发送Ctrl+C
+                if (tabKey) {
+                    (async () => {
+                        try {
+                            const { default: webSocketService } = await import('../../pages/Terminal/services/WebSocketService');
+                            await webSocketService.sendData({ key: tabKey } as any, '\x03', true);
+                            console.log('通过二进制协议发送 Ctrl+C');
+                        } catch (error) {
+                            console.warn('二进制协议发送失败，使用传统方式:', error);
+                            webSocketRef.current?.send('\x03');
+                        }
+                    })();
+                } else {
+                    webSocketRef.current.send('\x03');
+                }
 
                 // 清空当前输入
                 setLocalInput('');
@@ -774,7 +765,21 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     const eofLine = `${cleanPrompt}^D`;
                     setOutput(prev => [...prev, eofLine]);
                 }
-                webSocketRef.current.send('\x04');
+                // 使用二进制协议发送Ctrl+D
+                if (tabKey) {
+                    (async () => {
+                        try {
+                            const { default: webSocketService } = await import('../../pages/Terminal/services/WebSocketService');
+                            await webSocketService.sendData({ key: tabKey } as any, '\x04', true);
+                            console.log('通过二进制协议发送 Ctrl+D');
+                        } catch (error) {
+                            console.warn('二进制协议发送失败，使用传统方式:', error);
+                            webSocketRef.current?.send('\x04');
+                        }
+                    })();
+                } else {
+                    webSocketRef.current.send('\x04');
+                }
                 setLocalInput('');
                 setCursorPosition(0);
                 scrollToBottom();
@@ -785,7 +790,21 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 const suspendLine = `${cleanPrompt}${localInput}^Z`;
                 setOutput(prev => [...prev, suspendLine]);
 
-                webSocketRef.current.send('\x1A');
+                // 使用二进制协议发送Ctrl+Z
+                if (tabKey) {
+                    (async () => {
+                        try {
+                            const { default: webSocketService } = await import('../../pages/Terminal/services/WebSocketService');
+                            await webSocketService.sendData({ key: tabKey } as any, '\x1A', true);
+                            console.log('通过二进制协议发送 Ctrl+Z');
+                        } catch (error) {
+                            console.warn('二进制协议发送失败，使用传统方式:', error);
+                            webSocketRef.current?.send('\x1A');
+                        }
+                    })();
+                } else {
+                    webSocketRef.current.send('\x1A');
+                }
                 setLocalInput('');
                 setCursorPosition(0);
                 scrollToBottom();

@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-11 10:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-11 10:45:00
+ * @LastEditTime: 2025-06-02 18:05:19
  * @Description: 重新设计的终端容器组件
  */
 import React, { useEffect, useRef, useState } from 'react';

@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -32,93 +31,19 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// 新增：增强的消息类型定义
-type EnhancedMessage struct {
-	Type       string          `json:"type"`
-	Data       json.RawMessage `json:"data"`
-	Timestamp  int64           `json:"timestamp"`
-	MessageId  string          `json:"messageId,omitempty"`
-	Compressed bool            `json:"compressed,omitempty"`
-	Encoding   string          `json:"encoding,omitempty"`
-}
-
-// 密码输入消息
-type PasswordInputMessage struct {
-	Password  string `json:"password"`
-	MessageId string `json:"messageId,omitempty"`
-}
-
-// 普通输入消息
-type InputMessage struct {
-	Data      string `json:"data"`
-	MessageId string `json:"messageId,omitempty"`
-}
-
-// 控制键消息
-type ControlMessage struct {
-	Key       string `json:"key"`
-	MessageId string `json:"messageId,omitempty"`
-}
-
-// 确认消息
-type AckMessage struct {
-	MessageId string `json:"messageId"`
-	Status    string `json:"status"` // "success" 或 "error"
-	Error     string `json:"error,omitempty"`
-}
-
-// 压缩数据
-func compressData(data []byte) ([]byte, error) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(data); err != nil {
-		return nil, err
-	}
-	if err := gz.Close(); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// 解压数据
-func decompressData(data []byte) ([]byte, error) {
-	reader, err := gzip.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
-	return io.ReadAll(reader)
-}
-
 // ConnectionHandler 连接处理器
 type ConnectionHandler struct {
-	connService *service.ConnectionService
+	connService     *service.ConnectionService
+	binaryProtocol  *service.BinaryProtocolHandler
+	specialDetector *service.SpecialCommandDetector
 }
 
 // NewConnectionHandler 创建连接处理器实例
 func NewConnectionHandler(connService *service.ConnectionService) *ConnectionHandler {
-	return &ConnectionHandler{connService: connService}
-}
-
-// 发送确认消息
-func (h *ConnectionHandler) sendAck(wsConn *websocket.Conn, messageId, status, errorMsg string) {
-	ack := AckMessage{
-		MessageId: messageId,
-		Status:    status,
-		Error:     errorMsg,
-	}
-
-	response := EnhancedMessage{
-		Type:      "ack",
-		Timestamp: time.Now().UnixMilli(),
-	}
-
-	if data, err := json.Marshal(ack); err == nil {
-		response.Data = data
-		if responseBytes, err := json.Marshal(response); err == nil {
-			wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			wsConn.WriteMessage(websocket.TextMessage, responseBytes)
-		}
+	return &ConnectionHandler{
+		connService:     connService,
+		binaryProtocol:  service.NewBinaryProtocolHandler(),
+		specialDetector: service.NewSpecialCommandDetector(),
 	}
 }
 
@@ -771,6 +696,87 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 
 			log.Printf("收到WebSocket消息: 类型=%d, 大小=%d字节", messageType, len(p))
 
+			// 检查是否为二进制协议消息
+			if messageType == websocket.BinaryMessage && h.binaryProtocol.IsProtocolMessage(p) {
+				// 处理二进制协议消息
+				protocolMsg, err := h.binaryProtocol.DecodeMessage(p)
+				if err != nil {
+					log.Printf("解析二进制协议消息失败: %v", err)
+					continue
+				}
+
+				log.Printf("解析二进制协议消息成功: 类型=%d", protocolMsg.Header.MessageType)
+
+				// 处理协议协商
+				if protocolMsg.Header.MessageType == service.MessageTypeProtocolNegotiation {
+					if negotiationData, ok := protocolMsg.JSONData.(map[string]interface{}); ok {
+						// 转换为协议协商结构
+						var clientNegotiation service.ProtocolNegotiation
+						if negotiationBytes, err := json.Marshal(negotiationData); err == nil {
+							if err := json.Unmarshal(negotiationBytes, &clientNegotiation); err == nil {
+								log.Printf("收到客户端协议协商: %+v", clientNegotiation)
+
+								// 处理协议协商并发送响应
+								serverNegotiation, err := h.binaryProtocol.HandleProtocolNegotiation(&clientNegotiation)
+								if err == nil {
+									responseData, err := h.binaryProtocol.EncodeMessage(serverNegotiation, nil, service.CompressionNone)
+									if err == nil {
+										// 设置消息类型为协议协商
+										responseData[4] = service.MessageTypeProtocolNegotiation
+										wsConn.WriteMessage(websocket.BinaryMessage, responseData)
+										log.Printf("发送协议协商响应成功")
+									}
+								}
+							}
+						}
+					}
+					continue
+				}
+
+				// 处理心跳消息
+				if protocolMsg.Header.MessageType == service.MessageTypeHeartbeat {
+					log.Printf("收到心跳消息")
+					// 可以回复心跳响应
+					if heartbeatData, err := h.binaryProtocol.CreateHeartbeatMessage(); err == nil {
+						wsConn.WriteMessage(websocket.BinaryMessage, heartbeatData)
+					}
+					continue
+				}
+
+				// 处理其他协议消息
+				if protocolMsg.JSONData != nil {
+					// 检查是否是命令数据
+					if jsonMap, ok := protocolMsg.JSONData.(map[string]interface{}); ok {
+						// 检查是否是command类型消息
+						if msgType, hasType := jsonMap["type"]; hasType && msgType == "command" {
+							if content, hasContent := jsonMap["content"]; hasContent {
+								if contentStr, isString := content.(string); isString {
+									log.Printf("处理二进制协议命令: %s", contentStr)
+									// 直接将命令内容传递给终端
+									if _, err := terminal.Write([]byte(contentStr)); err != nil {
+										log.Printf("向终端写入命令失败: %v", err)
+									}
+									continue
+								}
+							}
+						}
+					}
+
+					// 如果有JSON数据但不是command类型，按JSON处理
+					if jsonBytes, err := json.Marshal(protocolMsg.JSONData); err == nil {
+						p = jsonBytes
+						messageType = websocket.TextMessage
+					}
+				} else if protocolMsg.BinaryData != nil {
+					// 如果有二进制数据，直接传递给终端
+					log.Printf("处理二进制数据: %d字节", len(protocolMsg.BinaryData))
+					if _, err := terminal.Write(protocolMsg.BinaryData); err != nil {
+						log.Printf("向终端写入二进制数据失败: %v", err)
+					}
+					continue
+				}
+			}
+
 			if messageType == websocket.TextMessage {
 				// 文本消息处理
 				if len(p) < 1000 {
@@ -781,145 +787,14 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 
 				// 检查是否是JSON格式
 				if strings.HasPrefix(string(p), "{") && strings.HasSuffix(string(p), "}") {
-					// 尝试解析增强的JSON命令
-					var enhancedCmd EnhancedMessage
-					var legacyCmd struct {
+					// 尝试解析JSON命令
+					var cmd struct {
 						Type string          `json:"type"`
 						Data json.RawMessage `json:"data"`
 					}
 
-					// 首先尝试解析增强格式
-					if err := json.Unmarshal(p, &enhancedCmd); err == nil && enhancedCmd.Type != "" {
-						log.Printf("解析增强JSON命令成功: %s (MessageId: %s)", enhancedCmd.Type, enhancedCmd.MessageId)
-
-						// 处理压缩数据
-						var actualData []byte = enhancedCmd.Data
-						if enhancedCmd.Compressed {
-							if enhancedCmd.Encoding == "base64" {
-								// 先解码base64
-								if decoded, err := base64.StdEncoding.DecodeString(string(enhancedCmd.Data)); err == nil {
-									// 再解压
-									if decompressed, err := decompressData(decoded); err == nil {
-										actualData = decompressed
-										log.Printf("成功解压数据: %d -> %d 字节", len(decoded), len(decompressed))
-									} else {
-										log.Printf("解压数据失败: %v", err)
-										h.sendAck(wsConn, enhancedCmd.MessageId, "error", "数据解压失败")
-										continue
-									}
-								} else {
-									log.Printf("base64解码失败: %v", err)
-									h.sendAck(wsConn, enhancedCmd.MessageId, "error", "数据解码失败")
-									continue
-								}
-							}
-						}
-
-						// 处理不同类型的增强命令
-						switch enhancedCmd.Type {
-						case "password_input":
-							var passwordMsg PasswordInputMessage
-							if err := json.Unmarshal(actualData, &passwordMsg); err == nil {
-								log.Printf("收到密码输入命令 (MessageId: %s)", passwordMsg.MessageId)
-
-								// 密码输入特殊处理：添加小延迟确保SSH准备好
-								go func() {
-									time.Sleep(100 * time.Millisecond) // 100ms延迟
-
-									// 写入密码到终端
-									passwordBytes := []byte(passwordMsg.Password + "\n")
-									n, err := terminal.Write(passwordBytes)
-
-									if err != nil {
-										log.Printf("写入密码到终端失败: %v", err)
-										h.sendAck(wsConn, passwordMsg.MessageId, "error", fmt.Sprintf("写入失败: %v", err))
-									} else {
-										log.Printf("密码写入终端成功: %d/%d 字节", n, len(passwordBytes))
-
-										// 强制flush数据到终端
-										if flusher, ok := terminal.(interface{ Flush() error }); ok {
-											if err := flusher.Flush(); err != nil {
-												log.Printf("Flush终端失败: %v", err)
-											} else {
-												log.Printf("终端数据已flush")
-											}
-										}
-
-										h.sendAck(wsConn, passwordMsg.MessageId, "success", "")
-									}
-								}()
-							} else {
-								log.Printf("解析密码输入数据失败: %v", err)
-								h.sendAck(wsConn, enhancedCmd.MessageId, "error", "密码数据格式错误")
-							}
-
-						case "input":
-							var inputMsg InputMessage
-							if err := json.Unmarshal(actualData, &inputMsg); err == nil {
-								log.Printf("收到普通输入命令: %s (MessageId: %s)", inputMsg.Data, inputMsg.MessageId)
-
-								inputBytes := []byte(inputMsg.Data)
-								n, err := terminal.Write(inputBytes)
-
-								if err != nil {
-									log.Printf("写入输入到终端失败: %v", err)
-									h.sendAck(wsConn, inputMsg.MessageId, "error", fmt.Sprintf("写入失败: %v", err))
-								} else {
-									log.Printf("输入写入终端成功: %d/%d 字节", n, len(inputBytes))
-									h.sendAck(wsConn, inputMsg.MessageId, "success", "")
-								}
-							} else {
-								log.Printf("解析输入数据失败: %v", err)
-								h.sendAck(wsConn, enhancedCmd.MessageId, "error", "输入数据格式错误")
-							}
-
-						case "control":
-							var ctrlMsg ControlMessage
-							if err := json.Unmarshal(actualData, &ctrlMsg); err == nil {
-								log.Printf("收到控制键命令: %s (MessageId: %s)", ctrlMsg.Key, ctrlMsg.MessageId)
-
-								// 处理控制键
-								var ctrlBytes []byte
-								switch ctrlMsg.Key {
-								case "c":
-									ctrlBytes = []byte{3} // Ctrl+C
-								case "d":
-									ctrlBytes = []byte{4} // Ctrl+D
-								case "z":
-									ctrlBytes = []byte{26} // Ctrl+Z
-								default:
-									log.Printf("不支持的控制键: %s", ctrlMsg.Key)
-									h.sendAck(wsConn, ctrlMsg.MessageId, "error", "不支持的控制键")
-									continue
-								}
-
-								n, err := terminal.Write(ctrlBytes)
-								if err != nil {
-									log.Printf("写入控制键到终端失败: %v", err)
-									h.sendAck(wsConn, ctrlMsg.MessageId, "error", fmt.Sprintf("写入失败: %v", err))
-								} else {
-									log.Printf("控制键写入终端成功: %d/%d 字节", n, len(ctrlBytes))
-									h.sendAck(wsConn, ctrlMsg.MessageId, "success", "")
-								}
-							} else {
-								log.Printf("解析控制键数据失败: %v", err)
-								h.sendAck(wsConn, enhancedCmd.MessageId, "error", "控制键数据格式错误")
-							}
-
-						default:
-							// 处理其他已有的命令类型（file_list, resize等）
-							cmd := legacyCmd
-							cmd.Type = enhancedCmd.Type
-							cmd.Data = actualData
-							// 继续使用原有的处理逻辑，跳转到传统命令处理
-							goto handleLegacyCommand
-						}
-						// 如果增强格式解析失败，尝试解析传统格式
-					} else if err := json.Unmarshal(p, &legacyCmd); err == nil {
-						log.Printf("解析传统JSON命令成功: %s", legacyCmd.Type)
-						cmd := legacyCmd
-
-					handleLegacyCommand:
+					if err := json.Unmarshal(p, &cmd); err == nil {
+						log.Printf("解析JSON命令成功: %s", cmd.Type)
 
 						// 处理特殊命令
 						switch cmd.Type {
@@ -1428,6 +1303,9 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			default:
 			}
 
+			// 声明特殊命令变量，初始化为nil
+			var specialCommand *service.SpecialCommandInfo
+
 			if n > 0 {
 				log.Printf("从终端读取了 %d 字节数据", n)
 
@@ -1459,6 +1337,17 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 						// 对于小型非图形数据，记录全部内容
 						log.Printf("终端输出文本内容: %s", string(buf[:n]))
 					}
+
+					// 检测特殊命令（仅对文本输出）
+					// 只对非图形协议的文本输出进行特殊命令检测
+					if prefix != "RDP_" && prefix != "VNC_" {
+						outputText := string(buf[:n])
+						specialCommand = h.specialDetector.DetectSpecialCommand(outputText)
+						if specialCommand.Type != service.SpecialCommandNormal {
+							log.Printf("检测到特殊命令: 类型=%s, 提示=%s, 掩码=%v",
+								specialCommand.Type, specialCommand.Prompt, specialCommand.Masked)
+						}
+					}
 				}
 			}
 
@@ -1474,15 +1363,70 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 				}
 			}
 
+			// 尝试使用二进制协议发送数据
+			var finalData []byte
+			var finalMsgType int
+			var protocolUsed bool
+
+			// 准备发送的数据 - 先尝试使用二进制协议包装
+			metadata := map[string]interface{}{
+				"type": "terminal-output",
+				"size": n,
+			}
+
+			// 检查是否为图形协议
+			if n > 4 {
+				prefix := string(buf[:min(4, n)])
+				if prefix == "RDP_" || prefix == "VNC_" {
+					metadata["protocol"] = strings.ToLower(prefix[:3])
+					metadata["graphic"] = true
+				}
+			}
+
+			// 如果检测到特殊命令，添加特殊信息
+			if specialCommand != nil && specialCommand.Type != service.SpecialCommandNormal {
+				metadata["special"] = map[string]interface{}{
+					"type":        string(specialCommand.Type),
+					"prompt":      specialCommand.Prompt,
+					"masked":      specialCommand.Masked,
+					"expectInput": specialCommand.ExpectInput,
+					"timeout":     specialCommand.Timeout,
+					"description": specialCommand.Description,
+				}
+			}
+
+			// 尝试使用二进制协议编码
+			if encodedData, err := h.binaryProtocol.EncodeMessage(metadata, buf[:n], service.CompressionNone); err == nil {
+				finalData = encodedData
+				finalMsgType = websocket.BinaryMessage
+				protocolUsed = true
+				log.Printf("使用二进制协议发送数据: 原始大小=%d, 编码后大小=%d", n, len(encodedData))
+				if specialCommand != nil && specialCommand.Type != service.SpecialCommandNormal {
+					log.Printf("包含特殊命令信息: %s", specialCommand.Type)
+				}
+			} else {
+				log.Printf("二进制协议编码失败，回退到原始方式: %v", err)
+			}
+
+			// 如果二进制协议失败或不适用，使用原始方式
+			if !protocolUsed {
+				finalData = buf[:n]
+				finalMsgType = msgType
+			}
+
 			// 设置写入超时
 			wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := wsConn.WriteMessage(msgType, buf[:n]); err != nil {
+			if err := wsConn.WriteMessage(finalMsgType, finalData); err != nil {
 				log.Printf("写入WebSocket错误: %v", err)
 				errChan <- err
 				return
 			}
 
-			log.Printf("成功发送 %d 字节数据到WebSocket客户端", n)
+			if protocolUsed {
+				log.Printf("成功发送 %d 字节二进制协议数据到WebSocket客户端（原始数据 %d 字节）", len(finalData), n)
+			} else {
+				log.Printf("成功发送 %d 字节数据到WebSocket客户端", n)
+			}
 		}
 	}()
 

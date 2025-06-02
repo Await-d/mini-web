@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 09:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-25 09:45:00
+ * @LastEditTime: 2025-06-02 08:28:33
  * @Description: WebSocket管理器Hook
  */
 
@@ -26,7 +26,7 @@ export interface UseWebSocketManagerReturn {
     // 刷新WebSocket连接
     refresh: (tab: TerminalTab) => WebSocket | null;
     // 发送数据
-    sendData: (tab: TerminalTab, data: string | ArrayBuffer | Blob) => boolean;
+    sendData: (tab: TerminalTab, data: string | ArrayBuffer | Blob) => Promise<boolean>;
     // 重置统计信息
     resetStats: () => void;
     // 获取活动连接
@@ -75,18 +75,13 @@ export const useWebSocketManager = (): UseWebSocketManagerReturn => {
         return result;
     }, [updateStats]);
 
-    // 发送数据
-    const sendData = useCallback((tab: TerminalTab, data: string | ArrayBuffer | Blob): boolean => {
+    // 发送数据（使用二进制协议）
+    const sendData = useCallback(async (tab: TerminalTab, data: string | ArrayBuffer | Blob): Promise<boolean> => {
         if (!tab || !tab.key) return false;
 
-        const activeConnections = webSocketService.getActiveConnections();
-        const connection = activeConnections.find(conn => conn.tabKey === tab.key);
-
-        if (!connection) return false;
-
         try {
-            connection.ws.send(data);
-            return true;
+            // 优先使用WebSocketService的二进制协议发送
+            return await webSocketService.sendData(tab, data, true); // 启用二进制协议
         } catch (error) {
             console.error(`发送数据到WebSocket失败: ${tab.key}`, error);
             return false;

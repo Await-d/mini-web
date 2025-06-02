@@ -2,12 +2,17 @@
  * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-25 20:10:51
+ * @LastEditTime: 2025-06-02 08:29:37
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
 import type { TerminalTab } from '../../../contexts/TerminalContext';
 import { API_BASE_URL } from '../../../services/api';
+import binaryJsonProtocol, {
+    BinaryJsonProtocol,
+    PROTOCOL_CONSTANTS
+} from './BinaryJsonProtocol';
+import type { ProtocolMessage } from './BinaryJsonProtocol';
 
 // WebSocket连接统计接口
 export interface WebSocketStats {
@@ -28,17 +33,20 @@ export interface WebSocketEventHandlers {
     onMessage?: (event: MessageEvent) => void;
     onClose?: () => void;
     onError?: (event: Event) => void;
+    onSpecialCommand?: (specialData: any) => void;
 }
 
 /**
  * WebSocket服务类
- * 管理所有终端的WebSocket连接
+ * 管理所有终端的WebSocket连接，支持二进制+JSON协议
  */
 export class WebSocketService {
     // 存储所有连接的Map
     private connections: Map<string, WebSocket> = new Map();
     // 存储连接处理函数的Map
     private handlers: Map<string, WebSocketEventHandlers> = new Map();
+    // 协议支持状态
+    private protocolSupport: Map<string, boolean> = new Map();
     // 连接统计数据
     private stats: WebSocketStats = {
         totalConnections: 0,
@@ -123,6 +131,9 @@ export class WebSocketService {
                 this.handlers.set(tab.key, handlers);
             }
 
+            // 默认启用二进制协议支持
+            this.protocolSupport.set(tab.key, true);
+
             // 更新统计信息
             this.stats.totalConnections++;
             this.stats.activeConnections++;
@@ -160,12 +171,17 @@ export class WebSocketService {
         const tabHandlers = this.handlers.get(tab.key);
 
         // 打开事件处理
-        ws.onopen = (event) => {
+        ws.onopen = async (event) => {
             console.log(`WebSocket连接已打开: ${tab.key}`);
+
+            // 发起协议协商
+            setTimeout(async () => {
+                await this.initiateProtocolNegotiation(tab);
+            }, 100); // 延迟100ms以确保连接稳定
 
             // 只有图形协议(RDP、VNC)才需要发送初始化消息
             if (tab.protocol === 'rdp' || tab.protocol === 'vnc') {
-                this.sendInitMessage(ws, tab);
+                await this.sendInitMessage(ws, tab);
             }
 
             // 调用自定义处理函数
@@ -180,13 +196,64 @@ export class WebSocketService {
         };
 
         // 消息事件处理
-        ws.onmessage = (event) => {
+        ws.onmessage = async (event) => {
             // 更新统计信息
-            this.stats.totalDataReceived += event.data.length || 0;
+            const dataSize = event.data.length || event.data.byteLength || event.data.size || 0;
+            this.stats.totalDataReceived += dataSize;
+
+            // 检查是否为二进制协议消息
+            let processedEvent = event;
+
+            if (event.data instanceof ArrayBuffer) {
+                // 尝试解析二进制协议消息
+                if (binaryJsonProtocol.isProtocolMessage(event.data)) {
+                    try {
+                        const protocolMessage = await binaryJsonProtocol.decodeMessage(event.data);
+
+                        // 处理心跳消息
+                        if (protocolMessage.header.messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.HEARTBEAT) {
+                            console.debug(`收到心跳消息: ${tab.key}`);
+                            return; // 心跳消息不传递给处理函数
+                        }
+
+                        // 处理协议协商
+                        if (protocolMessage.header.messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.PROTOCOL_NEGOTIATION) {
+                            this.handleProtocolNegotiation(tab.key, protocolMessage.jsonData);
+                            return;
+                        }
+
+                        // 创建增强的事件对象
+                        processedEvent = {
+                            ...event,
+                            data: protocolMessage.jsonData || protocolMessage.binaryData,
+                            protocolMessage: protocolMessage,
+                            isBinaryProtocol: true
+                        } as MessageEvent & { protocolMessage: ProtocolMessage; isBinaryProtocol: boolean };
+
+                    } catch (error) {
+                        console.warn(`解析二进制协议消息失败: ${tab.key}`, error);
+                        // 如果解析失败，按原始数据处理
+                    }
+                }
+            } else if (typeof event.data === 'string') {
+                // 检查是否为旧格式JSON消息
+                if (binaryJsonProtocol.isLegacyJsonMessage(event.data)) {
+                    try {
+                        const jsonData = JSON.parse(event.data);
+                        processedEvent = {
+                            ...event,
+                            data: jsonData,
+                            isLegacyJson: true
+                        } as MessageEvent & { isLegacyJson: boolean };
+                    } catch (error) {
+                        console.warn(`解析JSON消息失败: ${tab.key}`, error);
+                    }
+                }
+            }
 
             // 调用自定义处理函数
             if (tabHandlers?.onMessage) {
-                tabHandlers.onMessage(event);
+                tabHandlers.onMessage(processedEvent);
             }
         };
 
@@ -240,7 +307,7 @@ export class WebSocketService {
      * @param ws WebSocket实例
      * @param tab 终端标签
      */
-    private sendInitMessage(ws: WebSocket, tab: TerminalTab): void {
+    private async sendInitMessage(ws: WebSocket, tab: TerminalTab): Promise<void> {
         try {
             const initData = {
                 type: 'init',
@@ -248,10 +315,15 @@ export class WebSocketService {
                 sessionId: tab.sessionId,
                 protocol: tab.protocol || 'ssh'
             };
-            ws.send(JSON.stringify(initData));
+
+            // 使用二进制协议发送初始化消息
+            const encodedData = await binaryJsonProtocol.encodeMessage(initData);
+            ws.send(encodedData);
 
             // 更新统计信息
-            this.stats.totalDataSent += JSON.stringify(initData).length;
+            this.stats.totalDataSent += encodedData.byteLength;
+
+            console.log(`通过二进制协议发送初始化数据: ${tab.key}`);
         } catch (error) {
             console.error('发送初始化数据失败:', error);
         }
@@ -267,12 +339,14 @@ export class WebSocketService {
         this.clearHeartbeat(tabKey);
 
         // 创建新的心跳定时器
-        const timerId = window.setInterval(() => {
+        const timerId = window.setInterval(async () => {
             if (ws.readyState === WebSocket.OPEN) {
                 try {
-                    // 发送心跳消息
-                    ws.send(JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }));
-                    this.stats.totalDataSent += 50; // 估计心跳包大小
+                    // 使用二进制协议发送心跳消息
+                    const heartbeatData = await binaryJsonProtocol.createHeartbeatMessage();
+                    ws.send(heartbeatData);
+                    this.stats.totalDataSent += heartbeatData.byteLength;
+                    console.debug(`通过二进制协议发送心跳: ${tabKey}`);
                 } catch (error) {
                     console.warn(`发送心跳包失败: ${tabKey}`, error);
                     this.clearHeartbeat(tabKey);
@@ -403,12 +477,13 @@ export class WebSocketService {
     }
 
     /**
-     * 发送数据到WebSocket连接
+     * 发送数据到WebSocket连接（支持二进制协议）
      * @param tab 终端标签
      * @param data 要发送的数据
+     * @param useBinaryProtocol 是否使用二进制协议
      * @returns 是否发送成功
      */
-    sendData(tab: TerminalTab, data: string | ArrayBuffer | Blob): boolean {
+    async sendData(tab: TerminalTab, data: string | ArrayBuffer | Blob, useBinaryProtocol: boolean = true): Promise<boolean> {
         if (!tab || !tab.key) {
             console.error('无法发送数据: 标签缺少必要信息');
             return false;
@@ -421,22 +496,180 @@ export class WebSocketService {
         }
 
         try {
-            ws.send(data);
-
-            // 更新统计信息
+            let finalData: string | ArrayBuffer | Blob;
             let dataSize = 0;
-            if (typeof data === 'string') {
-                dataSize = data.length;
-            } else if (data instanceof ArrayBuffer) {
-                dataSize = data.byteLength;
-            } else if (data instanceof Blob) {
-                dataSize = data.size;
+
+            // 检查是否使用二进制协议且服务端支持
+            // 默认强制启用二进制协议，除非明确设置为false
+            const supportsBinaryProtocol = this.protocolSupport.get(tab.key) !== false;
+
+            // 强制启用二进制协议进行测试
+            console.log(`发送数据 - 二进制协议: ${useBinaryProtocol}, 支持: ${supportsBinaryProtocol}, 标签: ${tab.key}`);
+
+            if (useBinaryProtocol && supportsBinaryProtocol) {
+                console.log(`使用二进制协议发送数据: ${tab.key}, 类型: ${typeof data}`);
+                // 使用新的二进制协议
+                if (typeof data === 'string') {
+                    // 字符串数据作为JSON发送
+                    try {
+                        const jsonData = JSON.parse(data);
+                        finalData = await binaryJsonProtocol.encodeMessage(jsonData);
+                    } catch {
+                        // 如果不是JSON，当作命令字符串处理
+                        const commandData = { type: 'command', content: data };
+                        finalData = await binaryJsonProtocol.encodeMessage(commandData);
+                    }
+                } else if (data instanceof ArrayBuffer) {
+                    // 二进制数据
+                    finalData = await binaryJsonProtocol.encodeMessage(undefined, data);
+                } else if (data instanceof Blob) {
+                    // Blob转ArrayBuffer
+                    const arrayBuffer = await data.arrayBuffer();
+                    finalData = await binaryJsonProtocol.encodeMessage(undefined, arrayBuffer);
+                } else {
+                    finalData = data;
+                }
+
+                dataSize = finalData instanceof ArrayBuffer ? finalData.byteLength :
+                    (finalData as Blob).size || (finalData as string).length;
+            } else {
+                // 使用传统方式发送
+                console.log(`使用传统方式发送数据: ${tab.key}, 类型: ${typeof data}`);
+                finalData = data;
+                if (typeof data === 'string') {
+                    dataSize = data.length;
+                } else if (data instanceof ArrayBuffer) {
+                    dataSize = data.byteLength;
+                } else if (data instanceof Blob) {
+                    dataSize = data.size;
+                }
             }
 
+            ws.send(finalData);
+
+            // 更新统计信息
             this.stats.totalDataSent += dataSize;
             return true;
         } catch (error) {
             console.error(`发送数据失败: ${tab.key}`, error);
+            return false;
+        }
+    }
+
+    /**
+     * 发送JSON数据（使用二进制协议）
+     * @param tab 终端标签
+     * @param jsonData JSON数据对象
+     * @returns 是否发送成功
+     */
+    async sendJsonData(tab: TerminalTab, jsonData: any): Promise<boolean> {
+        if (!tab || !tab.key) {
+            console.error('无法发送JSON数据: 标签缺少必要信息');
+            return false;
+        }
+
+        const ws = this.connections.get(tab.key);
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            console.warn(`无法发送JSON数据: WebSocket连接不可用 (${tab.key})`);
+            return false;
+        }
+
+        try {
+            const binaryData = await binaryJsonProtocol.encodeMessage(jsonData);
+            ws.send(binaryData);
+
+            this.stats.totalDataSent += binaryData.byteLength;
+            return true;
+        } catch (error) {
+            console.error(`发送JSON数据失败: ${tab.key}`, error);
+            return false;
+        }
+    }
+
+    /**
+     * 发送二进制数据（使用二进制协议）
+     * @param tab 终端标签
+     * @param binaryData 二进制数据
+     * @param metadata 可选的元数据
+     * @returns 是否发送成功
+     */
+    async sendBinaryData(tab: TerminalTab, binaryData: ArrayBuffer, metadata?: any): Promise<boolean> {
+        if (!tab || !tab.key) {
+            console.error('无法发送二进制数据: 标签缺少必要信息');
+            return false;
+        }
+
+        const ws = this.connections.get(tab.key);
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            console.warn(`无法发送二进制数据: WebSocket连接不可用 (${tab.key})`);
+            return false;
+        }
+
+        try {
+            const encodedData = await binaryJsonProtocol.encodeMessage(metadata, binaryData);
+            ws.send(encodedData);
+
+            this.stats.totalDataSent += encodedData.byteLength;
+            return true;
+        } catch (error) {
+            console.error(`发送二进制数据失败: ${tab.key}`, error);
+            return false;
+        }
+    }
+
+    /**
+     * 处理协议协商
+     * @param tabKey 标签键
+     * @param negotiationData 协商数据
+     */
+    private handleProtocolNegotiation(tabKey: string, negotiationData: any): void {
+        console.log(`处理协议协商: ${tabKey}`, negotiationData);
+
+        if (negotiationData && typeof negotiationData === 'object') {
+            // 记录服务端支持的协议
+            this.protocolSupport.set(tabKey, true);
+            console.log(`服务端支持二进制协议: ${tabKey}`, {
+                version: negotiationData.version,
+                features: negotiationData.features,
+                compressions: negotiationData.supportedCompressions
+            });
+        } else {
+            // 服务端不支持或协商失败
+            this.protocolSupport.set(tabKey, false);
+            console.warn(`服务端不支持二进制协议: ${tabKey}`);
+        }
+    }
+
+    /**
+     * 发起协议协商
+     * @param tab 终端标签
+     * @returns 是否成功发起协商
+     */
+    async initiateProtocolNegotiation(tab: TerminalTab): Promise<boolean> {
+        if (!tab || !tab.key) {
+            console.error('无法发起协议协商: 标签缺少必要信息');
+            return false;
+        }
+
+        const ws = this.connections.get(tab.key);
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            console.warn(`无法发起协议协商: WebSocket连接不可用 (${tab.key})`);
+            return false;
+        }
+
+        try {
+            const negotiationMessage = binaryJsonProtocol.createNegotiationMessage();
+            const encodedMessage = await binaryJsonProtocol.encodeMessage(negotiationMessage);
+
+            // 设置消息类型为协议协商
+            const view = new DataView(encodedMessage);
+            view.setUint8(4, PROTOCOL_CONSTANTS.MESSAGE_TYPES.PROTOCOL_NEGOTIATION);
+
+            ws.send(encodedMessage);
+            console.log(`发起协议协商: ${tab.key}`);
+            return true;
+        } catch (error) {
+            console.error(`发起协议协商失败: ${tab.key}`, error);
             return false;
         }
     }

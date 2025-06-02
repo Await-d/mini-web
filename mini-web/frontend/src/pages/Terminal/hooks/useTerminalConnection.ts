@@ -83,12 +83,27 @@ export const useTerminalConnection = (): UseTerminalConnectionReturn => {
         setFullscreen(prev => !prev);
     }, []);
 
-    // 发送数据到服务器
-    const sendDataToServer = useCallback((data: string) => {
-        if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-            websocketRef.current.send(data);
+    // 发送数据到服务器（使用二进制协议）
+    const sendDataToServer = useCallback(async (data: string) => {
+        const activeTab = tabs.find(t => t.key === activeTabKey);
+        if (!activeTab) {
+            console.error('发送数据失败: 找不到活动标签');
+            return;
         }
-    }, []);
+
+        try {
+            // 使用WebSocketService的二进制协议发送
+            const { default: webSocketService } = await import('../services/WebSocketService');
+            await webSocketService.sendData(activeTab, data, true);
+            console.log(`通过二进制协议发送数据: ${data.substring(0, 50)}${data.length > 50 ? '...' : ''}`);
+        } catch (error) {
+            console.error('二进制协议发送失败，使用传统方式:', error);
+            // 回退到传统方式
+            if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+                websocketRef.current.send(data);
+            }
+        }
+    }, [tabs, activeTabKey]);
 
     // 刷新标签页
     const refreshTab = useCallback((tabKey: string) => {

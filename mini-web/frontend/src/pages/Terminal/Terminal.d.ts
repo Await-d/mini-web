@@ -58,7 +58,7 @@ export interface ConnectionChildProps {
     terminalMode?: string;
     sidebarCollapsed?: boolean;
     toggleFullscreen?: () => void;
-    sendDataToServer?: (data: any) => boolean;
+    sendDataToServer?: (data: any) => Promise<boolean>;
     createWebSocketConnection?: (sessionId: number | string, tabKey: string) => WebSocket | null;
 }
 

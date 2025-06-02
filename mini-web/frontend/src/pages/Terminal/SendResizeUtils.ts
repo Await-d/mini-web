@@ -38,33 +38,35 @@ export function createResizeMessage(cols: number, rows: number): ResizeMessage {
 }
 
 /**
- * 发送调整大小消息
- * @param websocket WebSocket连接
+ * 发送调整大小消息（使用二进制协议）
+ * @param tab 终端标签对象
  * @param cols 列数
  * @param rows 行数
  * @returns 是否发送成功
  */
-export function sendResizeMessage(
-  websocket: WebSocket | null,
-  cols: number, 
+export async function sendResizeMessage(
+  tab: any,
+  cols: number,
   rows: number
-): boolean {
-  // 检查WebSocket状态
-  if (!websocket || websocket.readyState !== WebSocket.OPEN) {
-    console.warn('无法发送调整大小消息：WebSocket未连接');
+): Promise<boolean> {
+  if (!tab) {
+    console.warn('无法发送调整大小消息：缺少标签信息');
     return false;
   }
 
   try {
     // 创建调整大小消息
     const resizeMessage = createResizeMessage(cols, rows);
-    
-    // 序列化并发送
-    const messageJson = JSON.stringify(resizeMessage);
-    websocket.send(messageJson);
-    
-    // 终端大小已调整
-    return true;
+
+    // 使用WebSocketService发送（启用二进制协议）
+    const webSocketServiceModule = await import('./services/WebSocketService');
+    const success = await webSocketServiceModule.default.sendJsonData(tab, resizeMessage);
+
+    if (success) {
+      console.log(`通过二进制协议发送调整大小消息: ${cols}x${rows}`);
+    }
+
+    return success;
   } catch (error) {
     console.error('创建或发送调整大小消息时出错:', error);
     return false;
