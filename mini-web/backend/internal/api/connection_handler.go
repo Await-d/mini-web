@@ -754,8 +754,14 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 									// 清理日志显示，但保持原始数据传递给终端
 									cleanContentForLog := strings.TrimSpace(contentStr)
 									log.Printf("处理二进制协议命令: %s", cleanContentForLog)
+
+									// 详细记录发送给终端的字节数据
+									terminalBytes := []byte(contentStr)
+									log.Printf("发送给终端的字节数据: 长度=%d, 内容=%v", len(terminalBytes), terminalBytes)
+									log.Printf("发送给终端的字符串表示: %q", contentStr)
+
 									// 直接将命令内容传递给终端（保留原始的\r\n）
-									if _, err := terminal.Write([]byte(contentStr)); err != nil {
+									if _, err := terminal.Write(terminalBytes); err != nil {
 										log.Printf("向终端写入命令失败: %v", err)
 									}
 									continue

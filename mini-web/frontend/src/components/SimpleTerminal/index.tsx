@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 20:45:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-02 19:15:34
+ * @LastEditTime: 2025-06-02 19:32:44
  * @Description: 简易终端组件，使用本地回显模式
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -77,6 +77,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
     // 密码输入模式状态
     const [passwordMode, setPasswordMode] = useState(false);
     const [lastPasswordPrompt, setLastPasswordPrompt] = useState('');
+    const [needsPasswordDelay, setNeedsPasswordDelay] = useState(false);
 
     // 提示符正则表达式 - 更宽松的匹配模式
     const promptRegex = /.*[@].*[$#]\s*$/;
@@ -275,6 +276,7 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                     // 立即设置密码模式
                     setPasswordMode(true);
                     setLastPasswordPrompt(line);
+                    setNeedsPasswordDelay(true); // 标记下次密码输入需要延迟
                     outputLines.push(`<span class="password-prompt">🔐 ${line}</span>`);
                     continue;
                 }
@@ -557,7 +559,13 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 // 密码模式：只显示掩码，不显示提示符
                 const maskedCommand = '*'.repeat(cleanCommand.length);
                 setOutput(prev => [...prev, `<span class="password-input-line">${maskedCommand}</span>`]);
-                console.log('密码模式下发送命令:', `[密码已隐藏:${cleanCommand.length}字符]`);
+
+                if (needsPasswordDelay) {
+                    console.log('密码模式下发送命令（延迟200ms）:', `[密码已隐藏:${cleanCommand.length}字符]`);
+                    setNeedsPasswordDelay(false); // 重置延迟标志
+                } else {
+                    console.log('密码模式下发送命令:', `[密码已隐藏:${cleanCommand.length}字符]`);
+                }
             } else {
                 // 普通模式：显示命令（本地回显）
                 const cleanPrompt = currentPrompt.split('\n').pop() || currentPrompt;
@@ -571,20 +579,37 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             setLastSentCommand(cleanCommand);
 
             // 使用二进制协议发送到服务器
-            if (tabKey) {
-                (async () => {
+            const sendToServer = async () => {
+                if (tabKey) {
                     try {
                         const { default: webSocketService } = await import('../../pages/Terminal/services/WebSocketService');
-                        await webSocketService.sendData({ key: tabKey } as any, cleanCommand + '\r\n', true);
+                        const commandWithCR = cleanCommand + '\r\n';
+
+                        // 详细日志记录实际发送的数据
+                        console.log('发送给WebSocketService的数据详情:');
+                        console.log('  原始命令:', JSON.stringify(command));
+                        console.log('  清理后命令:', JSON.stringify(cleanCommand));
+                        console.log('  添加回车后:', JSON.stringify(commandWithCR));
+                        console.log('  字节长度:', new TextEncoder().encode(commandWithCR).length);
+                        console.log('  字节数组:', Array.from(new TextEncoder().encode(commandWithCR)));
+
+                        await webSocketService.sendData({ key: tabKey } as any, commandWithCR, true);
                         console.log('通过二进制协议发送命令:', cleanCommand);
                     } catch (error) {
                         console.warn('二进制协议发送失败，使用传统方式:', error);
                         webSocketRef.current?.send(cleanCommand + '\r\n');
                     }
-                })();
+                } else {
+                    // 回退到传统方式
+                    webSocketRef.current?.send(cleanCommand + '\r\n');
+                }
+            };
+
+            // 如果是密码模式且需要延迟，则延迟发送
+            if (passwordMode && needsPasswordDelay) {
+                setTimeout(sendToServer, 200); // 200ms延迟
             } else {
-                // 回退到传统方式
-                webSocketRef.current.send(cleanCommand + '\r\n');
+                sendToServer();
             }
 
             // 成功消息也要考虑密码模式
@@ -599,6 +624,18 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
             message.error('发送命令失败');
         }
     }, [webSocketRef, currentPrompt, scrollToBottom, setLastSentCommand, passwordMode]);
+
+    // 延迟发送命令函数，主要用于密码输入
+    const sendCommandWithDelay = useCallback((command: string, delay: number = 0) => {
+        if (delay > 0) {
+            console.log(`延迟 ${delay}ms 后发送命令，确保终端准备就绪`);
+            setTimeout(() => {
+                sendCommand(command);
+            }, delay);
+        } else {
+            sendCommand(command);
+        }
+    }, [sendCommand]);
 
     // 发送批量命令
     const sendBatchCommands = useCallback((commands: string[]) => {
@@ -1193,6 +1230,8 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 visible={quickCommandsVisible}
                 onClose={() => setQuickCommandsVisible(false)}
                 onSendCommand={sendCommand}
+                onSendCommandWithDelay={sendCommandWithDelay}
+                passwordMode={passwordMode}
             />
 
             {/* 快捷键帮助模态框 */}
