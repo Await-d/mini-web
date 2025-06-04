@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-04 20:26:59
+ * @LastEditTime: 2025-06-04 20:36:03
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
@@ -25,6 +25,31 @@ export interface WebSocketStats {
     totalDataReceived: number;
     lastConnectionTime: string | null;
     lastDisconnectionTime: string | null;
+    // 新增：文件传输统计
+    fileTransferStats: {
+        uploadCount: number;
+        downloadCount: number;
+        totalUploadSize: number;
+        totalDownloadSize: number;
+    };
+    // 新增：按连接的数据统计
+    connectionDataStats: Map<string, {
+        connectionId: string;
+        protocol: string;
+        dataSent: number;
+        dataReceived: number;
+        startTime: string;
+        lastActivity: string;
+    }>;
+    // 新增：消息类型统计
+    messageTypeStats: {
+        terminalData: number;
+        fileTransfer: number;
+        heartbeat: number;
+        protocolNegotiation: number;
+        specialCommand: number;
+        other: number;
+    };
 }
 
 // WebSocket事件处理器接口
@@ -57,7 +82,22 @@ export class WebSocketService {
         totalDataSent: 0,
         totalDataReceived: 0,
         lastConnectionTime: null,
-        lastDisconnectionTime: null
+        lastDisconnectionTime: null,
+        fileTransferStats: {
+            uploadCount: 0,
+            downloadCount: 0,
+            totalUploadSize: 0,
+            totalDownloadSize: 0
+        },
+        connectionDataStats: new Map(),
+        messageTypeStats: {
+            terminalData: 0,
+            fileTransfer: 0,
+            heartbeat: 0,
+            protocolNegotiation: 0,
+            specialCommand: 0,
+            other: 0
+        }
     };
 
     // 心跳检测间隔(毫秒) - 调整为5秒，便于快速显示延迟信息
@@ -150,6 +190,16 @@ export class WebSocketService {
             const tabProtocol = tab.protocol || 'unknown';
             this.stats.connectionsByProtocol[tabProtocol] = (this.stats.connectionsByProtocol[tabProtocol] || 0) + 1;
 
+            // 初始化连接数据统计
+            this.stats.connectionDataStats.set(tab.key, {
+                connectionId: tab.connectionId?.toString() || 'unknown',
+                protocol: tabProtocol,
+                dataSent: 0,
+                dataReceived: 0,
+                startTime: new Date().toISOString(),
+                lastActivity: new Date().toISOString()
+            });
+
             // 设置WebSocket事件处理器
             this.setupWebSocketHandlers(ws, tab);
 
@@ -211,6 +261,13 @@ export class WebSocketService {
             const dataSize = event.data.length || event.data.byteLength || event.data.size || 0;
             this.stats.totalDataReceived += dataSize;
 
+            // 更新连接特定的数据统计
+            const connectionStat = this.stats.connectionDataStats.get(tab.key);
+            if (connectionStat) {
+                connectionStat.dataReceived += dataSize;
+                connectionStat.lastActivity = new Date().toISOString();
+            }
+
             // 检查是否为二进制协议消息
             let processedEvent = event;
 
@@ -240,6 +297,9 @@ export class WebSocketService {
 
                         // 处理心跳消息
                         if (protocolMessage.header.messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.HEARTBEAT) {
+                            // 统计心跳消息
+                            this.stats.messageTypeStats.heartbeat++;
+
                             // 计算心跳延迟
                             const sendTimestamp = this.heartbeatTimestamps.get(tab.key);
                             if (sendTimestamp) {
@@ -256,6 +316,8 @@ export class WebSocketService {
 
                         // 处理协议协商
                         if (protocolMessage.header.messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.PROTOCOL_NEGOTIATION) {
+                            // 统计协议协商消息
+                            this.stats.messageTypeStats.protocolNegotiation++;
                             this.handleProtocolNegotiation(tab.key, protocolMessage.jsonData);
                             return;
                         }
@@ -267,14 +329,31 @@ export class WebSocketService {
                         if (protocolMessage.jsonData &&
                             (protocolMessage.jsonData.type === 'terminal_data' || protocolMessage.jsonData.type === 'terminal-output') &&
                             protocolMessage.binaryData) {
+                            // 统计终端数据消息
+                            this.stats.messageTypeStats.terminalData++;
                             // 将二进制数据转换为字符串（终端输出）
                             const decoder = new TextDecoder();
                             actualData = decoder.decode(protocolMessage.binaryData);
                             console.log(`💾 [${tab.key}] 从二进制协议提取终端数据: ${actualData.length} 字符, 内容预览: "${actualData.substring(0, 50)}${actualData.length > 50 ? '...' : ''}"`);
                         } else if (protocolMessage.jsonData && protocolMessage.jsonData.type === 'special_command') {
+                            // 统计特殊命令消息
+                            this.stats.messageTypeStats.specialCommand++;
                             // 特殊命令消息，保持JSON格式
                             actualData = protocolMessage.jsonData;
                             console.log(`🔥 [${tab.key}] 特殊命令消息:`, actualData);
+                        } else if (protocolMessage.jsonData && (protocolMessage.jsonData.type === 'file_upload' || protocolMessage.jsonData.type === 'file_download')) {
+                            // 统计文件传输消息
+                            this.stats.messageTypeStats.fileTransfer++;
+                            if (protocolMessage.jsonData.type === 'file_upload') {
+                                this.stats.fileTransferStats.uploadCount++;
+                                this.stats.fileTransferStats.totalUploadSize += protocolMessage.binaryData?.byteLength || 0;
+                            } else {
+                                this.stats.fileTransferStats.downloadCount++;
+                                this.stats.fileTransferStats.totalDownloadSize += protocolMessage.binaryData?.byteLength || 0;
+                            }
+                            // 文件传输消息，保持JSON格式
+                            actualData = protocolMessage.jsonData;
+                            console.log(`📁 [${tab.key}] 文件传输消息:`, actualData);
                         } else if (protocolMessage.binaryData && !protocolMessage.jsonData) {
                             // 纯二进制数据，转换为字符串
                             const decoder = new TextDecoder();
@@ -286,6 +365,8 @@ export class WebSocketService {
                             actualData = decoder.decode(protocolMessage.binaryData);
                             console.log(`📄 [${tab.key}] 从混合消息提取二进制数据: ${actualData.length} 字符, 内容预览: "${actualData.substring(0, 50)}${actualData.length > 50 ? '...' : ''}"`);
                         } else {
+                            // 统计其他类型的消息
+                            this.stats.messageTypeStats.other++;
                             console.log(`📋 [${tab.key}] 使用JSON数据:`, actualData);
                         }
 
@@ -372,6 +453,9 @@ export class WebSocketService {
 
             // 从连接映射中移除
             this.connections.delete(tab.key);
+
+            // 清理连接数据统计
+            this.stats.connectionDataStats.delete(tab.key);
 
             // 触发终端断开事件
             window.dispatchEvent(new CustomEvent('terminal-ws-disconnected', {
@@ -682,6 +766,13 @@ export class WebSocketService {
 
             // 更新统计信息
             this.stats.totalDataSent += dataSize;
+
+            // 更新连接特定的数据统计
+            const connectionStat = this.stats.connectionDataStats.get(tab.key);
+            if (connectionStat) {
+                connectionStat.dataSent += dataSize;
+                connectionStat.lastActivity = new Date().toISOString();
+            }
             return true;
         } catch (error) {
             console.error(`发送数据失败: ${tab.key}`, error);
@@ -715,6 +806,13 @@ export class WebSocketService {
             (ws as any).lastActivity = Date.now();
 
             this.stats.totalDataSent += binaryData.byteLength;
+
+            // 更新连接特定的数据统计
+            const connectionStat = this.stats.connectionDataStats.get(tab.key);
+            if (connectionStat) {
+                connectionStat.dataSent += binaryData.byteLength;
+                connectionStat.lastActivity = new Date().toISOString();
+            }
             return true;
         } catch (error) {
             console.error(`发送JSON数据失败: ${tab.key}`, error);
@@ -749,6 +847,13 @@ export class WebSocketService {
             (ws as any).lastActivity = Date.now();
 
             this.stats.totalDataSent += encodedData.byteLength;
+
+            // 更新连接特定的数据统计
+            const connectionStat = this.stats.connectionDataStats.get(tab.key);
+            if (connectionStat) {
+                connectionStat.dataSent += encodedData.byteLength;
+                connectionStat.lastActivity = new Date().toISOString();
+            }
             return true;
         } catch (error) {
             console.error(`发送二进制数据失败: ${tab.key}`, error);
@@ -838,7 +943,22 @@ export class WebSocketService {
             totalDataSent: 0,
             totalDataReceived: 0,
             lastConnectionTime: this.stats.lastConnectionTime,
-            lastDisconnectionTime: this.stats.lastDisconnectionTime
+            lastDisconnectionTime: this.stats.lastDisconnectionTime,
+            fileTransferStats: {
+                uploadCount: 0,
+                downloadCount: 0,
+                totalUploadSize: 0,
+                totalDownloadSize: 0
+            },
+            connectionDataStats: new Map(),
+            messageTypeStats: {
+                terminalData: 0,
+                fileTransfer: 0,
+                heartbeat: 0,
+                protocolNegotiation: 0,
+                specialCommand: 0,
+                other: 0
+            }
         };
     }
 
@@ -889,6 +1009,77 @@ export class WebSocketService {
      */
     getAllNetworkLatencies(): Map<string, number> {
         return new Map(this.networkLatencies);
+    }
+
+    /**
+     * 获取特定连接的数据统计
+     * @param tabKey 标签键
+     * @returns 连接数据统计
+     */
+    getConnectionStats(tabKey: string) {
+        return this.stats.connectionDataStats.get(tabKey);
+    }
+
+    /**
+     * 获取所有连接的数据统计
+     * @returns 所有连接的数据统计
+     */
+    getAllConnectionStats() {
+        return Array.from(this.stats.connectionDataStats.entries()).map(([tabKey, stats]) => ({
+            tabKey,
+            ...stats
+        }));
+    }
+
+    /**
+     * 获取当前活跃连接的总数据量
+     * @returns 总数据量统计
+     */
+    getActiveConnectionsTotalData() {
+        let totalSent = 0;
+        let totalReceived = 0;
+
+        for (const stats of this.stats.connectionDataStats.values()) {
+            totalSent += stats.dataSent;
+            totalReceived += stats.dataReceived;
+        }
+
+        return {
+            totalSent,
+            totalReceived,
+            totalData: totalSent + totalReceived
+        };
+    }
+
+    /**
+     * 获取文件传输统计
+     * @returns 文件传输统计
+     */
+    getFileTransferStats() {
+        return this.stats.fileTransferStats;
+    }
+
+    /**
+     * 获取消息类型统计
+     * @returns 消息类型统计
+     */
+    getMessageTypeStats() {
+        return this.stats.messageTypeStats;
+    }
+
+    /**
+     * 手动添加文件传输统计（用于外部文件传输组件）
+     * @param type 传输类型
+     * @param size 文件大小
+     */
+    addFileTransferStats(type: 'upload' | 'download', size: number): void {
+        if (type === 'upload') {
+            this.stats.fileTransferStats.uploadCount++;
+            this.stats.fileTransferStats.totalUploadSize += size;
+        } else {
+            this.stats.fileTransferStats.downloadCount++;
+            this.stats.fileTransferStats.totalDownloadSize += size;
+        }
     }
 }
 

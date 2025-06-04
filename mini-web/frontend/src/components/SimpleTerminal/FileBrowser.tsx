@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 18:41:54
+ * @LastEditTime: 2025-06-04 20:42:57
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -1625,7 +1625,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             return;
         }
 
-        console.log('FileBrowser组件初始化开始...');
 
         // 清除之前的初始化定时器
         if (initializationTimerRef.current) {
@@ -1638,7 +1637,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             // 标记已经初始化，防止重复
             hasInitializedRef.current = true;
 
-            console.log('开始FileBrowser初始化流程...');
 
             // 尝试恢复保存的路径
             let targetPath = currentDirectory;
@@ -1652,7 +1650,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             }
 
             // 执行目录刷新
-            console.log('FileBrowser初始化，加载目录:', targetPath);
             refreshDirectory(targetPath);
 
             initializationTimerRef.current = null;
@@ -1684,7 +1681,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             return;
         }
 
-        console.log('FileBrowser: 设置WebSocket消息监听器');
 
         // 消息统计
         let messageStats = {
@@ -1697,23 +1693,19 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 return;
             }
 
-            console.log('📨 FileBrowser收到WebSocket消息:', event.data.substring(0, 100) + '...');
             messageStats.total++;
 
             try {
                 const data = JSON.parse(event.data);
-                console.log('📨 解析后的消息类型:', data.type);
 
                 // 只处理FileBrowser相关的消息类型
                 if (data.type === 'file_list_response') {
-                    console.log('📨 处理文件列表响应，requestId:', data.data?.requestId, '当前请求ID:', currentRequestRef.current);
                     processFileListMessageAsync(event);
                     return;
                 }
 
                 // 处理分段消息
                 if (data.type === 'file_list_segment') {
-                    console.log('📨 处理分段消息');
                     handleSegmentedFileList({
                         requestId: data.data.requestId,
                         segmentId: data.data.segmentId,
@@ -1726,7 +1718,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
                 // 处理文件创建响应
                 if (data.type === 'file_create_response') {
-                    console.log('📄 处理文件创建响应:', data.data);
                     if (data.data.success) {
                         message.success('文件创建成功');
                         // 刷新文件列表
@@ -1739,7 +1730,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
                 // 处理文件夹创建响应
                 if (data.type === 'folder_create_response') {
-                    console.log('📁 处理文件夹创建响应:', data.data);
                     if (data.data.success) {
                         message.success('文件夹创建成功');
                         // 刷新文件列表
@@ -1752,7 +1742,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
                 // 处理文件上传响应
                 if (data.type === 'file_upload_response') {
-                    console.log('📤 处理文件上传响应:', data.data);
                     // 文件上传的响应在uploadFile函数中通过事件监听器处理
                     // 这里不需要额外处理，让uploadFile函数的监听器处理
                     return;
@@ -1761,7 +1750,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 // 对于其他消息类型（如file_view_response），不做任何处理
                 // 让它们能够被其他组件的监听器正常处理
                 // 这里什么都不做，事件会继续冒泡给其他监听器
-                console.log('📨 忽略消息类型:', data.type, '- 让其他组件处理');
             } catch (error) {
                 console.error('❌ 解析WebSocket消息失败:', error);
             }
@@ -1773,21 +1761,13 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         const processFileListMessageAsync = (event: MessageEvent) => {
             try {
                 const data = JSON.parse(event.data);
-                console.log('📁 processFileListMessageAsync - 数据类型:', data.type);
 
                 if (data.type === 'file_list_response') {
-                    console.log('📁 请求ID检查:', {
-                        responseRequestId: data.data.requestId,
-                        currentRequestId: currentRequestRef.current,
-                        match: data.data.requestId === currentRequestRef.current
-                    });
 
                     if (data.data.requestId !== currentRequestRef.current) {
-                        console.log('📁 请求ID不匹配，忽略响应');
                         return;
                     }
 
-                    console.log('📁 开始处理文件列表响应');
 
                     // 清理超时和状态
                     if (requestTimeoutRef.current) {
@@ -1800,13 +1780,11 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     currentRequestRef.current = null;
 
                     if (data.data.error) {
-                        console.error('📁 文件列表错误:', data.data.error);
                         message.error(`获取文件列表失败: ${data.data.error}`);
                         return;
                     }
 
                     if (data.data.files && Array.isArray(data.data.files)) {
-                        console.log(`📁 收到文件列表，共 ${data.data.files.length} 个文件`);
 
                         // 处理文件列表，确保每个文件都有正确的path属性
                         const processedFiles = data.data.files.map((file: FileItem) => {
@@ -1853,8 +1831,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         ws.addEventListener('message', handleMessage);
 
         return () => {
-            console.log('FileBrowser: 移除WebSocket消息监听器');
-
             if (ws && ws.readyState !== WebSocket.CLOSED) {
                 ws.removeEventListener('message', handleMessage);
             }

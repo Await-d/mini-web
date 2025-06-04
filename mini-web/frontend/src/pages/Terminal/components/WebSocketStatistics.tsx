@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 10:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-23 20:16:31
+ * @LastEditTime: 2025-06-04 20:41:49
  * @Description: WebSocket连接统计组件
  */
 
@@ -252,6 +252,91 @@ const WebSocketStatistics: React.FC = () => {
                         </div>
                     </Col>
                 </Row>
+
+                {/* 当前活跃连接数据量 */}
+                <Divider style={{ margin: '12px 0' }} />
+                <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#722ed1' }}>
+                        {formatDataSize(stats.totalDataSent + stats.totalDataReceived)}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#8c8c8c' }}>总数据量</div>
+                </div>
+            </Card>
+
+            {/* 文件传输统计 */}
+            <Card size="small" title="文件传输" style={{ marginBottom: 16 }}>
+                <Row gutter={[12, 8]}>
+                    <Col span={12}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#52c41a' }}>
+                                {stats.fileTransferStats?.uploadCount || 0}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#8c8c8c' }}>上传文件</div>
+                            <div style={{ fontSize: '11px', color: '#8c8c8c' }}>
+                                {formatDataSize(stats.fileTransferStats?.totalUploadSize || 0)}
+                            </div>
+                        </div>
+                    </Col>
+                    <Col span={12}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1890ff' }}>
+                                {stats.fileTransferStats?.downloadCount || 0}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#8c8c8c' }}>下载文件</div>
+                            <div style={{ fontSize: '11px', color: '#8c8c8c' }}>
+                                {formatDataSize(stats.fileTransferStats?.totalDownloadSize || 0)}
+                            </div>
+                        </div>
+                    </Col>
+                </Row>
+            </Card>
+
+            {/* 消息类型统计 */}
+            <Card size="small" title="消息类型" style={{ marginBottom: 16 }}>
+                <Row gutter={[8, 8]}>
+                    <Col span={8}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#1890ff' }}>
+                                {stats.messageTypeStats?.terminalData || 0}
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#8c8c8c' }}>终端数据</div>
+                        </div>
+                    </Col>
+                    <Col span={8}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#52c41a' }}>
+                                {stats.messageTypeStats?.fileTransfer || 0}
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#8c8c8c' }}>文件传输</div>
+                        </div>
+                    </Col>
+                    <Col span={8}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#faad14' }}>
+                                {stats.messageTypeStats?.heartbeat || 0}
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#8c8c8c' }}>心跳</div>
+                        </div>
+                    </Col>
+                </Row>
+                <Row gutter={[8, 8]} style={{ marginTop: 8 }}>
+                    <Col span={12}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#722ed1' }}>
+                                {stats.messageTypeStats?.protocolNegotiation || 0}
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#8c8c8c' }}>协议协商</div>
+                        </div>
+                    </Col>
+                    <Col span={12}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#ff4d4f' }}>
+                                {stats.messageTypeStats?.specialCommand || 0}
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#8c8c8c' }}>特殊命令</div>
+                        </div>
+                    </Col>
+                </Row>
             </Card>
 
             {/* 协议分布 */}
@@ -275,6 +360,53 @@ const WebSocketStatistics: React.FC = () => {
                                     status="active"
                                     strokeColor="#1890ff"
                                 />
+                            </div>
+                        ))}
+                    </div>
+                </Card>
+            )}
+
+            {/* 当前连接详情 */}
+            {stats.activeConnections > 0 && (
+                <Card size="small" title="当前连接" style={{ marginBottom: 16 }}>
+                    <div style={{ maxHeight: '200px', overflow: 'auto' }}>
+                        {Array.from(stats.connectionDataStats || new Map()).map(([tabKey, connectionStats]) => (
+                            <div key={tabKey} style={{
+                                padding: '8px',
+                                border: '1px solid #f0f0f0',
+                                borderRadius: '4px',
+                                marginBottom: '8px',
+                                fontSize: '11px'
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div>
+                                        <Text strong style={{ fontSize: '11px' }}>
+                                            {connectionStats.protocol?.toUpperCase() || 'UNKNOWN'}
+                                        </Text>
+                                        <span style={{ marginLeft: '8px', color: '#8c8c8c' }}>
+                                            ID: {connectionStats.connectionId}
+                                        </span>
+                                    </div>
+                                    <Badge
+                                        status="processing"
+                                        text="活跃"
+                                        style={{ fontSize: '10px' }}
+                                    />
+                                </div>
+                                <div style={{ marginTop: '4px', display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ color: '#52c41a' }}>
+                                        ↑ {formatDataSize(connectionStats.dataSent)}
+                                    </span>
+                                    <span style={{ color: '#1890ff' }}>
+                                        ↓ {formatDataSize(connectionStats.dataReceived)}
+                                    </span>
+                                    <span style={{ color: '#722ed1' }}>
+                                        ∑ {formatDataSize(connectionStats.dataSent + connectionStats.dataReceived)}
+                                    </span>
+                                </div>
+                                <div style={{ marginTop: '2px', color: '#8c8c8c', fontSize: '10px' }}>
+                                    最后活动: {formatTime(connectionStats.lastActivity)}
+                                </div>
                             </div>
                         ))}
                     </div>
