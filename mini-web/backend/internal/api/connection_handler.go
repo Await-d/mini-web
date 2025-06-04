@@ -735,15 +735,37 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 
 				// 处理心跳消息
 				if protocolMsg.Header.MessageType == service.MessageTypeHeartbeat {
-					log.Printf("收到心跳消息，回复心跳响应")
 					// 更新活动时间
 					select {
 					case activeChan <- struct{}{}:
 					default:
 					}
-					// 回复心跳响应以便客户端测量延迟
-					if heartbeatReply, err := h.binaryProtocol.CreateHeartbeatMessage(); err == nil {
-						wsConn.WriteMessage(websocket.BinaryMessage, heartbeatReply)
+
+					// 检查是否处于密码模式或其他特殊状态
+					shouldReplyHeartbeat := true
+
+					// 检查SSH终端的密码模式状态
+					if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+						if sshTerminal.IsInPasswordMode() {
+							log.Printf("收到心跳消息，但当前处于密码模式，跳过心跳响应")
+							shouldReplyHeartbeat = false
+						}
+					}
+
+					// 检查Telnet终端的密码模式状态
+					if telnetTerminal, ok := terminal.(*service.TelnetTerminalSession); ok {
+						if telnetTerminal.IsInPasswordMode() {
+							log.Printf("收到心跳消息，但当前处于密码模式，跳过心跳响应")
+							shouldReplyHeartbeat = false
+						}
+					}
+
+					if shouldReplyHeartbeat {
+						log.Printf("收到心跳消息，回复心跳响应")
+						// 回复心跳响应以便客户端测量延迟
+						if heartbeatReply, err := h.binaryProtocol.CreateHeartbeatMessage(); err == nil {
+							wsConn.WriteMessage(websocket.BinaryMessage, heartbeatReply)
+						}
 					}
 					continue
 				}

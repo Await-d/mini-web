@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-08 18:19:21
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 19:29:56
+ * @LastEditTime: 2025-06-04 20:16:04
  * @Description: 请填写简介
  */
 package service
@@ -176,6 +176,14 @@ func (s *SSHTerminalSession) Write(p []byte) (int, error) {
 	// 直接写入到stdin，不处理命令回显
 	// 密码输入和普通命令都直接传输
 	return s.stdin.Write(p)
+}
+
+// IsInPasswordMode 检查是否处于密码输入模式
+func (s *SSHTerminalSession) IsInPasswordMode() bool {
+	if s.formatter == nil {
+		return false
+	}
+	return s.formatter.IsPasswordMode()
 }
 
 // Close 关闭SSH会话

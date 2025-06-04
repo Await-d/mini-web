@@ -280,6 +280,11 @@ func (tf *TerminalFormatter) isDuplicatePrompt(text string) bool {
 	return false
 }
 
+// IsPasswordMode 检查是否处于密码输入模式
+func (tf *TerminalFormatter) IsPasswordMode() bool {
+	return tf.passwordMode
+}
+
 // SetCommandEcho 设置命令回显内容，用于过滤
 func (tf *TerminalFormatter) SetCommandEcho(command string) {
 	tf.commandEcho = command

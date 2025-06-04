@@ -60,8 +60,8 @@ export class WebSocketService {
         lastDisconnectionTime: null
     };
 
-    // 心跳检测间隔(毫秒) - 调整为25秒，避免与服务器检测冲突
-    private heartbeatInterval: number = 25000;
+    // 心跳检测间隔(毫秒) - 调整为5秒，便于快速显示延迟信息
+    private heartbeatInterval: number = 5000;
     // 心跳检测定时器
     private heartbeatTimers: Map<string, number> = new Map();
     // 心跳发送时间戳用于计算延迟

@@ -185,6 +185,14 @@ func (t *TelnetTerminalSession) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// IsInPasswordMode 检查是否处于密码输入模式
+func (t *TelnetTerminalSession) IsInPasswordMode() bool {
+	if t.formatter == nil {
+		return false
+	}
+	return t.formatter.IsPasswordMode()
+}
+
 // Write 实现io.Writer接口
 func (t *TelnetTerminalSession) Write(p []byte) (int, error) {
 	// 直接写入到writer，不处理命令回显
