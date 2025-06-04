@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 10:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-04 20:39:13
+ * @LastEditTime: 2025-06-04 20:51:32
  * @Description: WebSocket管理器组件
  */
 
@@ -398,6 +398,8 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
             console.log(`WebSocketManager收到重连请求: tabKey=${tabKey}`);
 
             if (tab && tab.sessionId) {
+                // 设置手动重连标志，防止自动重连干扰
+                sessionStorage.setItem(`manual-reconnect-${tabKey}`, 'true');
                 // 创建自定义处理函数
                 const handlers: WebSocketEventHandlers = {
                     onOpen: (ws) => {

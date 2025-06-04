@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-04 20:36:03
+ * @LastEditTime: 2025-06-04 20:50:08
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
@@ -72,6 +72,8 @@ export class WebSocketService {
     private handlers: Map<string, WebSocketEventHandlers> = new Map();
     // 协议支持状态
     private protocolSupport: Map<string, boolean> = new Map();
+    // 连接状态跟踪（防止重复连接）
+    private connectionStates: Map<string, 'connecting' | 'connected' | 'disconnecting' | 'disconnected'> = new Map();
     // 连接统计数据
     private stats: WebSocketStats = {
         totalConnections: 0,
@@ -121,10 +123,18 @@ export class WebSocketService {
             return null;
         }
 
+        // 检查连接状态，防止重复连接
+        const currentState = this.connectionStates.get(tab.key);
+        if (currentState === 'connecting') {
+            console.log(`连接正在建立中，跳过重复请求: ${tab.key}`);
+            return this.connections.get(tab.key) || null;
+        }
+
         // 检查是否已有连接并且连接状态为OPEN
         const existingWs = this.connections.get(tab.key);
         if (existingWs && existingWs.readyState === WebSocket.OPEN) {
             console.log(`复用现有WebSocket连接: ${tab.key}`);
+            this.connectionStates.set(tab.key, 'connected');
             return existingWs;
         }
 
@@ -165,6 +175,10 @@ export class WebSocketService {
             const wsUrl = `${wsProtocol}//${host}/ws/${connProtocol}/${tab.sessionId}?token=${encodeURIComponent(token)}`;
 
             console.log(`创建WebSocket连接: ${wsUrl}`);
+
+            // 设置连接状态为connecting
+            this.connectionStates.set(tab.key, 'connecting');
+
             const ws = new WebSocket(wsUrl);
 
             // 设置初始活动时间
@@ -230,6 +244,9 @@ export class WebSocketService {
         // 打开事件处理
         ws.onopen = async (event) => {
             console.log(`WebSocket连接已打开: ${tab.key}`);
+
+            // 更新连接状态为已连接
+            this.connectionStates.set(tab.key, 'connected');
 
             // 发起协议协商
             setTimeout(async () => {
@@ -437,6 +454,9 @@ export class WebSocketService {
         ws.onclose = (event) => {
             console.log(`WebSocket连接已关闭: ${tab.key}`);
 
+            // 更新连接状态为已断开
+            this.connectionStates.set(tab.key, 'disconnected');
+
             // 更新统计信息 - 只有在连接映射中存在时才减少计数
             if (this.connections.has(tab.key)) {
                 this.stats.activeConnections = Math.max(0, this.stats.activeConnections - 1);
@@ -466,6 +486,9 @@ export class WebSocketService {
         // 错误事件处理
         ws.onerror = (event) => {
             console.error(`WebSocket连接错误: ${tab.key}`, event);
+
+            // 如果连接失败，重置状态为disconnected
+            this.connectionStates.set(tab.key, 'disconnected');
 
             // 调用自定义处理函数
             if (tabHandlers?.onError) {
@@ -618,6 +641,9 @@ export class WebSocketService {
         if (ws) {
             console.log(`关闭WebSocket连接: ${tabKey}`);
 
+            // 设置状态为正在断开
+            this.connectionStates.set(tabKey, 'disconnecting');
+
             // 更新统计信息 - 如果连接是活跃的，减少活跃连接数
             if (ws.readyState === WebSocket.OPEN) {
                 this.stats.activeConnections = Math.max(0, this.stats.activeConnections - 1);
@@ -629,6 +655,9 @@ export class WebSocketService {
 
             // 从连接映射中移除
             this.connections.delete(tabKey);
+
+            // 清理连接状态
+            this.connectionStates.delete(tabKey);
 
             // 清除心跳检测
             this.clearHeartbeat(tabKey);
@@ -674,6 +703,13 @@ export class WebSocketService {
             return null;
         }
 
+        // 检查是否正在连接，防止重复操作
+        const currentState = this.connectionStates.get(tab.key);
+        if (currentState === 'connecting') {
+            console.log(`连接正在建立中，跳过重连请求: ${tab.key}`);
+            return this.connections.get(tab.key) || null;
+        }
+
         console.log(`刷新WebSocket连接: ${tab.key}`);
 
         // 保存现有的处理函数
@@ -683,11 +719,16 @@ export class WebSocketService {
         // 先关闭现有连接，但保留处理函数
         this.closeConnection(tab.key, true);
 
-        // 更新统计信息
-        this.stats.reconnections++;
+        // 等待短暂时间确保连接完全关闭
+        setTimeout(() => {
+            // 更新统计信息
+            this.stats.reconnections++;
 
-        // 创建新连接，使用保存的处理函数
-        return this.connect(tab, finalHandlers);
+            // 创建新连接，使用保存的处理函数
+            this.connect(tab, finalHandlers);
+        }, 100);
+
+        return null;
     }
 
     /**
@@ -1080,6 +1121,24 @@ export class WebSocketService {
             this.stats.fileTransferStats.downloadCount++;
             this.stats.fileTransferStats.totalDownloadSize += size;
         }
+    }
+
+    /**
+     * 获取连接状态
+     * @param tabKey 标签键
+     * @returns 连接状态
+     */
+    getConnectionState(tabKey: string): 'connecting' | 'connected' | 'disconnecting' | 'disconnected' | undefined {
+        return this.connectionStates.get(tabKey);
+    }
+
+    /**
+     * 设置连接状态
+     * @param tabKey 标签键
+     * @param state 连接状态
+     */
+    setConnectionState(tabKey: string, state: 'connecting' | 'connected' | 'disconnecting' | 'disconnected'): void {
+        this.connectionStates.set(tabKey, state);
     }
 }
 

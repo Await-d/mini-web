@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 15:32:12
  * @LastEditors: Await
- * @LastEditTime: 2025-05-24 21:14:55
+ * @LastEditTime: 2025-06-04 20:50:43
  * @Description: 终端事件管理器组件
  */
 import React, { useEffect } from 'react';
@@ -81,12 +81,20 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
                             }));
                         });
 
-                        ws.addEventListener('close', () => {
+                        ws.addEventListener('close', (event) => {
                             console.log(`WebSocket连接已关闭: tabKey=${activeTab.key}`);
                             updateTab(activeTab.key, {
                                 isConnected: false,
                                 status: 'disconnected'
                             });
+
+                            // 检查是否是手动关闭（用户点击重连按钮）
+                            const isManualReconnect = sessionStorage.getItem(`manual-reconnect-${activeTab.key}`);
+                            if (isManualReconnect) {
+                                console.log(`检测到手动重连，跳过自动重连: ${activeTab.key}`);
+                                sessionStorage.removeItem(`manual-reconnect-${activeTab.key}`);
+                                return;
+                            }
                         });
 
                         ws.addEventListener('error', (e) => {

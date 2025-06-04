@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-01-02 10:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 18:05:39
+ * @LastEditTime: 2025-06-04 21:04:30
  * @Description: 文件查看器组件
  */
 import React, { useState, useEffect, useCallback } from 'react';
@@ -77,6 +77,8 @@ const FileViewer: React.FC<FileViewerProps> = ({
     const [editMode, setEditMode] = useState(false);
     const [editContent, setEditContent] = useState('');
     const [saving, setSaving] = useState(false);
+    const [loadingProgress, setLoadingProgress] = useState<{ current: number; total: number } | null>(null);
+    const [cancelling, setCancelling] = useState(false);
 
     // 获取文件扩展名
     const getFileExtension = useCallback((filename: string): string => {
@@ -186,6 +188,8 @@ const FileViewer: React.FC<FileViewerProps> = ({
 
         setLoading(true);
         setFileContent(null);
+        setLoadingProgress(null);
+        setCancelling(false);
 
         try {
             const fileType = getFileType(fileName);
@@ -220,12 +224,33 @@ const FileViewer: React.FC<FileViewerProps> = ({
             webSocketRef.current.send(JSON.stringify(fileViewRequest));
             console.log('📄 WebSocket消息已发送');
 
-            // 设置超时
-            const timeout = setTimeout(() => {
-                console.log('📄 文件加载超时');
-                setLoading(false);
-                message.error('文件加载超时');
-            }, 30000);
+            // 动态超时管理
+            let timeoutId: NodeJS.Timeout;
+            let lastActivity = Date.now();
+
+            const resetTimeout = () => {
+                if (timeoutId) clearTimeout(timeoutId);
+                lastActivity = Date.now();
+
+                // 根据文件大小动态设置超时时间：基础30秒 + 每MB增加10秒，最大5分钟
+                const baseTimeout = 30000; // 30秒
+                const sizeTimeoutBonus = Math.min(fileSize / (1024 * 1024) * 10000, 300000 - baseTimeout); // 最大5分钟
+                const totalTimeout = baseTimeout + sizeTimeoutBonus;
+
+                console.log(`📄 设置动态超时: ${Math.round(totalTimeout / 1000)}秒 (文件大小: ${formatFileSize(fileSize)})`);
+
+                timeoutId = setTimeout(() => {
+                    console.log('📄 文件加载超时，超时时间:', totalTimeout / 1000, '秒');
+                    setLoading(false);
+                    setLoadingProgress(null);
+                    setCancelling(false);
+                    message.error(`文件加载超时 (${Math.round(totalTimeout / 1000)}秒)`);
+                    webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+                }, totalTimeout);
+            };
+
+            // 初始设置超时
+            resetTimeout();
 
             // 分段数据存储
             const segmentData = new Map<string, { segments: Map<number, string>, totalSegments: number }>();
@@ -239,8 +264,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
                     // 如果是Blob类型，说明后端返回的是二进制数据而不是JSON
                     if (event.data instanceof Blob) {
                         console.error('📄 收到Blob数据，后端可能没有实现JSON格式的file_view API');
-                        clearTimeout(timeout);
+                        clearTimeout(timeoutId);
                         setLoading(false);
+                        setLoadingProgress(null);
+                        setCancelling(false);
                         setFileContent({
                             type: 'error',
                             content: '',
@@ -254,8 +281,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
                     // 检查是否是字符串
                     if (typeof event.data !== 'string') {
                         console.error('📄 收到非字符串数据:', typeof event.data, event.data);
-                        clearTimeout(timeout);
+                        clearTimeout(timeoutId);
                         setLoading(false);
+                        setLoadingProgress(null);
+                        setCancelling(false);
                         setFileContent({
                             type: 'error',
                             content: '',
@@ -269,8 +298,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
                     // 检查是否是"[object Blob]"这样的字符串
                     if (event.data === '[object Blob]' || event.data.startsWith('[object ')) {
                         console.error('📄 收到对象字符串表示，可能是后端序列化错误:', event.data);
-                        clearTimeout(timeout);
+                        clearTimeout(timeoutId);
                         setLoading(false);
+                        setLoadingProgress(null);
+                        setCancelling(false);
                         setFileContent({
                             type: 'error',
                             content: '',
@@ -286,8 +317,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
 
                     if (data.type === 'file_view_response' && data.data.requestId === requestId) {
                         console.log('📄 处理文件查看响应');
-                        clearTimeout(timeout);
+                        clearTimeout(timeoutId);
                         setLoading(false);
+                        setLoadingProgress(null);
+                        setCancelling(false);
 
                         if (data.data.error) {
                             console.error('📄 文件查看错误:', data.data.error);
@@ -312,6 +345,9 @@ const FileViewer: React.FC<FileViewerProps> = ({
                     } else if (data.type === 'file_view_segment' && data.data.requestId === requestId) {
                         console.log('📄 处理文件查看分段响应:', data.data.segmentId, '/', data.data.totalSegments);
 
+                        // 重置超时计时器，表示还在接收数据
+                        resetTimeout();
+
                         // 初始化分段数据
                         if (!segmentData.has(requestId)) {
                             segmentData.set(requestId, {
@@ -322,6 +358,12 @@ const FileViewer: React.FC<FileViewerProps> = ({
 
                         const segmentInfo = segmentData.get(requestId)!;
                         segmentInfo.segments.set(data.data.segmentId, data.data.data);
+
+                        // 更新进度显示
+                        setLoadingProgress({
+                            current: segmentInfo.segments.size,
+                            total: segmentInfo.totalSegments
+                        });
 
                         // 检查是否接收完所有分段
                         if (segmentInfo.segments.size === segmentInfo.totalSegments) {
@@ -338,8 +380,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
                                 const completeJsonData = JSON.parse(completeData);
                                 console.log('📄 分段数据合并成功，处理最终响应');
 
-                                clearTimeout(timeout);
+                                clearTimeout(timeoutId);
                                 setLoading(false);
+                                setLoadingProgress(null);
+                                setCancelling(false);
 
                                 if (completeJsonData.data.error) {
                                     console.error('📄 文件查看错误:', completeJsonData.data.error);
@@ -367,8 +411,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
 
                             } catch (parseError) {
                                 console.error('📄 解析合并后的分段数据失败:', parseError);
-                                clearTimeout(timeout);
+                                clearTimeout(timeoutId);
                                 setLoading(false);
+                                setLoadingProgress(null);
+                                setCancelling(false);
                                 setFileContent({
                                     type: 'error',
                                     content: '',
@@ -385,8 +431,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
                     console.error('📄 数据长度:', event.data?.length);
                     console.error('📄 数据前100字符:', typeof event.data === 'string' ? event.data.substring(0, 100) : 'N/A');
 
-                    clearTimeout(timeout);
+                    clearTimeout(timeoutId);
                     setLoading(false);
+                    setLoadingProgress(null);
+                    setCancelling(false);
                     setFileContent({
                         type: 'error',
                         content: '',
@@ -406,7 +454,21 @@ const FileViewer: React.FC<FileViewerProps> = ({
             console.error('📄 发送文件查看请求失败:', error);
             message.error('发送文件查看请求失败');
         }
-    }, [webSocketRef, fileName, filePath, getFileType, connectionId, sessionId]);
+    }, [webSocketRef, fileName, filePath, getFileType, connectionId, sessionId, fileSize, formatFileSize]);
+
+    // 取消文件加载
+    const cancelFileLoading = useCallback(() => {
+        console.log('📄 用户取消文件加载');
+        setCancelling(true);
+        setLoading(false);
+        setLoadingProgress(null);
+        setFileContent({
+            type: 'error',
+            content: '',
+            error: '用户取消了文件加载'
+        });
+        message.info('已取消文件加载');
+    }, []);
 
     // 复制文件内容
     const copyContent = useCallback(() => {
@@ -567,8 +629,50 @@ const FileViewer: React.FC<FileViewerProps> = ({
         if (loading) {
             return (
                 <div style={{ textAlign: 'center', padding: '50px' }}>
-                    <Spin size="large" />
-                    <div style={{ marginTop: 16 }}>正在加载文件内容...</div>
+                    <Space direction="vertical" size="large">
+                        <Spin size="large" />
+                        <div>正在加载文件内容...</div>
+
+                        {loadingProgress && (
+                            <div>
+                                <div style={{ marginBottom: 8 }}>
+                                    <Text type="secondary">
+                                        正在接收分段数据：{loadingProgress.current} / {loadingProgress.total}
+                                    </Text>
+                                </div>
+                                <div style={{ width: 300, margin: '0 auto' }}>
+                                    <div style={{
+                                        width: '100%',
+                                        height: 6,
+                                        backgroundColor: '#f0f0f0',
+                                        borderRadius: 3,
+                                        overflow: 'hidden'
+                                    }}>
+                                        <div style={{
+                                            width: `${(loadingProgress.current / loadingProgress.total) * 100}%`,
+                                            height: '100%',
+                                            backgroundColor: '#1677ff',
+                                            transition: 'width 0.3s ease'
+                                        }} />
+                                    </div>
+                                </div>
+                                <div style={{ marginTop: 8 }}>
+                                    <Text type="secondary" style={{ fontSize: 12 }}>
+                                        {Math.round((loadingProgress.current / loadingProgress.total) * 100)}%
+                                    </Text>
+                                </div>
+                            </div>
+                        )}
+
+                        <Button
+                            onClick={cancelFileLoading}
+                            disabled={cancelling}
+                            danger
+                            type="text"
+                        >
+                            {cancelling ? '正在取消...' : '取消加载'}
+                        </Button>
+                    </Space>
                 </div>
             );
         }
