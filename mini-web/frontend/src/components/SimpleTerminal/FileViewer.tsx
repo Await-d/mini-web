@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-01-02 10:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-04 21:04:30
+ * @LastEditTime: 2025-06-04 22:22:15
  * @Description: 文件查看器组件
  */
 import React, { useState, useEffect, useCallback } from 'react';
@@ -369,48 +369,85 @@ const FileViewer: React.FC<FileViewerProps> = ({
                         if (segmentInfo.segments.size === segmentInfo.totalSegments) {
                             console.log('📄 接收完所有分段，开始合并');
 
-                            // 按顺序合并分段
-                            let completeData = '';
-                            for (let i = 0; i < segmentInfo.totalSegments; i++) {
-                                completeData += segmentInfo.segments.get(i) || '';
-                            }
-
                             try {
-                                // 解析完整的JSON数据
-                                const completeJsonData = JSON.parse(completeData);
-                                console.log('📄 分段数据合并成功，处理最终响应');
+                                // 使用流式合并避免大字符串拼接
+                                const segments: string[] = [];
+                                for (let i = 0; i < segmentInfo.totalSegments; i++) {
+                                    const segment = segmentInfo.segments.get(i);
+                                    if (segment === undefined) {
+                                        throw new Error(`缺少分段 ${i}`);
+                                    }
+                                    segments.push(segment);
+                                }
 
-                                clearTimeout(timeoutId);
-                                setLoading(false);
-                                setLoadingProgress(null);
-                                setCancelling(false);
+                                // 分批处理大数据，避免UI阻塞
+                                const processSegments = async () => {
+                                    // 合并所有分段
+                                    const completeData = segments.join('');
+                                    console.log('📄 分段数据合并完成，数据大小:', completeData.length);
 
-                                if (completeJsonData.data.error) {
-                                    console.error('📄 文件查看错误:', completeJsonData.data.error);
+                                    // 使用setTimeout让出主线程，避免UI阻塞
+                                    return new Promise<any>((resolve, reject) => {
+                                        setTimeout(() => {
+                                            try {
+                                                const completeJsonData = JSON.parse(completeData);
+                                                resolve(completeJsonData);
+                                            } catch (error) {
+                                                reject(error);
+                                            }
+                                        }, 0);
+                                    });
+                                };
+
+                                processSegments().then(completeJsonData => {
+                                    console.log('📄 分段数据解析成功，处理最终响应');
+
+                                    clearTimeout(timeoutId);
+                                    setLoading(false);
+                                    setLoadingProgress(null);
+                                    setCancelling(false);
+
+                                    if (completeJsonData.data.error) {
+                                        console.error('📄 文件查看错误:', completeJsonData.data.error);
+                                        setFileContent({
+                                            type: 'error',
+                                            content: '',
+                                            error: completeJsonData.data.error
+                                        });
+                                        message.error(`文件加载失败: ${completeJsonData.data.error}`);
+                                    } else {
+                                        console.log('📄 文件查看成功:', completeJsonData.data.fileType, completeJsonData.data.content?.length);
+                                        setFileContent({
+                                            type: completeJsonData.data.fileType || fileType,
+                                            content: completeJsonData.data.content || '',
+                                            encoding: completeJsonData.data.encoding,
+                                            mimeType: completeJsonData.data.mimeType
+                                        });
+                                    }
+
+                                    // 清理分段数据
+                                    segmentData.delete(requestId);
+
+                                    // 移除监听器
+                                    webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+
+                                }).catch(parseError => {
+                                    console.error('📄 解析合并后的分段数据失败:', parseError);
+                                    clearTimeout(timeoutId);
+                                    setLoading(false);
+                                    setLoadingProgress(null);
+                                    setCancelling(false);
                                     setFileContent({
                                         type: 'error',
                                         content: '',
-                                        error: completeJsonData.data.error
+                                        error: '分段数据解析失败'
                                     });
-                                    message.error(`文件加载失败: ${completeJsonData.data.error}`);
-                                } else {
-                                    console.log('📄 文件查看成功:', completeJsonData.data.fileType, completeJsonData.data.content?.length);
-                                    setFileContent({
-                                        type: completeJsonData.data.fileType || fileType,
-                                        content: completeJsonData.data.content || '',
-                                        encoding: completeJsonData.data.encoding,
-                                        mimeType: completeJsonData.data.mimeType
-                                    });
-                                }
+                                    message.error('分段数据解析失败');
+                                    webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+                                });
 
-                                // 清理分段数据
-                                segmentData.delete(requestId);
-
-                                // 移除监听器
-                                webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
-
-                            } catch (parseError) {
-                                console.error('📄 解析合并后的分段数据失败:', parseError);
+                            } catch (segmentError) {
+                                console.error('📄 分段处理失败:', segmentError);
                                 clearTimeout(timeoutId);
                                 setLoading(false);
                                 setLoadingProgress(null);
@@ -418,9 +455,9 @@ const FileViewer: React.FC<FileViewerProps> = ({
                                 setFileContent({
                                     type: 'error',
                                     content: '',
-                                    error: '分段数据解析失败'
+                                    error: '分段数据处理失败'
                                 });
-                                message.error('分段数据解析失败');
+                                message.error('分段数据处理失败');
                                 webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
                             }
                         }

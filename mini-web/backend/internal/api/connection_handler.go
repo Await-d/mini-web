@@ -31,11 +31,81 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// SafeWebSocketConn 线程安全的WebSocket连接包装器
+type SafeWebSocketConn struct {
+	conn  *websocket.Conn
+	mutex sync.Mutex
+}
+
+// WriteMessage 线程安全的写入消息
+func (s *SafeWebSocketConn) WriteMessage(messageType int, data []byte) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.conn.WriteMessage(messageType, data)
+}
+
+// SetWriteDeadline 设置写入超时
+func (s *SafeWebSocketConn) SetWriteDeadline(t time.Time) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.conn.SetWriteDeadline(t)
+}
+
+// Close 关闭连接
+func (s *SafeWebSocketConn) Close() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.conn.Close()
+}
+
+// 其他WebSocket方法的包装
+func (s *SafeWebSocketConn) ReadMessage() (messageType int, p []byte, err error) {
+	return s.conn.ReadMessage()
+}
+
+func (s *SafeWebSocketConn) SetReadDeadline(t time.Time) error {
+	return s.conn.SetReadDeadline(t)
+}
+
+func (s *SafeWebSocketConn) SetPingHandler(h func(appData string) error) {
+	s.conn.SetPingHandler(h)
+}
+
+func (s *SafeWebSocketConn) SetPongHandler(h func(appData string) error) {
+	s.conn.SetPongHandler(h)
+}
+
+func (s *SafeWebSocketConn) SetCloseHandler(h func(code int, text string) error) {
+	s.conn.SetCloseHandler(h)
+}
+
+// NewSafeWebSocketConn 创建线程安全的WebSocket连接
+func NewSafeWebSocketConn(conn *websocket.Conn) *SafeWebSocketConn {
+	return &SafeWebSocketConn{
+		conn: conn,
+	}
+}
+
+// safeWriteMessage 线程安全地写入WebSocket消息
+func safeWriteMessage(wsConn *websocket.Conn, messageType int, data []byte, mutex *sync.Mutex) error {
+	mutex.Lock()
+	defer mutex.Unlock()
+	return wsConn.WriteMessage(messageType, data)
+}
+
+// safeSetWriteDeadline 线程安全地设置写入超时
+func safeSetWriteDeadline(wsConn *websocket.Conn, t time.Time, mutex *sync.Mutex) error {
+	mutex.Lock()
+	defer mutex.Unlock()
+	return wsConn.SetWriteDeadline(t)
+}
+
 // ConnectionHandler 连接处理器
 type ConnectionHandler struct {
 	connService     *service.ConnectionService
 	binaryProtocol  *service.BinaryProtocolHandler
 	specialDetector *service.SpecialCommandDetector
+	wsWriteMutex    sync.Mutex // WebSocket写入互斥锁
 }
 
 // NewConnectionHandler 创建连接处理器实例
@@ -1568,6 +1638,9 @@ func (h *ConnectionHandler) sendSegmentedResponse(wsConn *websocket.Conn, data [
 			return fmt.Errorf("WebSocket连接为空")
 		}
 
+		// 使用互斥锁保护WebSocket写入操作
+		h.wsWriteMutex.Lock()
+
 		// 设置写入超时
 		writeTimeout := 10 * time.Second
 		wsConn.SetWriteDeadline(time.Now().Add(writeTimeout))
@@ -1575,6 +1648,8 @@ func (h *ConnectionHandler) sendSegmentedResponse(wsConn *websocket.Conn, data [
 		// 发送分段消息
 		log.Printf("发送分段 %d/%d: 数据长度=%d字节", i+1, totalSegments, len(segmentData))
 		err = wsConn.WriteMessage(websocket.TextMessage, segmentBytes)
+
+		h.wsWriteMutex.Unlock()
 		if err != nil {
 			log.Printf("发送分段 %d 失败: %v", i, err)
 			return fmt.Errorf("发送分段 %d 失败: %v", i, err)
@@ -1789,12 +1864,17 @@ func (h *ConnectionHandler) sendSegmentedFileViewResponse(wsConn *websocket.Conn
 			return fmt.Errorf("序列化文件查看分段消息失败: %v", err)
 		}
 
+		// 使用互斥锁保护WebSocket写入操作
+		h.wsWriteMutex.Lock()
+
 		// 设置写入超时
 		wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 
 		// 发送分段消息
 		log.Printf("发送文件查看分段 %d/%d: 数据长度=%d字节", i+1, totalSegments, len(segmentData))
 		err = wsConn.WriteMessage(websocket.TextMessage, segmentBytes)
+
+		h.wsWriteMutex.Unlock()
 		if err != nil {
 			log.Printf("发送文件查看分段 %d 失败: %v", i, err)
 			return fmt.Errorf("发送文件查看分段 %d 失败: %v", i, err)
