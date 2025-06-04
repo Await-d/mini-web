@@ -1880,9 +1880,22 @@ func (h *ConnectionHandler) sendSegmentedFileViewResponse(wsConn *websocket.Conn
 			return fmt.Errorf("发送文件查看分段 %d 失败: %v", i, err)
 		}
 
-		// 在分段之间添加延迟，防止网络拥塞
+		// 在分段之间添加自适应延迟，防止网络拥塞和前端处理不过来
 		if i < totalSegments-1 {
-			time.Sleep(50 * time.Millisecond)
+			// 根据分段总数自适应调整延迟时间
+			var delay time.Duration
+			if totalSegments > 500 {
+				delay = 200 * time.Millisecond // 超大文件：200ms延迟
+			} else if totalSegments > 100 {
+				delay = 150 * time.Millisecond // 大文件：150ms延迟
+			} else if totalSegments > 50 {
+				delay = 100 * time.Millisecond // 中等文件：100ms延迟
+			} else {
+				delay = 50 * time.Millisecond // 小文件：50ms延迟
+			}
+
+			log.Printf("分段传输延迟: %v (总分段数: %d)", delay, totalSegments)
+			time.Sleep(delay)
 		}
 	}
 
