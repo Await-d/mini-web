@@ -284,3 +284,55 @@
     padding: 0 6px;
   }
 }
+
+/* 标签内延迟显示 */
+.latencyDisplay {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+/* 不同延迟级别的颜色 */
+.latencyGood {
+  background-color: #52c41a;
+  color: white;
+}
+
+.latencyNormal {
+  background-color: #1677ff;
+  color: white;
+}
+
+.latencyWarning {
+  background-color: #fa8c16;
+  color: white;
+}
+
+.latencyBad {
+  background-color: #ff4d4f;
+  color: white;
+}
+
+/* 标签标题容器 */
+.tabTitleContainer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+/* 标签更多操作图标 */
+.tabMoreIcon {
+  margin-left: 4px;
+  opacity: 0.6;
+  transition: opacity 0.3s;
+}
+
+.tabMoreIcon:hover {
+  opacity: 1;
+}

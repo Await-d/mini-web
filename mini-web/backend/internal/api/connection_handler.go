@@ -653,11 +653,11 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 	activityTimer := time.NewTicker(10 * time.Second)
 	defer activityTimer.Stop()
 
-	// 添加ping-pong机制检测连接状态
-	pingTimer := time.NewTicker(30 * time.Second)
-	defer pingTimer.Stop()
+	// 禁用原生ping/pong机制，使用二进制协议心跳代替
+	// pingTimer := time.NewTicker(30 * time.Second)
+	// defer pingTimer.Stop()
 
-	// 设置pong处理器
+	// 设置pong处理器（仍保留，以防客户端发送原生ping）
 	wsConn.SetPongHandler(func(appData string) error {
 		log.Printf("收到pong响应: %s", appData)
 		// 更新活动时间
@@ -735,10 +735,16 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 
 				// 处理心跳消息
 				if protocolMsg.Header.MessageType == service.MessageTypeHeartbeat {
-					log.Printf("收到心跳消息")
-					// 可以回复心跳响应
+					log.Printf("收到心跳消息，回复心跳响应")
+					// 更新活动时间
+					select {
+					case activeChan <- struct{}{}:
+					default:
+					}
+					// 回复心跳响应，用于客户端计算延迟
 					if heartbeatData, err := h.binaryProtocol.CreateHeartbeatMessage(); err == nil {
 						wsConn.WriteMessage(websocket.BinaryMessage, heartbeatData)
+						log.Printf("发送心跳响应")
 					}
 					continue
 				}
@@ -1473,14 +1479,15 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 				wsConn.WriteMessage(websocket.TextMessage, []byte("会话超时，连接将被关闭"))
 				return
 			}
-		case <-pingTimer.C:
-			// 发送ping检测连接状态
-			log.Printf("发送ping检测连接状态")
-			wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if err := wsConn.WriteMessage(websocket.PingMessage, []byte("ping")); err != nil {
-				log.Printf("发送ping失败，连接可能已断开: %v", err)
-				return
-			}
+			// 移除原生ping机制，使用二进制协议心跳
+			// case <-pingTimer.C:
+			//	// 发送ping检测连接状态
+			//	log.Printf("发送ping检测连接状态")
+			//	wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			//	if err := wsConn.WriteMessage(websocket.PingMessage, []byte("ping")); err != nil {
+			//		log.Printf("发送ping失败，连接可能已断开: %v", err)
+			//		return
+			//	}
 		}
 	}
 }

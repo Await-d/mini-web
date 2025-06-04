@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-02 18:42:39
+ * @LastEditTime: 2025-06-04 19:49:32
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
@@ -60,10 +60,14 @@ export class WebSocketService {
         lastDisconnectionTime: null
     };
 
-    // 心跳检测间隔(毫秒)
-    private heartbeatInterval: number = 30000;
+    // 心跳检测间隔(毫秒) - 调整为25秒，避免与服务器检测冲突
+    private heartbeatInterval: number = 25000;
     // 心跳检测定时器
     private heartbeatTimers: Map<string, number> = new Map();
+    // 心跳发送时间记录，用于计算延迟
+    private heartbeatSentTimes: Map<string, number> = new Map();
+    // 心跳延迟记录 (毫秒)
+    private heartbeatLatencies: Map<string, number> = new Map();
 
     /**
      * 创建并管理WebSocket连接
@@ -231,7 +235,20 @@ export class WebSocketService {
 
                         // 处理心跳消息
                         if (protocolMessage.header.messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.HEARTBEAT) {
-                            console.debug(`收到心跳消息: ${tab.key}`);
+                            const receivedTime = Date.now();
+                            const sentTime = this.heartbeatSentTimes.get(tab.key);
+
+                            if (sentTime) {
+                                const latency = receivedTime - sentTime;
+                                this.heartbeatLatencies.set(tab.key, latency);
+                                console.debug(`💓 [${tab.key}] 心跳延迟: ${latency}ms`);
+
+                                // 触发心跳延迟更新事件
+                                window.dispatchEvent(new CustomEvent('terminal-heartbeat-latency', {
+                                    detail: { tabKey: tab.key, latency }
+                                }));
+                            }
+
                             return; // 心跳消息不传递给处理函数
                         }
 
@@ -374,6 +391,31 @@ export class WebSocketService {
                 detail: { tabKey: tab.key, error: 'WebSocket连接错误' }
             }));
         };
+
+        // 添加ping处理器，防止原生ping/pong与二进制协议心跳冲突
+        if ('onping' in ws) {
+            (ws as any).onping = (event: any) => {
+                console.debug(`收到WebSocket ping: ${tab.key}`);
+                // 自动回复pong
+                if (ws.readyState === WebSocket.OPEN) {
+                    try {
+                        // 发送pong响应
+                        (ws as any).pong(event.data || new ArrayBuffer(0));
+                        console.debug(`回复WebSocket pong: ${tab.key}`);
+                    } catch (error) {
+                        console.warn(`回复pong失败: ${tab.key}`, error);
+                    }
+                }
+            };
+        }
+
+        // 添加pong处理器
+        if ('onpong' in ws) {
+            (ws as any).onpong = (event: any) => {
+                console.debug(`收到WebSocket pong: ${tab.key}`);
+                // 更新活动状态
+            };
+        }
     }
 
     /**
@@ -418,11 +460,15 @@ export class WebSocketService {
         const timerId = window.setInterval(async () => {
             if (ws.readyState === WebSocket.OPEN) {
                 try {
+                    // 记录心跳发送时间
+                    const sentTime = Date.now();
+                    this.heartbeatSentTimes.set(tabKey, sentTime);
+
                     // 使用二进制协议发送心跳消息
                     const heartbeatData = await binaryJsonProtocol.createHeartbeatMessage();
                     ws.send(heartbeatData);
                     this.stats.totalDataSent += heartbeatData.byteLength;
-                    console.debug(`通过二进制协议发送心跳: ${tabKey}`);
+                    console.debug(`📡 [${tabKey}] 发送心跳包 (${heartbeatData.byteLength} bytes)`);
                 } catch (error) {
                     console.warn(`发送心跳包失败: ${tabKey}`, error);
                     this.clearHeartbeat(tabKey);
@@ -447,6 +493,18 @@ export class WebSocketService {
             clearInterval(timerId);
             this.heartbeatTimers.delete(tabKey);
         }
+        // 清除心跳相关数据
+        this.heartbeatSentTimes.delete(tabKey);
+        this.heartbeatLatencies.delete(tabKey);
+    }
+
+    /**
+     * 获取指定标签的心跳延迟
+     * @param tabKey 标签键
+     * @returns 心跳延迟(毫秒)，如果没有数据则返回null
+     */
+    getHeartbeatLatency(tabKey: string): number | null {
+        return this.heartbeatLatencies.get(tabKey) || null;
     }
 
     /**

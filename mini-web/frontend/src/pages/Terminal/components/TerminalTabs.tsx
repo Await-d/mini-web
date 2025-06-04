@@ -29,7 +29,7 @@ export interface TerminalTabsProps {
   onTabClose: (key: string) => void;
   onTabRefresh?: (key: string) => void;
   onTabDuplicate?: (key: string) => void;
-  networkLatency?: number | null; // 添加网络延迟属性
+  networkLatency?: number | null; // 添加网络延迟属性（全局显示）
 }
 
 // 右键菜单项类型
@@ -164,7 +164,7 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
     },
     {
       key: 'divider1',
-      type: 'divider',
+      type: 'divider' as const,
     },
     {
       key: 'close',
@@ -197,6 +197,7 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
   const renderTabTitle = (tab: TerminalTab) => {
     const isConnected = tab.isConnected;
     const statusColor = isConnected ? 'green' : 'red';
+    const latency = tab.networkLatency;
 
     return (
       <div className={styles.tabTitleContainer}>
@@ -204,49 +205,22 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
         <span className={styles.tabTitle}>
           {tab.title}
         </span>
-        <Dropdown
-          menu={{
-            items: [
-              {
-                key: "refresh",
-                icon: <ReloadOutlined />,
-                label: "刷新连接",
-                onClick: (e) => {
-                  e.domEvent.stopPropagation();
-                  onTabRefresh?.(tab.key);
-                }
-              },
-              {
-                key: "duplicate",
-                icon: <CopyOutlined />,
-                label: "复制标签页",
-                onClick: (e) => {
-                  e.domEvent.stopPropagation();
-                  onTabDuplicate?.(tab.key);
-                }
-              },
-              {
-                type: "divider"
-              },
-              {
-                key: "close",
-                icon: <CloseOutlined />,
-                label: "关闭标签页",
-                onClick: (e) => {
-                  e.domEvent.stopPropagation();
-                  onTabClose(tab.key);
-                }
-              }
-            ]
-          }}
-          trigger={['click']}
-          placement="bottomRight"
+        {/* 显示延迟信息 */}
+        {latency !== null && latency !== undefined && (
+          <span className={`${styles.latencyDisplay} ${latency < 100 ? styles.latencyGood :
+            latency < 300 ? styles.latencyNormal :
+              latency < 600 ? styles.latencyWarning : styles.latencyBad
+            }`}>
+            {latency}ms
+          </span>
+        )}
+        <span
+          className={styles.tabMoreIcon}
+          onClick={(e) => e.stopPropagation()}
+          title="更多操作"
         >
-          <MoreOutlined
-            className={styles.tabMoreIcon}
-            onClick={(e) => e.stopPropagation()}
-          />
-        </Dropdown>
+          <MoreOutlined />
+        </span>
       </div>
     );
   };

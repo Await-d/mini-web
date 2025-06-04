@@ -50,6 +50,27 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
   const connectionId = connectionParams?.connectionId;
   const sessionId = connectionParams?.sessionId;
 
+  // 监听心跳延迟事件
+  useEffect(() => {
+    const handleHeartbeatLatency = (event: CustomEvent) => {
+      const { tabKey, latency } = event.detail;
+
+      // 更新对应标签的网络延迟
+      updateTab(tabKey, { networkLatency: latency });
+
+      // 如果是当前活动标签，也更新本地状态
+      if (tabKey === activeTabKey) {
+        setNetworkLatency(latency);
+      }
+    };
+
+    window.addEventListener('terminal-heartbeat-latency', handleHeartbeatLatency as EventListener);
+
+    return () => {
+      window.removeEventListener('terminal-heartbeat-latency', handleHeartbeatLatency as EventListener);
+    };
+  }, [updateTab, activeTabKey]);
+
   // 处理全屏切换
   const toggleFullscreen = () => {
     setFullscreen(prev => !prev);
