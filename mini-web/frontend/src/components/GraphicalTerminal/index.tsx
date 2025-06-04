@@ -88,7 +88,6 @@ const GraphicalTerminal: React.FC<GraphicalTerminalProps> = ({
 
         // 处理Blob数据
         if (data instanceof Blob) {
-          console.log('收到Blob数据');
           // 转换Blob为文本或ArrayBuffer
           data.text().then(text => {
             try {

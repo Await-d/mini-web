@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-04 20:03:41
+ * @LastEditTime: 2025-06-04 20:26:59
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
@@ -127,6 +127,9 @@ export class WebSocketService {
             console.log(`创建WebSocket连接: ${wsUrl}`);
             const ws = new WebSocket(wsUrl);
 
+            // 设置初始活动时间
+            (ws as any).lastActivity = Date.now();
+
             // 存储连接
             this.connections.set(tab.key, ws);
 
@@ -201,6 +204,9 @@ export class WebSocketService {
 
         // 消息事件处理
         ws.onmessage = async (event) => {
+            // 更新连接活动时间
+            (ws as any).lastActivity = Date.now();
+
             // 更新统计信息
             const dataSize = event.data.length || event.data.byteLength || event.data.size || 0;
             this.stats.totalDataReceived += dataSize;
@@ -214,7 +220,6 @@ export class WebSocketService {
 
                 // 如果是Blob，先转换为ArrayBuffer
                 if (event.data instanceof Blob) {
-                    console.log(`🔄 [${tab.key}] 收到Blob数据，大小: ${event.data.size} bytes`);
                     arrayBufferData = await event.data.arrayBuffer();
                 } else {
                     arrayBufferData = event.data;
@@ -241,8 +246,6 @@ export class WebSocketService {
                                 const currentTime = Date.now();
                                 const latency = currentTime - sendTimestamp;
                                 this.networkLatencies.set(tab.key, latency);
-                                console.debug(`💓 [${tab.key}] 心跳响应延迟: ${latency}ms`);
-
                                 // 触发延迟更新事件
                                 window.dispatchEvent(new CustomEvent('network-latency-update', {
                                     detail: { tabKey: tab.key, latency: latency }
@@ -466,8 +469,11 @@ export class WebSocketService {
                     // 使用二进制协议发送心跳消息
                     const heartbeatData = await binaryJsonProtocol.createHeartbeatMessage();
                     ws.send(heartbeatData);
+
+                    // 更新连接活动时间
+                    (ws as any).lastActivity = Date.now();
+
                     this.stats.totalDataSent += heartbeatData.byteLength;
-                    console.debug(`📡 [${tabKey}] 发送心跳包 (${heartbeatData.byteLength} bytes) 时间戳: ${timestamp}`);
                 } catch (error) {
                     console.warn(`发送心跳包失败: ${tabKey}`, error);
                     this.clearHeartbeat(tabKey);
@@ -671,6 +677,9 @@ export class WebSocketService {
 
             ws.send(finalData);
 
+            // 更新连接活动时间
+            (ws as any).lastActivity = Date.now();
+
             // 更新统计信息
             this.stats.totalDataSent += dataSize;
             return true;
@@ -702,6 +711,9 @@ export class WebSocketService {
             const binaryData = await binaryJsonProtocol.encodeMessage(jsonData);
             ws.send(binaryData);
 
+            // 更新连接活动时间
+            (ws as any).lastActivity = Date.now();
+
             this.stats.totalDataSent += binaryData.byteLength;
             return true;
         } catch (error) {
@@ -732,6 +744,9 @@ export class WebSocketService {
         try {
             const encodedData = await binaryJsonProtocol.encodeMessage(metadata, binaryData);
             ws.send(encodedData);
+
+            // 更新连接活动时间
+            (ws as any).lastActivity = Date.now();
 
             this.stats.totalDataSent += encodedData.byteLength;
             return true;
@@ -790,6 +805,10 @@ export class WebSocketService {
             view.setUint8(4, PROTOCOL_CONSTANTS.MESSAGE_TYPES.PROTOCOL_NEGOTIATION);
 
             ws.send(encodedMessage);
+
+            // 更新连接活动时间
+            (ws as any).lastActivity = Date.now();
+
             console.log(`发起协议协商: ${tab.key}`);
             return true;
         } catch (error) {

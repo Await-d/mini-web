@@ -980,7 +980,6 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     const handleNetworkLatencyUpdate = (event: CustomEvent) => {
       const { tabKey, latency } = event.detail || {};
       if (tabKey && typeof latency === 'number') {
-        console.debug(`💓 [${tabKey}] 更新网络延迟: ${latency}ms`);
         updateTab(tabKey, { networkLatency: latency });
       }
     };
