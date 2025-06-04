@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-04 19:49:32
+ * @LastEditTime: 2025-06-04 20:03:41
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
@@ -64,10 +64,10 @@ export class WebSocketService {
     private heartbeatInterval: number = 25000;
     // 心跳检测定时器
     private heartbeatTimers: Map<string, number> = new Map();
-    // 心跳发送时间记录，用于计算延迟
-    private heartbeatSentTimes: Map<string, number> = new Map();
-    // 心跳延迟记录 (毫秒)
-    private heartbeatLatencies: Map<string, number> = new Map();
+    // 心跳发送时间戳用于计算延迟
+    private heartbeatTimestamps: Map<string, number> = new Map();
+    // 网络延迟数据
+    private networkLatencies: Map<string, number> = new Map();
 
     /**
      * 创建并管理WebSocket连接
@@ -235,20 +235,19 @@ export class WebSocketService {
 
                         // 处理心跳消息
                         if (protocolMessage.header.messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.HEARTBEAT) {
-                            const receivedTime = Date.now();
-                            const sentTime = this.heartbeatSentTimes.get(tab.key);
+                            // 计算心跳延迟
+                            const sendTimestamp = this.heartbeatTimestamps.get(tab.key);
+                            if (sendTimestamp) {
+                                const currentTime = Date.now();
+                                const latency = currentTime - sendTimestamp;
+                                this.networkLatencies.set(tab.key, latency);
+                                console.debug(`💓 [${tab.key}] 心跳响应延迟: ${latency}ms`);
 
-                            if (sentTime) {
-                                const latency = receivedTime - sentTime;
-                                this.heartbeatLatencies.set(tab.key, latency);
-                                console.debug(`💓 [${tab.key}] 心跳延迟: ${latency}ms`);
-
-                                // 触发心跳延迟更新事件
-                                window.dispatchEvent(new CustomEvent('terminal-heartbeat-latency', {
-                                    detail: { tabKey: tab.key, latency }
+                                // 触发延迟更新事件
+                                window.dispatchEvent(new CustomEvent('network-latency-update', {
+                                    detail: { tabKey: tab.key, latency: latency }
                                 }));
                             }
-
                             return; // 心跳消息不传递给处理函数
                         }
 
@@ -460,15 +459,15 @@ export class WebSocketService {
         const timerId = window.setInterval(async () => {
             if (ws.readyState === WebSocket.OPEN) {
                 try {
-                    // 记录心跳发送时间
-                    const sentTime = Date.now();
-                    this.heartbeatSentTimes.set(tabKey, sentTime);
+                    // 记录心跳发送时间戳
+                    const timestamp = Date.now();
+                    this.heartbeatTimestamps.set(tabKey, timestamp);
 
                     // 使用二进制协议发送心跳消息
                     const heartbeatData = await binaryJsonProtocol.createHeartbeatMessage();
                     ws.send(heartbeatData);
                     this.stats.totalDataSent += heartbeatData.byteLength;
-                    console.debug(`📡 [${tabKey}] 发送心跳包 (${heartbeatData.byteLength} bytes)`);
+                    console.debug(`📡 [${tabKey}] 发送心跳包 (${heartbeatData.byteLength} bytes) 时间戳: ${timestamp}`);
                 } catch (error) {
                     console.warn(`发送心跳包失败: ${tabKey}`, error);
                     this.clearHeartbeat(tabKey);
@@ -493,18 +492,9 @@ export class WebSocketService {
             clearInterval(timerId);
             this.heartbeatTimers.delete(tabKey);
         }
-        // 清除心跳相关数据
-        this.heartbeatSentTimes.delete(tabKey);
-        this.heartbeatLatencies.delete(tabKey);
-    }
-
-    /**
-     * 获取指定标签的心跳延迟
-     * @param tabKey 标签键
-     * @returns 心跳延迟(毫秒)，如果没有数据则返回null
-     */
-    getHeartbeatLatency(tabKey: string): number | null {
-        return this.heartbeatLatencies.get(tabKey) || null;
+        // 清理延迟相关数据
+        this.heartbeatTimestamps.delete(tabKey);
+        this.networkLatencies.delete(tabKey);
     }
 
     /**
@@ -863,6 +853,23 @@ export class WebSocketService {
                 this.closeConnection(tabKey);
             }
         });
+    }
+
+    /**
+     * 获取指定标签的网络延迟
+     * @param tabKey 标签键
+     * @returns 网络延迟（毫秒）或null
+     */
+    getNetworkLatency(tabKey: string): number | null {
+        return this.networkLatencies.get(tabKey) || null;
+    }
+
+    /**
+     * 获取所有标签的网络延迟
+     * @returns 所有标签的延迟映射
+     */
+    getAllNetworkLatencies(): Map<string, number> {
+        return new Map(this.networkLatencies);
     }
 }
 

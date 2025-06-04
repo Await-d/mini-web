@@ -976,14 +976,25 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
       }
     };
 
+    // 添加网络延迟更新处理
+    const handleNetworkLatencyUpdate = (event: CustomEvent) => {
+      const { tabKey, latency } = event.detail || {};
+      if (tabKey && typeof latency === 'number') {
+        console.debug(`💓 [${tabKey}] 更新网络延迟: ${latency}ms`);
+        updateTab(tabKey, { networkLatency: latency });
+      }
+    };
+
     // 添加事件监听器
     window.addEventListener('websocket-error', handleWebSocketError as EventListener);
+    window.addEventListener('network-latency-update', handleNetworkLatencyUpdate as EventListener);
 
     // 清理事件监听器
     return () => {
       window.removeEventListener('websocket-error', handleWebSocketError as EventListener);
+      window.removeEventListener('network-latency-update', handleNetworkLatencyUpdate as EventListener);
     };
-  }, [message]);
+  }, [message, updateTab]);
 
   const setActiveTab = useCallback((key: string) => {
     if (state.activeTabKey === key && state.tabs.some(t => t.key === key)) return;

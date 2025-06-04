@@ -741,10 +741,9 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 					case activeChan <- struct{}{}:
 					default:
 					}
-					// 回复心跳响应，用于客户端计算延迟
-					if heartbeatData, err := h.binaryProtocol.CreateHeartbeatMessage(); err == nil {
-						wsConn.WriteMessage(websocket.BinaryMessage, heartbeatData)
-						log.Printf("发送心跳响应")
+					// 回复心跳响应以便客户端测量延迟
+					if heartbeatReply, err := h.binaryProtocol.CreateHeartbeatMessage(); err == nil {
+						wsConn.WriteMessage(websocket.BinaryMessage, heartbeatReply)
 					}
 					continue
 				}

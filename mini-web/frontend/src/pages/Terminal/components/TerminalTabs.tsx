@@ -29,7 +29,7 @@ export interface TerminalTabsProps {
   onTabClose: (key: string) => void;
   onTabRefresh?: (key: string) => void;
   onTabDuplicate?: (key: string) => void;
-  networkLatency?: number | null; // 添加网络延迟属性（全局显示）
+  networkLatency?: number | null; // 添加网络延迟属性
 }
 
 // 右键菜单项类型
@@ -164,7 +164,7 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
     },
     {
       key: 'divider1',
-      type: 'divider' as const,
+      type: 'divider',
     },
     {
       key: 'close',
@@ -193,34 +193,87 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
     }
   };
 
+  // 渲染标签延迟徽章
+  const renderLatencyBadge = (latency: number | null | undefined) => {
+    if (latency === null || latency === undefined) {
+      return null;
+    }
+
+    let latencyClass = styles.latencyNormal;
+    let latencyText = `${latency}ms`;
+
+    if (latency < 100) {
+      latencyClass = styles.latencyGood;
+    } else if (latency >= 100 && latency < 300) {
+      latencyClass = styles.latencyNormal;
+    } else if (latency >= 300 && latency < 600) {
+      latencyClass = styles.latencyWarning;
+    } else {
+      latencyClass = styles.latencyBad;
+    }
+
+    return (
+      <span className={`${styles.latencyBadge} ${latencyClass}`} style={{ marginRight: '6px', fontSize: '10px' }}>
+        {latencyText}
+      </span>
+    );
+  };
+
   // 渲染标签标题
   const renderTabTitle = (tab: TerminalTab) => {
     const isConnected = tab.isConnected;
     const statusColor = isConnected ? 'green' : 'red';
-    const latency = tab.networkLatency;
 
     return (
       <div className={styles.tabTitleContainer}>
         <Badge color={statusColor} />
+        {renderLatencyBadge(tab.networkLatency)}
         <span className={styles.tabTitle}>
           {tab.title}
         </span>
-        {/* 显示延迟信息 */}
-        {latency !== null && latency !== undefined && (
-          <span className={`${styles.latencyDisplay} ${latency < 100 ? styles.latencyGood :
-            latency < 300 ? styles.latencyNormal :
-              latency < 600 ? styles.latencyWarning : styles.latencyBad
-            }`}>
-            {latency}ms
-          </span>
-        )}
-        <span
-          className={styles.tabMoreIcon}
-          onClick={(e) => e.stopPropagation()}
-          title="更多操作"
+        <Dropdown
+          menu={{
+            items: [
+              {
+                key: "refresh",
+                icon: <ReloadOutlined />,
+                label: "刷新连接",
+                onClick: (e: any) => {
+                  e.domEvent.stopPropagation();
+                  onTabRefresh?.(tab.key);
+                }
+              },
+              {
+                key: "duplicate",
+                icon: <CopyOutlined />,
+                label: "复制标签页",
+                onClick: (e: any) => {
+                  e.domEvent.stopPropagation();
+                  onTabDuplicate?.(tab.key);
+                }
+              },
+              {
+                type: "divider" as const
+              },
+              {
+                key: "close",
+                icon: <CloseOutlined />,
+                label: "关闭标签页",
+                onClick: (e: any) => {
+                  e.domEvent.stopPropagation();
+                  onTabClose(tab.key);
+                }
+              }
+            ]
+          }}
+          trigger={['click']}
+          placement="bottomRight"
         >
-          <MoreOutlined />
-        </span>
+          <MoreOutlined
+            className={styles.tabMoreIcon}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </Dropdown>
       </div>
     );
   };
