@@ -125,17 +125,17 @@ export const useWebSocketManager = () => {
                         if (data.type === 'connected') {
                             console.log('【WebSocket】与服务器建立连接');
 
-                                                     // 通知连接成功
+                            // 通知连接成功
                             if (onConnect) {
                                 onConnect();
                             }
                         }
                         else if (data.type === 'data') {
-                                                   }
+                        }
                         else if (data.type === 'error') {
                             console.error(`【WebSocket】错误: ${data.message}`);
 
-                                                     // 调用错误回调
+                            // 调用错误回调
                             if (onConnectionFailed) {
                                 onConnectionFailed();
                             }
@@ -166,7 +166,7 @@ export const useWebSocketManager = () => {
             // 处理关闭
             ws.onclose = () => {
                 console.log('【WebSocket】RDP WebSocket连接关闭');
-                                // 调用重试回调
+                // 调用重试回调
                 if (onRetryNeeded) {
                     onRetryNeeded();
                 }

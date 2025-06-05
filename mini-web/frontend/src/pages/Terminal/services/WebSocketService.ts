@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-04 20:50:08
+ * @LastEditTime: 2025-06-05 20:54:41
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
@@ -271,6 +271,36 @@ export class WebSocketService {
 
         // 消息事件处理
         ws.onmessage = async (event) => {
+            // 立即检查是否为心跳消息，在任何其他处理之前标记
+
+            // 对于Blob类型，检查其大小是否为16字节（心跳包的典型大小）
+            if (event.data instanceof Blob && event.data.size === 16) {
+                // 立即标记为心跳消息
+                Object.defineProperty(event, '__isHeartbeatMessage', {
+                    value: true,
+                    writable: false,
+                    enumerable: false
+                });
+            }
+            // 对于ArrayBuffer，进行详细检查
+            else if (event.data instanceof ArrayBuffer && event.data.byteLength >= 8) {
+                const view = new DataView(event.data);
+                const magicNumber = view.getUint32(0, false);
+                const messageType = view.getUint8(4);
+
+
+                if (magicNumber === PROTOCOL_CONSTANTS.MAGIC_NUMBER &&
+                    messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.HEARTBEAT) {
+
+                    // 立即标记为心跳消息
+                    Object.defineProperty(event, '__isHeartbeatMessage', {
+                        value: true,
+                        writable: false,
+                        enumerable: false
+                    });
+                }
+            }
+
             // 更新连接活动时间
             (ws as any).lastActivity = Date.now();
 
@@ -299,8 +329,23 @@ export class WebSocketService {
                     arrayBufferData = event.data;
                 }
 
-                // 尝试解析二进制协议消息
-                if (binaryJsonProtocol.isProtocolMessage(arrayBufferData)) {
+                // 改进的协议判断：首先进行严格的完整性检查，避免误判文本消息
+                // 只有通过所有验证的消息才被认为是有效的二进制协议消息
+                const hasBasicProtocolStructure = binaryJsonProtocol.isProtocolMessage(arrayBufferData);
+                const hasMinimumSize = arrayBufferData.byteLength >= PROTOCOL_CONSTANTS.HEADER_SIZE;
+                const isCompleteAndValid = this.isCompleteProtocolMessage(arrayBufferData);
+
+                console.log(`🔍 [${tab.key}] 协议判断详情:`, {
+                    hasBasicProtocolStructure,
+                    hasMinimumSize,
+                    isCompleteAndValid,
+                    dataSize: arrayBufferData.byteLength,
+                    preview: Array.from(new Uint8Array(arrayBufferData.slice(0, 8))).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' ')
+                });
+
+                const isValidProtocolMessage = hasBasicProtocolStructure && hasMinimumSize && isCompleteAndValid;
+
+                if (isValidProtocolMessage) {
                     try {
                         const protocolMessage = await binaryJsonProtocol.decodeMessage(arrayBufferData);
 
@@ -908,20 +953,80 @@ export class WebSocketService {
      * @param negotiationData 协商数据
      */
     private handleProtocolNegotiation(tabKey: string, negotiationData: any): void {
-        console.log(`处理协议协商: ${tabKey}`, negotiationData);
 
         if (negotiationData && typeof negotiationData === 'object') {
             // 记录服务端支持的协议
             this.protocolSupport.set(tabKey, true);
-            console.log(`服务端支持二进制协议: ${tabKey}`, {
-                version: negotiationData.version,
-                features: negotiationData.features,
-                compressions: negotiationData.supportedCompressions
-            });
         } else {
             // 服务端不支持或协商失败
             this.protocolSupport.set(tabKey, false);
-            console.warn(`服务端不支持二进制协议: ${tabKey}`);
+        }
+    }
+
+    /**
+     * 检查是否为完整的协议消息
+     * 避免将恰好以魔数开头的文本消息误判为二进制协议消息
+     * @param data 消息数据
+     * @returns 是否为完整的协议消息
+     */
+    private isCompleteProtocolMessage(data: ArrayBuffer): boolean {
+        if (data.byteLength < PROTOCOL_CONSTANTS.HEADER_SIZE) {
+            return false;
+        }
+
+        try {
+            // 解析消息头
+            const view = new DataView(data, 0, PROTOCOL_CONSTANTS.HEADER_SIZE);
+            const header = {
+                magicNumber: view.getUint32(0, false),
+                messageType: view.getUint8(4),
+                compressionFlag: view.getUint8(5),
+                jsonLength: view.getUint32(6, false),
+                binaryLength: view.getUint32(10, false),
+                reserved: view.getUint16(14, false)
+            };
+
+            // 验证魔数
+            if (header.magicNumber !== PROTOCOL_CONSTANTS.MAGIC_NUMBER) {
+                return false;
+            }
+
+            // 验证消息类型
+            const validTypes = [
+                PROTOCOL_CONSTANTS.MESSAGE_TYPES.JSON_ONLY,
+                PROTOCOL_CONSTANTS.MESSAGE_TYPES.BINARY_ONLY,
+                PROTOCOL_CONSTANTS.MESSAGE_TYPES.MIXED,
+                PROTOCOL_CONSTANTS.MESSAGE_TYPES.HEARTBEAT,
+                PROTOCOL_CONSTANTS.MESSAGE_TYPES.PROTOCOL_NEGOTIATION
+            ] as const;
+            if (!validTypes.includes(header.messageType as any)) {
+                return false;
+            }
+
+            // 验证消息长度
+            const expectedLength = PROTOCOL_CONSTANTS.HEADER_SIZE + header.jsonLength + header.binaryLength;
+            if (data.byteLength !== expectedLength) {
+                return false;
+            }
+
+            // 验证数据完整性
+            if (header.jsonLength > 0) {
+                const jsonStart = PROTOCOL_CONSTANTS.HEADER_SIZE;
+                const jsonEnd = jsonStart + header.jsonLength;
+                const jsonBuffer = data.slice(jsonStart, jsonEnd);
+
+                try {
+                    const decoder = new TextDecoder();
+                    const jsonString = decoder.decode(jsonBuffer);
+                    JSON.parse(jsonString); // 尝试解析JSON
+                } catch (e) {
+                    return false;
+                }
+            }
+
+            return true;
+        } catch (error) {
+            return false;
         }
     }
 

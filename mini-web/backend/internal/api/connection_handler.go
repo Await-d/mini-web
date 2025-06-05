@@ -102,18 +102,21 @@ func safeSetWriteDeadline(wsConn *websocket.Conn, t time.Time, mutex *sync.Mutex
 
 // ConnectionHandler 连接处理器
 type ConnectionHandler struct {
-	connService     *service.ConnectionService
-	binaryProtocol  *service.BinaryProtocolHandler
-	specialDetector *service.SpecialCommandDetector
-	wsWriteMutex    sync.Mutex // WebSocket写入互斥锁
+	connService          *service.ConnectionService
+	binaryProtocol       *service.BinaryProtocolHandler
+	specialDetector      *service.SpecialCommandDetector
+	wsWriteMutex         sync.Mutex      // WebSocket写入互斥锁
+	cancelledRequests    map[string]bool // 取消的请求ID
+	cancelledRequestsMux sync.RWMutex    // 取消请求的读写锁
 }
 
 // NewConnectionHandler 创建连接处理器实例
 func NewConnectionHandler(connService *service.ConnectionService) *ConnectionHandler {
 	return &ConnectionHandler{
-		connService:     connService,
-		binaryProtocol:  service.NewBinaryProtocolHandler(),
-		specialDetector: service.NewSpecialCommandDetector(),
+		connService:       connService,
+		binaryProtocol:    service.NewBinaryProtocolHandler(),
+		specialDetector:   service.NewSpecialCommandDetector(),
+		cancelledRequests: make(map[string]bool),
 	}
 }
 
@@ -1145,6 +1148,26 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 								log.Printf("解析文件查看请求数据失败: %v", err)
 								h.sendFileViewError(wsConn, fileViewData.RequestId, "请求数据格式错误")
 							}
+						case "file_view_cancel":
+							// 处理文件查看取消请求
+							var cancelData struct {
+								RequestId string `json:"requestId"`
+								Reason    string `json:"reason,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &cancelData); err == nil {
+								log.Printf("收到文件查看取消请求: 请求ID=%s, 原因=%s", cancelData.RequestId, cancelData.Reason)
+
+								// 标记请求为已取消
+								h.markRequestCancelled(cancelData.RequestId)
+
+								// 发送取消确认响应
+								h.sendFileViewCancelResponse(wsConn, cancelData.RequestId, cancelData.Reason)
+
+								log.Printf("文件查看请求已标记为取消: %s", cancelData.RequestId)
+
+							} else {
+								log.Printf("解析文件查看取消请求数据失败: %v", err)
+							}
 						case "file_save":
 							// 处理文件保存请求
 							var fileSaveData struct {
@@ -1814,6 +1837,65 @@ func (h *ConnectionHandler) sendFileViewError(wsConn *websocket.Conn, requestId 
 	}
 }
 
+// sendFileViewCancelResponse 发送文件查看取消确认响应
+func (h *ConnectionHandler) sendFileViewCancelResponse(wsConn *websocket.Conn, requestId string, reason string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Cancelled bool   `json:"cancelled"`
+			Reason    string `json:"reason,omitempty"`
+		} `json:"data"`
+	}{
+		Type: "file_view_cancel_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Cancelled bool   `json:"cancelled"`
+			Reason    string `json:"reason,omitempty"`
+		}{
+			RequestId: requestId,
+			Cancelled: true,
+			Reason:    reason,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件查看取消响应失败: %v", err)
+		return
+	}
+
+	wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件查看取消响应失败: %v", err)
+	} else {
+		log.Printf("文件查看取消响应发送成功，请求ID: %s, 原因: %s", requestId, reason)
+	}
+}
+
+// markRequestCancelled 标记请求为已取消
+func (h *ConnectionHandler) markRequestCancelled(requestId string) {
+	h.cancelledRequestsMux.Lock()
+	defer h.cancelledRequestsMux.Unlock()
+	h.cancelledRequests[requestId] = true
+	log.Printf("标记请求为已取消: %s", requestId)
+}
+
+// isRequestCancelled 检查请求是否已取消
+func (h *ConnectionHandler) isRequestCancelled(requestId string) bool {
+	h.cancelledRequestsMux.RLock()
+	defer h.cancelledRequestsMux.RUnlock()
+	return h.cancelledRequests[requestId]
+}
+
+// clearCancelledRequest 清理已取消的请求记录
+func (h *ConnectionHandler) clearCancelledRequest(requestId string) {
+	h.cancelledRequestsMux.Lock()
+	defer h.cancelledRequestsMux.Unlock()
+	delete(h.cancelledRequests, requestId)
+	log.Printf("清理已取消的请求记录: %s", requestId)
+}
+
 // sendSegmentedFileViewResponse 发送分段的文件查看响应
 func (h *ConnectionHandler) sendSegmentedFileViewResponse(wsConn *websocket.Conn, data []byte, requestId string) error {
 	const segmentSize = 16384 // 16KB 每段
@@ -1823,6 +1905,13 @@ func (h *ConnectionHandler) sendSegmentedFileViewResponse(wsConn *websocket.Conn
 	log.Printf("开始分段传输文件查看响应: 总大小=%d字节, 分段大小=%d字节, 总分段数=%d", totalSize, segmentSize, totalSegments)
 
 	for i := 0; i < totalSegments; i++ {
+		// 检查请求是否已被取消
+		if h.isRequestCancelled(requestId) {
+			log.Printf("检测到请求已取消，停止分段传输: %s (已传输 %d/%d 段)", requestId, i, totalSegments)
+			h.clearCancelledRequest(requestId) // 清理取消记录
+			return fmt.Errorf("传输已被取消")
+		}
+
 		start := i * segmentSize
 		end := start + segmentSize
 		if end > totalSize {
