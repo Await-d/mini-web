@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-06 19:11:40
+ * @LastEditTime: 2025-06-06 19:19:17
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
@@ -396,13 +396,13 @@ export class WebSocketService {
                             // 将二进制数据转换为字符串（终端输出）
                             const decoder = new TextDecoder();
                             actualData = decoder.decode(protocolMessage.binaryData);
-                            console.log(`💾 [${tab.key}] 从二进制协议提取终端数据: ${actualData.length} 字符, 内容预览: "${actualData.substring(0, 50)}${actualData.length > 50 ? '...' : ''}"`);
+                            // console.log(`💾 [${tab.key}] 从二进制协议提取终端数据: ${actualData.length} 字符, 内容预览: "${actualData.substring(0, 50)}${actualData.length > 50 ? '...' : ''}"`);
                         } else if (protocolMessage.jsonData && protocolMessage.jsonData.type === 'special_command') {
                             // 统计特殊命令消息
                             this.stats.messageTypeStats.specialCommand++;
                             // 特殊命令消息，保持JSON格式
                             actualData = protocolMessage.jsonData;
-                            console.log(`🔥 [${tab.key}] 特殊命令消息:`, actualData);
+                            // console.log(`🔥 [${tab.key}] 特殊命令消息:`, actualData);
                         } else if (protocolMessage.jsonData && (protocolMessage.jsonData.type === 'file_upload' || protocolMessage.jsonData.type === 'file_download')) {
                             // 统计文件传输消息
                             this.stats.messageTypeStats.fileTransfer++;
@@ -415,17 +415,17 @@ export class WebSocketService {
                             }
                             // 文件传输消息，保持JSON格式
                             actualData = protocolMessage.jsonData;
-                            console.log(`📁 [${tab.key}] 文件传输消息:`, actualData);
+                            // console.log(`📁 [${tab.key}] 文件传输消息:`, actualData);
                         } else if (protocolMessage.binaryData && !protocolMessage.jsonData) {
                             // 纯二进制数据，转换为字符串
                             const decoder = new TextDecoder();
                             actualData = decoder.decode(protocolMessage.binaryData);
-                            console.log(`📄 [${tab.key}] 纯二进制数据转换为文本: ${actualData.length} 字符, 内容预览: "${actualData.substring(0, 50)}${actualData.length > 50 ? '...' : ''}"`);
+                            // console.log(`📄 [${tab.key}] 纯二进制数据转换为文本: ${actualData.length} 字符, 内容预览: "${actualData.substring(0, 50)}${actualData.length > 50 ? '...' : ''}"`);
                         } else if (protocolMessage.binaryData && protocolMessage.jsonData) {
                             // 有二进制数据的混合消息，优先使用二进制数据
                             const decoder = new TextDecoder();
                             actualData = decoder.decode(protocolMessage.binaryData);
-                            console.log(`📄 [${tab.key}] 从混合消息提取二进制数据: ${actualData.length} 字符, 内容预览: "${actualData.substring(0, 50)}${actualData.length > 50 ? '...' : ''}"`);
+                            // console.log(`📄 [${tab.key}] 从混合消息提取二进制数据: ${actualData.length} 字符, 内容预览: "${actualData.substring(0, 50)}${actualData.length > 50 ? '...' : ''}"`);
                         } else {
                             // 统计其他类型的消息
                             this.stats.messageTypeStats.other++;

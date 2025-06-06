@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-01-02 10:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-06 19:11:21
+ * @LastEditTime: 2025-06-06 19:26:37
  * @Description: 文件查看器组件
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -87,6 +87,7 @@ const FileViewer: React.FC<FileViewerProps> = ({
     const messageHandlerRef = useRef<((event: MessageEvent) => void) | null>(null);
     const forceStopRef = useRef<boolean>(false); // 强制停止标记
     const isProcessingRef = useRef<boolean>(false); // 处理状态标记
+    const allActiveRequestsRef = useRef<Set<string>>(new Set()); // 跟踪所有活动请求
 
     // 清理分段数据的函数
     const clearSegmentData = useCallback((requestId?: string) => {
@@ -116,9 +117,60 @@ const FileViewer: React.FC<FileViewerProps> = ({
         }
     }, [webSocketRef]);
 
+    // 通知后端停止传输的函数
+    const notifyBackendStopTransmission = useCallback((requestId: string, reason: string) => {
+        console.log('📄 ⚠️ 开始通知后端停止传输 - requestId:', requestId, 'reason:', reason);
+        console.log('📄 ⚠️ WebSocket详细状态检查:');
+        console.log('📄   - WebSocket对象存在:', !!webSocketRef.current);
+        console.log('📄   - WebSocket readyState:', webSocketRef.current?.readyState);
+        console.log('📄   - OPEN状态值:', WebSocket.OPEN);
+        console.log('📄   - 是否相等:', webSocketRef.current?.readyState === WebSocket.OPEN);
+
+        if (webSocketRef.current) {
+            if (webSocketRef.current.readyState === WebSocket.OPEN) {
+                try {
+                    const stopRequest = {
+                        type: 'file_view_cancel',
+                        data: {
+                            requestId: requestId,
+                            reason: reason
+                        }
+                    };
+                    console.log('📄 ✅ 发送停止传输请求:', JSON.stringify(stopRequest));
+                    webSocketRef.current.send(JSON.stringify(stopRequest));
+                    console.log('📄 ✅ 停止传输请求已成功发送到WebSocket');
+                    return true;
+                } catch (error) {
+                    console.error('📄 ❌ 发送停止传输请求失败:', error);
+                    return false;
+                }
+            } else {
+                console.warn('📄 ⚠️ WebSocket连接状态不是OPEN，当前状态:', webSocketRef.current.readyState);
+                const states = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
+                console.warn('📄 ⚠️ 状态说明:', states[webSocketRef.current.readyState] || '未知状态');
+                return false;
+            }
+        } else {
+            console.error('📄 ❌ WebSocket对象不存在');
+            return false;
+        }
+    }, [webSocketRef]);
+
     // 强制停止所有处理
     const forceStopAllProcessing = useCallback(() => {
-        console.log('📄 强制停止所有处理');
+        console.log('📄 强制停止所有处理 - 活动请求:', Array.from(allActiveRequestsRef.current));
+
+        // 取消所有活动请求
+        if (allActiveRequestsRef.current.size > 0) {
+            console.log('📄 🚨 发现多个活动请求，逐一取消:', Array.from(allActiveRequestsRef.current));
+            for (const requestId of allActiveRequestsRef.current) {
+                console.log('📄 🚨 取消活动请求:', requestId);
+                const success = notifyBackendStopTransmission(requestId, '强制停止所有请求');
+                console.log('📄 🚨 取消请求结果:', requestId, success ? '成功' : '失败');
+            }
+            // 清空活动请求列表
+            allActiveRequestsRef.current.clear();
+        }
 
         // 设置强制停止标记
         forceStopRef.current = true;
@@ -135,7 +187,7 @@ const FileViewer: React.FC<FileViewerProps> = ({
         setLoadingProgress(null);
         setCancelling(false);
 
-    }, [clearSegmentData, clearRequestTimeout, clearMessageHandler]);
+    }, [clearSegmentData, clearRequestTimeout, clearMessageHandler, notifyBackendStopTransmission]);
 
     // 组件卸载时清理
     useEffect(() => {
@@ -225,45 +277,6 @@ const FileViewer: React.FC<FileViewerProps> = ({
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }, []);
 
-    // 通知后端停止传输的函数
-    const notifyBackendStopTransmission = useCallback((requestId: string, reason: string) => {
-        console.log('📄 ⚠️ 开始通知后端停止传输 - requestId:', requestId, 'reason:', reason);
-        console.log('📄 ⚠️ WebSocket详细状态检查:');
-        console.log('📄   - WebSocket对象存在:', !!webSocketRef.current);
-        console.log('📄   - WebSocket readyState:', webSocketRef.current?.readyState);
-        console.log('📄   - OPEN状态值:', WebSocket.OPEN);
-        console.log('📄   - 是否相等:', webSocketRef.current?.readyState === WebSocket.OPEN);
-
-        if (webSocketRef.current) {
-            if (webSocketRef.current.readyState === WebSocket.OPEN) {
-                try {
-                    const stopRequest = {
-                        type: 'file_view_cancel',
-                        data: {
-                            requestId: requestId,
-                            reason: reason
-                        }
-                    };
-                    console.log('📄 ✅ 发送停止传输请求:', JSON.stringify(stopRequest));
-                    webSocketRef.current.send(JSON.stringify(stopRequest));
-                    console.log('📄 ✅ 停止传输请求已成功发送到WebSocket');
-                    return true;
-                } catch (error) {
-                    console.error('📄 ❌ 发送停止传输请求失败:', error);
-                    return false;
-                }
-            } else {
-                console.warn('📄 ⚠️ WebSocket连接状态不是OPEN，当前状态:', webSocketRef.current.readyState);
-                const states = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
-                console.warn('📄 ⚠️ 状态说明:', states[webSocketRef.current.readyState] || '未知状态');
-                return false;
-            }
-        } else {
-            console.error('📄 ❌ WebSocket对象不存在');
-            return false;
-        }
-    }, [webSocketRef]);
-
     // 完整的错误清理函数 - 不包含移除事件监听器，因为那需要在调用点处理
     const handleTransmissionError = useCallback((requestId: string, errorMessage: string, reason: string) => {
         console.error('📄 传输错误:', errorMessage);
@@ -275,6 +288,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
         clearSegmentData(requestId);
         clearRequestTimeout();
         currentRequestRef.current = null;
+
+        // 🆔 从活动请求列表中移除
+        allActiveRequestsRef.current.delete(requestId);
+        console.log('📄 🆔 请求出错，从活动列表移除:', requestId, '剩余:', allActiveRequestsRef.current.size);
 
         // 更新UI状态
         setLoading(false);
@@ -296,7 +313,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
             webSocketExists: !!webSocketRef.current,
             webSocketState: webSocketRef.current?.readyState,
             connectionId,
-            sessionId
+            sessionId,
+            currentRequest: currentRequestRef.current,
+            isLoading: loading,
+            isProcessing: isProcessingRef.current
         });
 
         if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
@@ -310,6 +330,25 @@ const FileViewer: React.FC<FileViewerProps> = ({
             });
             message.error('WebSocket连接未建立');
             return;
+        }
+
+        // 🛡️ 防重复请求：如果已经在加载中，先强制停止现有请求
+        if (loading || currentRequestRef.current || isProcessingRef.current) {
+            console.log('📄 🛡️ 检测到重复请求，先取消现有请求:', {
+                loading,
+                currentRequest: currentRequestRef.current,
+                isProcessing: isProcessingRef.current
+            });
+
+            if (currentRequestRef.current) {
+                console.log('📄 🛡️ 发送取消旧请求指令:', currentRequestRef.current);
+                const success = notifyBackendStopTransmission(currentRequestRef.current, '新请求开始，取消旧请求');
+                console.log('📄 🛡️ 取消旧请求结果:', success ? '成功' : '失败');
+            }
+
+            // 强制停止所有处理
+            forceStopAllProcessing();
+            console.log('📄 🛡️ 已强制停止旧请求，继续新请求');
         }
 
         // 重置强制停止标记
@@ -327,6 +366,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
 
             // 设置当前请求ID，用于取消检查
             currentRequestRef.current = requestId;
+
+            // 🆔 添加到活动请求列表
+            allActiveRequestsRef.current.add(requestId);
+            console.log('📄 🆔 新请求已添加到活动列表:', requestId, '总数:', allActiveRequestsRef.current.size);
 
             // 发送文件查看请求
             const fileViewRequest = {
@@ -490,6 +533,11 @@ const FileViewer: React.FC<FileViewerProps> = ({
                         // 清理当前请求ID并移除监听器
                         currentRequestRef.current = null;
                         isProcessingRef.current = false;
+
+                        // 🆔 从活动请求列表中移除
+                        allActiveRequestsRef.current.delete(requestId);
+                        console.log('📄 🆔 请求已取消，从活动列表移除:', requestId, '剩余:', allActiveRequestsRef.current.size);
+
                         webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
 
                         setFileContent({
@@ -497,14 +545,32 @@ const FileViewer: React.FC<FileViewerProps> = ({
                             content: '',
                             error: '文件传输已取消'
                         });
-                    } else if (data.type === 'file_view_segment' && data.data.requestId === requestId) {
-                        console.log('📄 处理文件查看分段响应:', data.data.segmentId, '/', data.data.totalSegments);
+                    } else if (data.type === 'file_view_segment') {
+                        // 🔍 详细检查分段请求有效性
+                        const segmentRequestId = data.data.requestId;
+                        console.log('📄 🔍 收到分段数据，详细检查:', {
+                            segmentRequestId,
+                            currentRequestId: currentRequestRef.current,
+                            expectedRequestId: requestId,
+                            forceStop: forceStopRef.current,
+                            isProcessing: isProcessingRef.current,
+                            segmentId: data.data.segmentId,
+                            totalSegments: data.data.totalSegments
+                        });
+
+                        // 检查请求ID是否匹配（期望的请求）
+                        if (segmentRequestId !== requestId) {
+                            console.log('📄 🛡️ 忽略不匹配的分段数据 - 期望:', requestId, '收到:', segmentRequestId);
+                            return;
+                        }
 
                         // 检查请求是否仍然有效（避免处理已取消请求的分段）
                         if (currentRequestRef.current !== requestId || forceStopRef.current) {
-                            console.log('📄 忽略已取消请求的分段数据:', requestId, 'forceStop:', forceStopRef.current);
+                            console.log('📄 🛡️ 忽略已取消请求的分段数据:', requestId, 'forceStop:', forceStopRef.current, 'currentRef:', currentRequestRef.current);
                             return;
                         }
+
+                        console.log('📄 ✅ 分段数据有效，开始处理:', data.data.segmentId, '/', data.data.totalSegments);
 
                         // 重置超时计时器，表示还在接收数据
                         resetTimeout();
@@ -598,6 +664,11 @@ const FileViewer: React.FC<FileViewerProps> = ({
                                     // 清理当前请求ID并移除监听器
                                     currentRequestRef.current = null;
                                     isProcessingRef.current = false;
+
+                                    // 🆔 从活动请求列表中移除
+                                    allActiveRequestsRef.current.delete(requestId);
+                                    console.log('📄 🆔 请求已完成，从活动列表移除:', requestId, '剩余:', allActiveRequestsRef.current.size);
+
                                     webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
 
                                 }).catch(parseError => {
