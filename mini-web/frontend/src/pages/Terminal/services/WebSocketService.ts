@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-05 20:54:41
+ * @LastEditTime: 2025-06-06 19:11:40
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
@@ -335,13 +335,13 @@ export class WebSocketService {
                 const hasMinimumSize = arrayBufferData.byteLength >= PROTOCOL_CONSTANTS.HEADER_SIZE;
                 const isCompleteAndValid = this.isCompleteProtocolMessage(arrayBufferData);
 
-                console.log(`🔍 [${tab.key}] 协议判断详情:`, {
-                    hasBasicProtocolStructure,
-                    hasMinimumSize,
-                    isCompleteAndValid,
-                    dataSize: arrayBufferData.byteLength,
-                    preview: Array.from(new Uint8Array(arrayBufferData.slice(0, 8))).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' ')
-                });
+                // console.log(`🔍 [${tab.key}] 协议判断详情:`, {
+                //     hasBasicProtocolStructure,
+                //     hasMinimumSize,
+                //     isCompleteAndValid,
+                //     dataSize: arrayBufferData.byteLength,
+                //     preview: Array.from(new Uint8Array(arrayBufferData.slice(0, 8))).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' ')
+                // });
 
                 const isValidProtocolMessage = hasBasicProtocolStructure && hasMinimumSize && isCompleteAndValid;
 
@@ -349,13 +349,13 @@ export class WebSocketService {
                     try {
                         const protocolMessage = await binaryJsonProtocol.decodeMessage(arrayBufferData);
 
-                        console.log(`🔍 [${tab.key}] 二进制协议消息解析:`, {
-                            messageType: protocolMessage.header.messageType,
-                            hasJsonData: !!protocolMessage.jsonData,
-                            hasBinaryData: !!protocolMessage.binaryData,
-                            jsonDataType: protocolMessage.jsonData?.type,
-                            binaryDataSize: protocolMessage.binaryData?.byteLength || 0
-                        });
+                        // console.log(`🔍 [${tab.key}] 二进制协议消息解析:`, {
+                        //     messageType: protocolMessage.header.messageType,
+                        //     hasJsonData: !!protocolMessage.jsonData,
+                        //     hasBinaryData: !!protocolMessage.binaryData,
+                        //     jsonDataType: protocolMessage.jsonData?.type,
+                        //     binaryDataSize: protocolMessage.binaryData?.byteLength || 0
+                        // });
 
                         // 处理心跳消息
                         if (protocolMessage.header.messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.HEARTBEAT) {
