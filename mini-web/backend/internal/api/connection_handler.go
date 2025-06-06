@@ -640,7 +640,7 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 	terminal, err := h.connService.CreateTerminalSession(protocol, connectionInfo)
 	if err != nil {
 		log.Printf("创建终端会话失败: 协议=%s, 错误: %v", protocol, err)
-		wsConn.WriteMessage(websocket.BinaryMessage, []byte("创建终端会话失败: "+err.Error()))
+		wsConn.WriteMessage(websocket.TextMessage, []byte("创建终端会话失败: "+err.Error()))
 		return
 	}
 	defer terminal.Close()
@@ -710,7 +710,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 		initData, _ := json.Marshal(initMsg)
 		log.Printf("发送图形协议初始化消息: %s", string(initData))
 
-		if err := wsConn.WriteMessage(websocket.BinaryMessage, initData); err != nil {
+		if err := wsConn.WriteMessage(websocket.TextMessage, initData); err != nil {
 			log.Printf("发送初始化消息失败: %v", err)
 			return
 		} else {
@@ -888,7 +888,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 					// 如果有JSON数据但不是command类型，按JSON处理
 					if jsonBytes, err := json.Marshal(protocolMsg.JSONData); err == nil {
 						p = jsonBytes
-						messageType = websocket.BinaryMessage
+						messageType = websocket.TextMessage
 					}
 				} else if protocolMsg.BinaryData != nil {
 					// 如果有二进制数据，直接传递给终端
@@ -900,7 +900,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 				}
 			}
 
-			if messageType == websocket.BinaryMessage {
+			if messageType == websocket.TextMessage {
 				// 文本消息处理
 				if len(p) < 1000 {
 					log.Printf("文本消息内容: %s", string(p))
@@ -956,7 +956,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 											},
 										}
 										if responseBytes, err := json.Marshal(response); err == nil {
-											wsConn.WriteMessage(websocket.BinaryMessage, responseBytes)
+											wsConn.WriteMessage(websocket.TextMessage, responseBytes)
 										}
 										return
 									}
@@ -1043,7 +1043,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 												}
 												if errorBytes, marshalErr := json.Marshal(errorResponse); marshalErr == nil {
 													wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-													wsConn.WriteMessage(websocket.BinaryMessage, errorBytes)
+													wsConn.WriteMessage(websocket.TextMessage, errorBytes)
 												}
 											}
 										} else {
@@ -1072,7 +1072,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 										},
 									}
 									if responseBytes, err := json.Marshal(response); err == nil {
-										wsConn.WriteMessage(websocket.BinaryMessage, responseBytes)
+										wsConn.WriteMessage(websocket.TextMessage, responseBytes)
 									}
 								}
 							} else {
@@ -1501,7 +1501,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			if n > 4 {
 				prefix := string(buf[:min(4, n)])
 				if prefix == "RDP_" || prefix == "VNC_" {
-					msgType = websocket.BinaryMessage
+					msgType = websocket.TextMessage
 					log.Printf("使用文本消息类型发送图形协议数据: %s...", prefix)
 				}
 			}
@@ -1590,7 +1590,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			// 检查是否超时
 			if time.Since(lastActivity) > timeout {
 				log.Printf("会话超时: 超过 %v 无活动，正在关闭", timeout)
-				wsConn.WriteMessage(websocket.BinaryMessage, []byte("会话超时，连接将被关闭"))
+				wsConn.WriteMessage(websocket.TextMessage, []byte("会话超时，连接将被关闭"))
 				return
 			}
 			// 移除原生ping机制，使用二进制协议心跳
@@ -1670,7 +1670,7 @@ func (h *ConnectionHandler) sendSegmentedResponse(wsConn *websocket.Conn, data [
 
 		// 发送分段消息
 		log.Printf("发送分段 %d/%d: 数据长度=%d字节", i+1, totalSegments, len(segmentData))
-		err = wsConn.WriteMessage(websocket.BinaryMessage, segmentBytes)
+		err = wsConn.WriteMessage(websocket.TextMessage, segmentBytes)
 
 		h.wsWriteMutex.Unlock()
 		if err != nil {
@@ -1720,7 +1720,7 @@ func (h *ConnectionHandler) sendFileListResponse(wsConn *websocket.Conn, respons
 			writeTimeout := 15 * time.Second
 			wsConn.SetWriteDeadline(time.Now().Add(writeTimeout))
 
-			err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes)
+			err := wsConn.WriteMessage(websocket.TextMessage, responseBytes)
 			if err == nil {
 				log.Printf("文件列表响应发送成功 (尝试 %d/%d)", attempt, maxRetries)
 				return nil
@@ -1789,7 +1789,7 @@ func (h *ConnectionHandler) sendFileViewResponse(wsConn *websocket.Conn, request
 	} else {
 		// 直接发送
 		wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		if err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes); err != nil {
+		if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 			log.Printf("发送文件查看响应失败: %v", err)
 			h.sendFileViewError(wsConn, requestId, "网络传输失败")
 		} else {
@@ -1830,7 +1830,7 @@ func (h *ConnectionHandler) sendFileViewError(wsConn *websocket.Conn, requestId 
 	}
 
 	wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes); err != nil {
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 		log.Printf("发送文件查看错误响应失败: %v", err)
 	} else {
 		log.Printf("文件查看错误响应发送成功，请求ID: %s, 错误: %s", requestId, errorMsg)
@@ -1866,7 +1866,7 @@ func (h *ConnectionHandler) sendFileViewCancelResponse(wsConn *websocket.Conn, r
 	}
 
 	wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes); err != nil {
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 		log.Printf("发送文件查看取消响应失败: %v", err)
 	} else {
 		log.Printf("文件查看取消响应发送成功，请求ID: %s, 原因: %s", requestId, reason)
@@ -1961,7 +1961,7 @@ func (h *ConnectionHandler) sendSegmentedFileViewResponse(wsConn *websocket.Conn
 
 		// 发送分段消息
 		log.Printf("发送文件查看分段 %d/%d: 数据长度=%d字节", i+1, totalSegments, len(segmentData))
-		err = wsConn.WriteMessage(websocket.BinaryMessage, segmentBytes)
+		err = wsConn.WriteMessage(websocket.TextMessage, segmentBytes)
 
 		h.wsWriteMutex.Unlock()
 		if err != nil {
@@ -2018,7 +2018,7 @@ func (h *ConnectionHandler) sendFileSaveResponse(wsConn *websocket.Conn, request
 		return
 	}
 
-	if err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes); err != nil {
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 		log.Printf("发送文件保存响应失败: %v", err)
 	} else {
 		log.Printf("文件保存响应发送成功: %s", requestId)
@@ -2053,7 +2053,7 @@ func (h *ConnectionHandler) sendFileSaveError(wsConn *websocket.Conn, requestId 
 		return
 	}
 
-	if err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes); err != nil {
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 		log.Printf("发送文件保存错误响应失败: %v", err)
 	} else {
 		log.Printf("文件保存错误响应发送成功: %s - %s", requestId, errorMsg)
@@ -2085,7 +2085,7 @@ func (h *ConnectionHandler) sendFileCreateResponse(wsConn *websocket.Conn, reque
 		return
 	}
 
-	if err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes); err != nil {
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 		log.Printf("发送文件创建响应失败: %v", err)
 	} else {
 		log.Printf("文件创建响应发送成功: %s", requestId)
@@ -2120,7 +2120,7 @@ func (h *ConnectionHandler) sendFileCreateError(wsConn *websocket.Conn, requestI
 		return
 	}
 
-	if err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes); err != nil {
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 		log.Printf("发送文件创建错误响应失败: %v", err)
 	} else {
 		log.Printf("文件创建错误响应发送成功: %s - %s", requestId, errorMsg)
@@ -2152,7 +2152,7 @@ func (h *ConnectionHandler) sendFolderCreateResponse(wsConn *websocket.Conn, req
 		return
 	}
 
-	if err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes); err != nil {
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 		log.Printf("发送文件夹创建响应失败: %v", err)
 	} else {
 		log.Printf("文件夹创建响应发送成功: %s", requestId)
@@ -2187,7 +2187,7 @@ func (h *ConnectionHandler) sendFolderCreateError(wsConn *websocket.Conn, reques
 		return
 	}
 
-	if err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes); err != nil {
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 		log.Printf("发送文件夹创建错误响应失败: %v", err)
 	} else {
 		log.Printf("文件夹创建错误响应发送成功: %s - %s", requestId, errorMsg)
@@ -2240,7 +2240,7 @@ func (h *ConnectionHandler) sendFileUploadResponse(wsConn *websocket.Conn, reque
 	// 设置写入超时
 	wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 
-	if err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes); err != nil {
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 		log.Printf("发送文件上传响应失败: %v", err)
 		// 连接可能已断开，记录但不要抛出错误
 	} else {
@@ -2286,7 +2286,7 @@ func (h *ConnectionHandler) sendFileUploadError(wsConn *websocket.Conn, requestI
 	// 设置较短的写入超时，避免长时间阻塞
 	wsConn.SetWriteDeadline(time.Now().Add(3 * time.Second))
 
-	if err := wsConn.WriteMessage(websocket.BinaryMessage, responseBytes); err != nil {
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
 		log.Printf("发送文件上传错误响应失败: %v", err)
 		// 连接可能已断开，记录但不要抛出错误
 	} else {
