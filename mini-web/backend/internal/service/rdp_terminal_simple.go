@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-06-07 14:45:23
  * @LastEditors: Await
- * @LastEditTime: 2025-06-07 17:39:48
+ * @LastEditTime: 2025-06-07 17:50:30
  * @Description: 请填写简介
  */
 package service
@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,6 +95,32 @@ func createRDPTerminalSessionSimple(conn *model.Connection) (*RDPSessionSimple, 
 	return session, nil
 }
 
+// testNetworkConnectivity 测试网络连通性
+func (s *RDPSessionSimple) testNetworkConnectivity(host string) error {
+	// 尝试连接到常见端口(如80或443)测试基本连通性
+	testPorts := []int{80, 443, 22, 3389} // HTTP, HTTPS, SSH, 标准RDP
+
+	for _, port := range testPorts {
+		addr := net.JoinHostPort(host, strconv.Itoa(port))
+		conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+		if err == nil {
+			conn.Close()
+			log.Printf("网络连通性测试成功: %s:%d 可达", host, port)
+			return nil
+		}
+	}
+
+	// 如果所有端口都不通，尝试ping
+	// 注意：在Windows上ping需要特殊权限，这里只是尝试DNS解析
+	_, err := net.LookupHost(host)
+	if err != nil {
+		return fmt.Errorf("DNS解析失败: %v", err)
+	}
+
+	log.Printf("DNS解析成功但所有测试端口都不可达")
+	return fmt.Errorf("主机可解析但网络不可达")
+}
+
 // StartRDPConnection 启动RDP连接
 func (s *RDPSessionSimple) StartRDPConnection() error {
 	s.mutex.Lock()
@@ -118,10 +145,35 @@ func (s *RDPSessionSimple) StartRDPConnection() error {
 		addr := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
 		log.Printf("尝试连接RDP服务器: %s", addr)
 
-		tcpConn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+		// 首先尝试解析地址
+		tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+		if err != nil {
+			log.Printf("RDP地址解析失败: %v", err)
+			s.onError(fmt.Errorf("无法解析RDP服务器地址 %s: %v", addr, err))
+			return
+		}
+
+		log.Printf("地址解析成功: %s -> %s", addr, tcpAddr.String())
+
+		// 设置较长的超时时间并添加更详细的错误信息
+		dialer := &net.Dialer{
+			Timeout:   15 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}
+
+		tcpConn, err := dialer.Dial("tcp", addr)
 		if err != nil {
 			log.Printf("RDP TCP连接失败: %v", err)
-			s.onError(fmt.Errorf("无法连接到RDP服务器: %v", err))
+			log.Printf("连接详情: 目标=%s, 解析地址=%s", addr, tcpAddr.String())
+
+			// 尝试基本的网络连通性测试
+			if pingErr := s.testNetworkConnectivity(s.Host); pingErr != nil {
+				log.Printf("网络连通性测试失败: %v", pingErr)
+				s.onError(fmt.Errorf("网络连接失败: %v (主机不可达或防火墙阻止)", err))
+			} else {
+				log.Printf("网络连通性正常，但RDP端口不可达")
+				s.onError(fmt.Errorf("RDP服务器端口 %d 不可达: %v (可能服务未启动或端口被占用)", s.Port, err))
+			}
 			return
 		}
 
@@ -178,13 +230,79 @@ func (s *RDPSessionSimple) onError(err error) {
 
 	log.Printf("RDP连接错误: %s, 错误: %v", s.SessionID, err)
 
+	// 生成详细的错误信息和解决建议
+	errorDetails := s.generateErrorDetails(err)
+
 	// 发送错误消息
 	s.sendMessage(&RDPMessageSimple{
-		Type:      "RDP_ERROR",
-		Data:      fmt.Sprintf("RDP连接失败: %v", err),
+		Type: "RDP_ERROR",
+		Data: map[string]interface{}{
+			"error":       err.Error(),
+			"details":     errorDetails.Details,
+			"suggestions": errorDetails.Suggestions,
+			"host":        s.Host,
+			"port":        s.Port,
+		},
 		SessionID: s.SessionID,
 		Timestamp: time.Now().Unix(),
 	})
+}
+
+// ErrorDetails 错误详情结构
+type ErrorDetails struct {
+	Details     string   `json:"details"`
+	Suggestions []string `json:"suggestions"`
+}
+
+// generateErrorDetails 生成详细的错误信息和解决建议
+func (s *RDPSessionSimple) generateErrorDetails(err error) ErrorDetails {
+	errStr := err.Error()
+	details := fmt.Sprintf("连接 %s:%d 失败", s.Host, s.Port)
+	suggestions := []string{}
+
+	if strings.Contains(errStr, "refused") {
+		details = "目标服务器拒绝连接"
+		suggestions = append(suggestions, []string{
+			"检查RDP服务是否在目标机器上运行",
+			"确认端口号是否正确 (标准RDP端口是3389)",
+			"检查目标机器的防火墙设置",
+			"确认RDP服务是否允许远程连接",
+		}...)
+	} else if strings.Contains(errStr, "timeout") {
+		details = "连接超时"
+		suggestions = append(suggestions, []string{
+			"检查网络连接是否正常",
+			"确认目标IP地址是否正确",
+			"检查网络防火墙或安全组设置",
+			"尝试增加连接超时时间",
+		}...)
+	} else if strings.Contains(errStr, "no route") {
+		details = "网络路由不可达"
+		suggestions = append(suggestions, []string{
+			"检查目标IP地址是否在可达的网络段",
+			"确认网络路由配置",
+			"检查VPN或网络代理设置",
+		}...)
+	} else if strings.Contains(errStr, "DNS") {
+		details = "域名解析失败"
+		suggestions = append(suggestions, []string{
+			"检查域名拼写是否正确",
+			"确认DNS服务器配置",
+			"尝试使用IP地址直接连接",
+		}...)
+	} else {
+		suggestions = append(suggestions, []string{
+			"检查目标服务器状态",
+			"确认网络连接正常",
+			"验证连接参数是否正确",
+			"查看服务器端日志获取更多信息",
+		}...)
+	}
+
+	return ErrorDetails{
+		Details:     details,
+		Suggestions: suggestions,
+	}
 }
 
 // sendMockDesktopData 发送模拟的桌面数据
@@ -298,7 +416,6 @@ func (s *RDPSessionSimple) HandleWebSocketMessage(messageType int, data []byte) 
 func (s *RDPSessionSimple) processMessage(msg *RDPMessageSimple) error {
 	switch msg.Type {
 	case "init":
-		// 处理前端发送的初始化消息
 		return s.handleInitMessage(msg.Data)
 	case "RDP_MOUSE":
 		return s.handleMouseEvent(msg.Data)
@@ -316,37 +433,36 @@ func (s *RDPSessionSimple) processMessage(msg *RDPMessageSimple) error {
 
 // handleInitMessage 处理初始化消息
 func (s *RDPSessionSimple) handleInitMessage(data interface{}) error {
-	log.Printf("RDP收到初始化消息")
+	log.Printf("RDP收到初始化消息: %+v", data)
 
 	// 解析初始化数据
 	if initData, ok := data.(map[string]interface{}); ok {
-		// 从初始化消息中获取屏幕尺寸等信息
+		// 提取窗口大小信息
 		if width, exists := initData["width"]; exists {
-			if w, ok := width.(float64); ok && w > 0 {
+			if w, ok := width.(float64); ok {
 				s.Width = int(w)
 			}
 		}
 		if height, exists := initData["height"]; exists {
-			if h, ok := height.(float64); ok && h > 0 {
+			if h, ok := height.(float64); ok {
 				s.Height = int(h)
 			}
 		}
 
-		log.Printf("RDP初始化屏幕大小: %dx%d", s.Width, s.Height)
-	}
+		log.Printf("RDP初始化完成: 窗口大小 %dx%d", s.Width, s.Height)
 
-	// 发送初始化确认消息
-	s.sendMessage(&RDPMessageSimple{
-		Type: "RDP_INIT_RESPONSE",
-		Data: map[string]interface{}{
-			"status":  "ready",
-			"width":   s.Width,
-			"height":  s.Height,
-			"message": "RDP会话已初始化",
-		},
-		SessionID: s.SessionID,
-		Timestamp: time.Now().Unix(),
-	})
+		// 发送初始化完成响应
+		s.sendMessage(&RDPMessageSimple{
+			Type: "RDP_INIT_COMPLETE",
+			Data: map[string]interface{}{
+				"width":  s.Width,
+				"height": s.Height,
+				"status": "initialized",
+			},
+			SessionID: s.SessionID,
+			Timestamp: time.Now().Unix(),
+		})
+	}
 
 	return nil
 }
