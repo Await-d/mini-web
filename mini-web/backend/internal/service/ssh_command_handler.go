@@ -1324,7 +1324,7 @@ func (h *SSHCommandHandler) ExecuteFilePermissionsCommand(path string, permissio
 
 	// 2. 执行权限修改命令
 	// 使用多种命令兼容不同系统：Unix/Linux (chmod)、Windows (可能不支持)
-	cmd := fmt.Sprintf("chmod %s '%s' 2>/dev/null", permissions, path)
+	cmd := fmt.Sprintf("chmod %s '%s'", permissions, path)
 	log.Printf("执行权限修改命令: %s", cmd)
 
 	done := make(chan error, 1)
@@ -1337,18 +1337,25 @@ func (h *SSHCommandHandler) ExecuteFilePermissionsCommand(path string, permissio
 		log.Printf("权限修改命令执行完成，输出: %s, 错误: %v", string(output), cmdErr)
 
 		if cmdErr != nil {
-			log.Printf("权限修改命令执行失败: %v, 输出: %s", cmdErr, string(output))
+			outputStr := strings.TrimSpace(string(output))
+			log.Printf("权限修改命令执行失败: %v, 输出: %s", cmdErr, outputStr)
+
 			// 检查具体错误类型
-			if strings.Contains(string(output), "Permission denied") {
+			if strings.Contains(outputStr, "Permission denied") || strings.Contains(outputStr, "permission denied") {
 				done <- fmt.Errorf("权限被拒绝：您没有修改此文件权限的权限")
-			} else if strings.Contains(string(output), "No such file or directory") {
+			} else if strings.Contains(outputStr, "No such file or directory") || strings.Contains(outputStr, "cannot stat") {
 				done <- fmt.Errorf("文件或目录不存在")
-			} else if strings.Contains(string(output), "Operation not permitted") {
+			} else if strings.Contains(outputStr, "Operation not permitted") || strings.Contains(outputStr, "operation not permitted") {
 				done <- fmt.Errorf("操作不被允许：可能是系统文件或只读文件系统")
-			} else if strings.Contains(string(output), "chmod: command not found") || strings.Contains(string(output), "is not recognized") {
+			} else if strings.Contains(outputStr, "Read-only file system") {
+				done <- fmt.Errorf("只读文件系统：无法修改权限")
+			} else if strings.Contains(outputStr, "chmod: command not found") || strings.Contains(outputStr, "is not recognized") {
 				done <- fmt.Errorf("系统不支持chmod命令（可能是Windows系统）")
+			} else if outputStr != "" {
+				done <- fmt.Errorf("权限修改失败: %s", outputStr)
 			} else {
-				done <- fmt.Errorf("权限修改失败: %s", string(output))
+				// 如果没有输出但有错误，提供更通用的错误信息
+				done <- fmt.Errorf("权限修改失败，可能是权限不足或文件系统限制")
 			}
 		} else {
 			log.Printf("权限修改成功")
