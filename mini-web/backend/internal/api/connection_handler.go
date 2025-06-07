@@ -651,6 +651,23 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 
 	log.Printf("终端会话创建成功，开始处理WebSocket通信")
 
+	// 如果是RDP会话，需要设置WebSocket连接并启动连接
+	if actualProtocol == "rdp" {
+		if rdpSession, ok := terminal.(*service.RDPSessionSimple); ok {
+			log.Printf("设置RDP会话的WebSocket连接")
+			rdpSession.SetWebSocket(wsConn)
+
+			// 启动RDP连接
+			log.Printf("启动RDP连接")
+			if err := rdpSession.StartRDPConnection(); err != nil {
+				log.Printf("启动RDP连接失败: %v", err)
+				wsConn.WriteMessage(websocket.TextMessage, []byte("启动RDP连接失败: "+err.Error()))
+				return
+			}
+			log.Printf("RDP连接启动成功")
+		}
+	}
+
 	// 处理WebSocket连接
 	h.handleTerminalSession(wsConn, terminal)
 }
@@ -688,7 +705,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 		prefix := string(buf[:4])
 		log.Printf("终端响应前缀: %s", prefix)
 
-		if prefix == "RDP_" {
+		if prefix == "RDP_" || strings.Contains(string(buf[:n]), "RDP_SESSION_READY") {
 			isGraphical = true
 			protocol = model.ProtocolRDP
 			log.Printf("检测到RDP图形协议")

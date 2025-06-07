@@ -181,6 +181,9 @@ func (s *RDPSessionSimple) onError(err error) {
 
 // sendMockDesktopData 发送模拟的桌面数据
 func (s *RDPSessionSimple) sendMockDesktopData() {
+	// 延迟一秒，让连接稳定
+	time.Sleep(1 * time.Second)
+
 	// 发送模拟的桌面初始化消息
 	s.sendMessage(&RDPMessageSimple{
 		Type: "RDP_DESKTOP_INIT",
@@ -215,6 +218,30 @@ func (s *RDPSessionSimple) sendMockDesktopData() {
 		SessionID: s.SessionID,
 		Timestamp: time.Now().Unix(),
 	})
+
+	// 发送一个更大的测试图像（100x100的蓝色方块）
+	testImage := s.generateTestImage(100, 100)
+	s.sendMessage(&RDPMessageSimple{
+		Type: "RDP_BITMAP",
+		Data: map[string]interface{}{
+			"x":      50,
+			"y":      50,
+			"width":  100,
+			"height": 100,
+			"data":   testImage,
+			"format": "base64",
+		},
+		SessionID: s.SessionID,
+		Timestamp: time.Now().Unix(),
+	})
+}
+
+// generateTestImage 生成测试图像
+func (s *RDPSessionSimple) generateTestImage(width, height int) string {
+	// 创建一个简单的蓝色正方形图像的base64数据
+	// 这是一个40x40像素的蓝色PNG图像
+	blueSquare := "iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAYAAACM/rhtAAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAB3RJTUUH3wgWEBsOJvvkpQAAAB1pVFh0Q29tbWVudAAAAAAAQ3JlYXRlZCB3aXRoIEdJTVBkLmUHAAAA00lEQVRYw+2YQQ6DMAxE3yFceADcgRNwAm7ACbgBJ+AG3IAb7A14Ay9wA07ACbgBN+AGvAFvwA24ATfgBtyAG3ADbsANuAE34AbcgBtwA27ADbgBN+AG3IAb8P8DfvqJiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiH8BPgC3WiWjuFzyVAAAAABJRU5ErkJggg=="
+	return blueSquare
 }
 
 // sendMessage 发送消息到WebSocket
@@ -362,18 +389,45 @@ func (s *RDPSessionSimple) Disconnect() error {
 
 // Read 读取数据（实现io.Reader接口）
 func (s *RDPSessionSimple) Read(p []byte) (n int, err error) {
-	// RDP是图形协议，不像SSH那样有文本流
-	// 为了避免无限循环，我们让这个方法阻塞直到连接关闭
-	select {
-	case <-s.ctx.Done():
-		return 0, s.ctx.Err()
+	// RDP是图形协议，我们返回一些标识信息供connection_handler识别
+	if !s.Connected && !s.Connecting {
+		return 0, fmt.Errorf("RDP连接未建立")
 	}
+
+	// 返回RDP协议标识，让处理器知道这是RDP连接
+	rdpPrefix := []byte("RDP_SESSION_READY")
+	if len(p) >= len(rdpPrefix) {
+		copy(p, rdpPrefix)
+		return len(rdpPrefix), nil
+	}
+
+	// 如果缓冲区太小，返回需要的字节数
+	return 0, fmt.Errorf("缓冲区太小，需要至少 %d 字节", len(rdpPrefix))
 }
 
 // Write 写入数据（实现io.Writer接口）
 func (s *RDPSessionSimple) Write(p []byte) (n int, err error) {
 	// RDP是图形协议，写入操作通过鼠标键盘事件处理
-	// 这里简单返回写入的字节数
+	// 如果收到数据，尝试解析为WebSocket消息
+	if len(p) > 1 && s.WebSocket != nil {
+		// 尝试解析JSON消息
+		var msg map[string]interface{}
+		if err := json.Unmarshal(p, &msg); err == nil {
+			log.Printf("RDP收到WebSocket消息: %+v", msg)
+
+			// 如果是RDP消息，转换为RDPMessageSimple并处理
+			if msgType, exists := msg["type"]; exists {
+				rdpMsg := &RDPMessageSimple{
+					Type:      fmt.Sprintf("%v", msgType),
+					Data:      msg["data"],
+					SessionID: s.SessionID,
+					Timestamp: time.Now().Unix(),
+				}
+				s.processMessage(rdpMsg)
+			}
+		}
+	}
+
 	return len(p), nil
 }
 
