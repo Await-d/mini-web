@@ -91,8 +91,8 @@ func (h *SSHCommandHandler) ExecuteFileListCommand(path string) (*FileListRespon
 		session.Close()
 	}()
 
-	// 直接执行简单的ls命令
-	cmd := fmt.Sprintf("ls -la '%s'", path)
+	// 使用ls命令获取完整时间格式，优先使用GNU ls的time-style参数
+	cmd := fmt.Sprintf("ls -la --time-style='+%%Y-%%m-%%d %%H:%%M:%%S' '%s' 2>/dev/null || ls -la '%s'", path, path)
 	log.Printf("执行文件列表命令: %s", cmd)
 
 	// 设置超时
@@ -180,9 +180,11 @@ func (h *SSHCommandHandler) parseLsOutput(path string, lines []string) (*FileLis
 		}
 
 		// 解析文件信息行
-		// 格式: drwxr-xr-x 2 user group 4096 Jan 1 12:00 filename
+		// 支持两种格式:
+		// 1. 新格式: drwxr-xr-x 2 user group 4096 2025-05-23 10:29:03 filename
+		// 2. 旧格式: drwxr-xr-x 2 user group 4096 Jan 1 12:00 filename
 		parts := strings.Fields(line)
-		if len(parts) < 9 {
+		if len(parts) < 8 {
 			continue
 		}
 
@@ -190,12 +192,36 @@ func (h *SSHCommandHandler) parseLsOutput(path string, lines []string) (*FileLis
 		owner := parts[2]
 		group := parts[3]
 		size := parts[4]
-		month := parts[5]
-		day := parts[6]
-		timeOrYear := parts[7]
 
-		// 文件名可能包含空格，从第8个部分开始
-		fileName := strings.Join(parts[8:], " ")
+		var fullTime string
+		var fileName string
+
+		// 检查是否是新的时间格式 (YYYY-MM-DD)
+		if len(parts) >= 9 && strings.Contains(parts[5], "-") && len(parts[5]) == 10 {
+			// 新格式: 2025-05-23 10:29:03
+			date := parts[5] // 2025-05-23
+			time := parts[6] // 10:29:03
+			fullTime = fmt.Sprintf("%s %s", date, time)
+			// 文件名从第7个部分开始
+			fileName = strings.Join(parts[7:], " ")
+		} else {
+			// 旧格式: Jan 1 12:00 或 Jan 1 2023
+			if len(parts) < 9 {
+				continue
+			}
+			month := parts[5]
+			day := parts[6]
+			timeOrYear := parts[7]
+
+			// 尝试转换为标准格式
+			if parsedTime := h.convertToStandardTime(month, day, timeOrYear); parsedTime != "" {
+				fullTime = parsedTime
+			} else {
+				fullTime = fmt.Sprintf("%s %s %s", month, day, timeOrYear)
+			}
+			// 文件名从第8个部分开始
+			fileName = strings.Join(parts[8:], " ")
+		}
 
 		// 处理符号链接
 		if strings.Contains(fileName, " -> ") {
@@ -225,7 +251,7 @@ func (h *SSHCommandHandler) parseLsOutput(path string, lines []string) (*FileLis
 			Size:               fileSize,
 			Permissions:        permissions,
 			NumericPermissions: convertPermissionsToNumeric(permissions),
-			Modified:           fmt.Sprintf("%s %s %s", month, day, timeOrYear),
+			Modified:           fullTime,
 			Owner:              owner,
 			Group:              group,
 			Path:               path,
@@ -267,6 +293,35 @@ func convertPermissionsToNumeric(symbolic string) string {
 	}
 
 	return result
+}
+
+// convertToStandardTime 将旧的时间格式转换为标准格式
+func (h *SSHCommandHandler) convertToStandardTime(month, day, timeOrYear string) string {
+	monthMap := map[string]string{
+		"Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04",
+		"May": "05", "Jun": "06", "Jul": "07", "Aug": "08",
+		"Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12",
+	}
+
+	monthNum, exists := monthMap[month]
+	if !exists {
+		return ""
+	}
+
+	// 补零天数
+	if len(day) == 1 {
+		day = "0" + day
+	}
+
+	// 检查是否包含冒号（时间）还是年份
+	if strings.Contains(timeOrYear, ":") {
+		// 包含时间，使用当前年份
+		currentYear := time.Now().Year()
+		return fmt.Sprintf("%d-%s-%s %s:00", currentYear, monthNum, day, timeOrYear)
+	} else {
+		// 只有年份，使用00:00:00作为时间
+		return fmt.Sprintf("%s-%s-%s 00:00:00", timeOrYear, monthNum, day)
+	}
 }
 
 // ExecuteFileViewCommand 执行文件查看命令

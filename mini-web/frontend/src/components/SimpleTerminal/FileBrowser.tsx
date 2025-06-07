@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-07 13:45:44
+ * @LastEditTime: 2025-06-07 13:51:42
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -291,9 +291,12 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             title: '修改时间',
             dataIndex: 'modified',
             key: 'modified',
-            width: 100,
+            width: 150,
             sorter: true,
             ellipsis: true,
+            render: (text: string) => (
+                <span style={{ fontSize: '12px', fontFamily: 'monospace' }}>{text}</span>
+            ),
         },
         {
             title: '操作',
@@ -2796,7 +2799,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 }}
                 okText="确认修改"
                 cancelText="取消"
-                destroyOnClose
+                destroyOnHidden
                 width={500}
             >
                 <div style={{ marginBottom: 20 }}>
