@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-07 13:42:32
+ * @LastEditTime: 2025-06-07 13:45:44
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -107,6 +107,11 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     const [permissionsVisible, setPermissionsVisible] = useState(false);
     const [permissionsTarget, setPermissionsTarget] = useState<string>('');
     const [newPermissions, setNewPermissions] = useState('');
+    const [permissionsMatrix, setPermissionsMatrix] = useState({
+        owner: { read: false, write: false, execute: false },
+        group: { read: false, write: false, execute: false },
+        others: { read: false, write: false, execute: false }
+    });
     const [uploadProgress, setUploadProgress] = useState(0);
     const [clipboard, setClipboard] = useState<{ files: string[], operation: 'copy' | 'cut' | null }>({
         files: [],
@@ -254,29 +259,32 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             title: '权限',
             dataIndex: 'permissions',
             key: 'permissions',
-            width: 120,
+            width: 100,
             ellipsis: true,
             render: (permissions: string, record: FileItem) => (
-                <Space>
-                    <Tooltip title={`符号权限: ${permissions}`}>
-                        <Tag color="blue" style={{ cursor: 'pointer', fontSize: '11px' }}>
-                            {record.numericPermissions || '---'}
-                        </Tag>
-                    </Tooltip>
-                    <Tooltip title="修改权限">
-                        <Button
-                            type="text"
-                            size="small"
-                            icon={<EditOutlined />}
-                            onClick={() => {
-                                setPermissionsTarget(record.name);
-                                setNewPermissions(record.numericPermissions || '755');
-                                setPermissionsVisible(true);
-                            }}
-                            style={{ padding: '0 2px' }}
-                        />
-                    </Tooltip>
-                </Space>
+                <Tooltip title={`符号权限: ${permissions} - 点击修改权限`}>
+                    <Tag
+                        color="blue"
+                        style={{
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontFamily: 'monospace',
+                            minWidth: '40px',
+                            textAlign: 'center',
+                            userSelect: 'none'
+                        }}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            const currentPerms = record.numericPermissions || '755';
+                            setPermissionsTarget(record.name);
+                            setNewPermissions(currentPerms);
+                            setPermissionsMatrix(numericToPermissionsMatrix(currentPerms));
+                            setPermissionsVisible(true);
+                        }}
+                    >
+                        {record.numericPermissions || '---'}
+                    </Tag>
+                </Tooltip>
             ),
         },
         {
@@ -503,6 +511,37 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         }
 
         return result;
+    }, []);
+
+    // 将数字权限转换为权限矩阵
+    const numericToPermissionsMatrix = useCallback((numeric: string) => {
+        const paddedNumeric = numeric.padStart(3, '0');
+        return {
+            owner: {
+                read: (parseInt(paddedNumeric[0]) & 4) !== 0,
+                write: (parseInt(paddedNumeric[0]) & 2) !== 0,
+                execute: (parseInt(paddedNumeric[0]) & 1) !== 0
+            },
+            group: {
+                read: (parseInt(paddedNumeric[1]) & 4) !== 0,
+                write: (parseInt(paddedNumeric[1]) & 2) !== 0,
+                execute: (parseInt(paddedNumeric[1]) & 1) !== 0
+            },
+            others: {
+                read: (parseInt(paddedNumeric[2]) & 4) !== 0,
+                write: (parseInt(paddedNumeric[2]) & 2) !== 0,
+                execute: (parseInt(paddedNumeric[2]) & 1) !== 0
+            }
+        };
+    }, []);
+
+    // 将权限矩阵转换为数字权限
+    const permissionsMatrixToNumeric = useCallback((matrix: typeof permissionsMatrix) => {
+        const calculateValue = (perms: { read: boolean; write: boolean; execute: boolean }) => {
+            return (perms.read ? 4 : 0) + (perms.write ? 2 : 0) + (perms.execute ? 1 : 0);
+        };
+
+        return `${calculateValue(matrix.owner)}${calculateValue(matrix.group)}${calculateValue(matrix.others)}`;
     }, []);
 
     // 解析ls命令输出
@@ -2758,22 +2797,172 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 okText="确认修改"
                 cancelText="取消"
                 destroyOnClose
+                width={500}
             >
-                <div style={{ marginBottom: 16 }}>
+                <div style={{ marginBottom: 20 }}>
                     <p><strong>文件:</strong> {permissionsTarget}</p>
-                    <p><strong>当前权限:</strong> {files.find(f => f.name === permissionsTarget)?.permissions || 'N/A'}
-                        (<Tag color="blue">{files.find(f => f.name === permissionsTarget)?.numericPermissions || '---'}</Tag>)
-                    </p>
+                    <p><strong>当前权限:</strong> {files.find(f => f.name === permissionsTarget)?.permissions || 'N/A'}</p>
                 </div>
 
+                {/* 可视化权限设置 */}
+                <div style={{ marginBottom: 20 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                            <tr style={{ backgroundColor: '#f5f5f5' }}>
+                                <th style={{ padding: '8px', textAlign: 'left', border: '1px solid #d9d9d9' }}></th>
+                                <th style={{ padding: '8px', textAlign: 'center', border: '1px solid #d9d9d9' }}>读取</th>
+                                <th style={{ padding: '8px', textAlign: 'center', border: '1px solid #d9d9d9' }}>写入</th>
+                                <th style={{ padding: '8px', textAlign: 'center', border: '1px solid #d9d9d9' }}>可执行</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', fontWeight: 'bold' }}>所有者</td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.owner.read}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                owner: { ...permissionsMatrix.owner, read: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.owner.write}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                owner: { ...permissionsMatrix.owner, write: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.owner.execute}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                owner: { ...permissionsMatrix.owner, execute: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', fontWeight: 'bold' }}>用户组</td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.group.read}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                group: { ...permissionsMatrix.group, read: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.group.write}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                group: { ...permissionsMatrix.group, write: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.group.execute}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                group: { ...permissionsMatrix.group, execute: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', fontWeight: 'bold' }}>公共</td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.others.read}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                others: { ...permissionsMatrix.others, read: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.others.write}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                others: { ...permissionsMatrix.others, write: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.others.execute}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                others: { ...permissionsMatrix.others, execute: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* 权限数字输入 */}
                 <Form layout="vertical">
-                    <Form.Item label="新的权限值 (数字格式)" required>
+                    <Form.Item label="权限">
                         <Input
                             value={newPermissions}
-                            onChange={(e) => setNewPermissions(e.target.value)}
-                            placeholder="例如: 755, 644, 777"
+                            onChange={(e) => {
+                                const value = e.target.value;
+                                if (/^[0-7]{0,3}$/.test(value)) {
+                                    setNewPermissions(value);
+                                    if (value.length === 3) {
+                                        setPermissionsMatrix(numericToPermissionsMatrix(value));
+                                    }
+                                }
+                            }}
+                            placeholder="例如: 755"
                             maxLength={3}
-                            style={{ width: 200 }}
+                            style={{ width: 200, fontFamily: 'monospace', fontSize: '16px' }}
                             onKeyDown={(e) => e.stopPropagation()}
                             onKeyUp={(e) => e.stopPropagation()}
                             onKeyPress={(e) => e.stopPropagation()}
@@ -2784,16 +2973,33 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                             onFocus={(e) => e.stopPropagation()}
                             onBlur={(e) => e.stopPropagation()}
                         />
-                        <div style={{ fontSize: '12px', color: '#666', marginTop: 8 }}>
-                            <p><strong>常用权限:</strong></p>
-                            <Space direction="vertical" size={2}>
-                                <div><Tag color="green" style={{ cursor: 'pointer' }} onClick={() => setNewPermissions('755')}>755</Tag> - 拥有者读写执行，组和其他只读执行</div>
-                                <div><Tag color="blue" style={{ cursor: 'pointer' }} onClick={() => setNewPermissions('644')}>644</Tag> - 拥有者读写，组和其他只读</div>
-                                <div><Tag color="orange" style={{ cursor: 'pointer' }} onClick={() => setNewPermissions('777')}>777</Tag> - 所有用户读写执行</div>
-                                <div><Tag color="purple" style={{ cursor: 'pointer' }} onClick={() => setNewPermissions('600')}>600</Tag> - 仅拥有者读写</div>
-                            </Space>
-                        </div>
                     </Form.Item>
+
+                    {/* 常用权限快速选择 */}
+                    <div style={{ marginTop: 16 }}>
+                        <p style={{ marginBottom: 8 }}><strong>常用权限:</strong></p>
+                        <Space wrap>
+                            {[
+                                { value: '755', desc: '拥有者全权限，其他读执行', color: 'green' },
+                                { value: '644', desc: '拥有者读写，其他只读', color: 'blue' },
+                                { value: '777', desc: '所有用户全权限', color: 'orange' },
+                                { value: '600', desc: '仅拥有者读写', color: 'purple' }
+                            ].map(perm => (
+                                <Tooltip key={perm.value} title={perm.desc}>
+                                    <Tag
+                                        color={perm.color}
+                                        style={{ cursor: 'pointer' }}
+                                        onClick={() => {
+                                            setNewPermissions(perm.value);
+                                            setPermissionsMatrix(numericToPermissionsMatrix(perm.value));
+                                        }}
+                                    >
+                                        {perm.value}
+                                    </Tag>
+                                </Tooltip>
+                            ))}
+                        </Space>
+                    </div>
                 </Form>
             </Modal>
         </div>
