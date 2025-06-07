@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-06-07 14:45:23
  * @LastEditors: Await
- * @LastEditTime: 2025-06-07 17:38:20
+ * @LastEditTime: 2025-06-07 17:39:48
  * @Description: 请填写简介
  */
 package service
@@ -297,6 +297,9 @@ func (s *RDPSessionSimple) HandleWebSocketMessage(messageType int, data []byte) 
 // processMessage 处理RDP消息
 func (s *RDPSessionSimple) processMessage(msg *RDPMessageSimple) error {
 	switch msg.Type {
+	case "init":
+		// 处理前端发送的初始化消息
+		return s.handleInitMessage(msg.Data)
 	case "RDP_MOUSE":
 		return s.handleMouseEvent(msg.Data)
 	case "RDP_KEYBOARD":
@@ -309,6 +312,43 @@ func (s *RDPSessionSimple) processMessage(msg *RDPMessageSimple) error {
 		log.Printf("未知的RDP消息类型: %s", msg.Type)
 		return nil
 	}
+}
+
+// handleInitMessage 处理初始化消息
+func (s *RDPSessionSimple) handleInitMessage(data interface{}) error {
+	log.Printf("RDP收到初始化消息")
+
+	// 解析初始化数据
+	if initData, ok := data.(map[string]interface{}); ok {
+		// 从初始化消息中获取屏幕尺寸等信息
+		if width, exists := initData["width"]; exists {
+			if w, ok := width.(float64); ok && w > 0 {
+				s.Width = int(w)
+			}
+		}
+		if height, exists := initData["height"]; exists {
+			if h, ok := height.(float64); ok && h > 0 {
+				s.Height = int(h)
+			}
+		}
+
+		log.Printf("RDP初始化屏幕大小: %dx%d", s.Width, s.Height)
+	}
+
+	// 发送初始化确认消息
+	s.sendMessage(&RDPMessageSimple{
+		Type: "RDP_INIT_RESPONSE",
+		Data: map[string]interface{}{
+			"status":  "ready",
+			"width":   s.Width,
+			"height":  s.Height,
+			"message": "RDP会话已初始化",
+		},
+		SessionID: s.SessionID,
+		Timestamp: time.Now().Unix(),
+	})
+
+	return nil
 }
 
 // handleMouseEvent 处理鼠标事件
