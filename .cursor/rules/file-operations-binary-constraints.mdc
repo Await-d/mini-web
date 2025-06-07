@@ -1,0 +1,169 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# 文件操作二进制通讯约束
+
+## 适用范围
+
+本规则适用于 [FileBrowser.tsx](mdc:frontend/src/components/SimpleTerminal/FileBrowser.tsx) 中实现的文件删除和重命名功能，以及 [connection_handler.go](mdc:backend/internal/api/connection_handler.go) 中的相应处理逻辑。
+
+## 当前实现状态
+
+### 已实现功能
+- 文件/目录删除: 通过 `file_delete` 类型的WebSocket消息
+- 文件/目录重命名: 通过 `file_rename` 类型的WebSocket消息
+- 跨平台命令支持: 在 [ssh_command_handler.go](mdc:backend/internal/service/ssh_command_handler.go) 中实现
+
+### 待改进的二进制约束
+
+#### 1. WebSocket消息格式限制
+当前使用JSON格式，需要逐步迁移到二进制格式：
+
+**当前格式**:
+```json
+{
+  "type": "file_delete",
+  "data": {
+    "path": "/path/to/file",
+    "isDirectory": false,
+    "requestId": "delete_123456"
+  }
+}
+```
+
+**目标二进制格式**:
+```typescript
+// 使用ArrayBuffer包装
+const buffer = new ArrayBuffer(headerSize + pathSize + metadataSize);
+const view = new DataView(buffer);
+// 写入二进制数据...
+```
+
+#### 2. 响应数据二进制化
+响应函数如 `sendFileDeleteResponse` 和 `sendFileRenameResponse` 需要支持二进制格式输出。
+
+## 强制约束
+
+### 数据大小限制
+- **路径长度**: 最大4096字节 (UTF-8编码)
+- **请求ID**: 固定16字节
+- **单个操作超时**: 30秒
+- **并发文件操作**: 最多5个同时进行
+
+### 安全检查
+```typescript
+// 前端必须实现的路径验证
+function validateFilePath(path: string): boolean {
+  // 禁止路径遍历攻击
+  if (path.includes('..') || path.includes('//')) {
+    return false;
+  }
+  // 路径长度检查
+  if (new TextEncoder().encode(path).length > 4096) {
+    return false;
+  }
+  return true;
+}
+```
+
+### 内存管理约束
+- 前端文件操作缓冲区: 最大8MB
+- 后端单个操作内存: 最大16MB
+- 自动垃圾回收: 操作完成后立即释放ArrayBuffer
+
+## 实现优先级
+
+### 第一阶段: 兼容性改造
+1. 保持当前JSON格式
+2. 添加二进制数据验证层
+3. 实现数据完整性检查
+
+### 第二阶段: 混合模式
+1. 支持JSON和二进制双重格式
+2. 根据数据大小自动选择传输方式
+3. 添加协议版本协商
+
+### 第三阶段: 纯二进制
+1. 完全移除JSON支持
+2. 实现高效的二进制序列化
+3. 优化网络传输性能
+
+## 代码约束示例
+
+### 前端WebSocket发送约束
+```typescript
+// 在 FileBrowser.tsx 中强制使用二进制检查
+const sendBinaryFileOperation = (operation: FileOperation) => {
+  // 强制路径长度检查
+  if (!validateFilePath(operation.path)) {
+    throw new Error('Invalid file path for binary transmission');
+  }
+  
+  // 强制使用ArrayBuffer
+  const binaryData = serializeFileOperation(operation);
+  if (!(binaryData instanceof ArrayBuffer)) {
+    throw new Error('File operation must use binary format');
+  }
+  
+  webSocket.send(binaryData);
+};
+```
+
+### 后端响应格式约束
+```go
+// 在 connection_handler.go 中添加二进制响应检查
+func (h *ConnectionHandler) sendBinaryFileResponse(wsConn *websocket.Conn, response FileOperationResponse) error {
+    // 强制使用二进制序列化
+    binaryData, err := serializeToBinary(response)
+    if err != nil {
+        return fmt.Errorf("failed to serialize to binary: %v", err)
+    }
+    
+    // 验证数据大小
+    if len(binaryData) > MaxBinaryResponseSize {
+        return fmt.Errorf("binary response too large: %d bytes", len(binaryData))
+    }
+    
+    return wsConn.WriteMessage(websocket.BinaryMessage, binaryData)
+}
+```
+
+## 性能监控要求
+
+### 必须监控的指标
+- 二进制vs JSON传输时间对比
+- 内存使用量峰值
+- WebSocket连接错误率
+- 文件操作成功率
+
+### 报警阈值
+- 响应时间超过5秒
+- 内存使用超过配置限制的80%
+- 错误率超过1%
+- 并发连接数超过限制
+
+## 调试约束
+
+### 开发环境
+- 允许JSON格式用于调试
+- 必须记录二进制数据包大小
+- 实现二进制数据的可视化工具
+
+### 生产环境
+- 严格禁止JSON格式文件传输
+- 启用二进制数据完整性检查
+- 记录所有异常的二进制操作
+
+## 迁移检查清单
+
+- [ ] 实现文件路径的二进制编码/解码
+- [ ] 添加ArrayBuffer数据验证
+- [ ] 更新WebSocket消息类型检查
+- [ ] 实现二进制错误响应格式
+- [ ] 添加性能监控埋点
+- [ ] 完善单元测试覆盖
+- [ ] 编写二进制协议文档
+- [ ] 实施安全性审计
+
