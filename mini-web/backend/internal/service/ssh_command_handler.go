@@ -197,7 +197,7 @@ func (h *SSHCommandHandler) parseLsOutput(path string, lines []string) (*FileLis
 		var fileName string
 
 		// 检查是否是新的时间格式 (YYYY-MM-DD)
-		if len(parts) >= 9 && strings.Contains(parts[5], "-") && len(parts[5]) == 10 {
+		if len(parts) >= 8 && strings.Contains(parts[5], "-") && len(parts[5]) == 10 {
 			// 新格式: 2025-05-23 10:29:03
 			date := parts[5] // 2025-05-23
 			time := parts[6] // 10:29:03
