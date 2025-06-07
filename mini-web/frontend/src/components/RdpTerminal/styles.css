@@ -121,4 +121,382 @@
 /* 错误提示 */
 .rdp-error {
   margin-bottom: 10px;
+}
+
+/* RDP终端容器样式 - 优化版本 */
+
+.rdp-terminal-container {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 400px;
+    background: #1e1e1e;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    transition: all 0.3s ease;
+}
+
+/* 全屏模式 */
+.rdp-fullscreen {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 1000;
+    border-radius: 0;
+    background: #000;
+}
+
+/* 顶部状态栏 */
+.rdp-status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #2c3e50, #34495e);
+    border-bottom: 1px solid #34495e;
+    height: 40px;
+    flex-shrink: 0;
+}
+
+/* 状态指示器 */
+.rdp-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.rdp-status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.3);
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(82, 196, 26, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(82, 196, 26, 0);
+    }
+}
+
+/* RDP画布样式 */
+.rdp-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    flex: 1;
+    background: #000;
+    cursor: default;
+    outline: none;
+    border: none;
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+    transition: opacity 0.3s ease;
+}
+
+.rdp-canvas:focus {
+    outline: 2px solid #1890ff;
+    outline-offset: -2px;
+}
+
+.rdp-canvas:hover {
+    cursor: crosshair;
+}
+
+/* 加载容器 */
+.rdp-loading-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 24px;
+    border-radius: 8px;
+    backdrop-filter: blur(4px);
+}
+
+.rdp-spin-content {
+    width: 60px;
+    height: 60px;
+    background: transparent;
+}
+
+/* 错误提示容器 */
+.rdp-error-container {
+    position: absolute;
+    top: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    min-width: 300px;
+    max-width: 500px;
+}
+
+/* 工具栏按钮样式优化 */
+.rdp-status-bar .ant-btn {
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    transition: all 0.2s ease;
+}
+
+.rdp-status-bar .ant-btn:hover {
+    color: #1890ff;
+    background: rgba(255, 255, 255, 0.1);
+    transform: scale(1.1);
+}
+
+.rdp-status-bar .ant-btn:disabled {
+    color: rgba(255, 255, 255, 0.3);
+    background: transparent;
+    transform: none;
+}
+
+/* 性能指标样式 */
+.rdp-performance-info {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
+.rdp-metric {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: #bfbfbf;
+}
+
+.rdp-metric-value {
+    font-weight: 600;
+    color: #52c41a;
+}
+
+/* 连接质量指示器 */
+.rdp-quality-indicator {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.rdp-signal-bar {
+    width: 3px;
+    height: 12px;
+    background: #666;
+    border-radius: 1px;
+    transition: background-color 0.3s ease;
+}
+
+.rdp-signal-bar.active {
+    background: #52c41a;
+}
+
+.rdp-signal-bar.medium {
+    background: #faad14;
+}
+
+.rdp-signal-bar.poor {
+    background: #ff4d4f;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .rdp-status-bar {
+        padding: 6px 12px;
+        height: 36px;
+    }
+    
+    .rdp-status-indicator {
+        gap: 6px;
+    }
+    
+    .rdp-performance-info {
+        gap: 8px;
+    }
+    
+    .rdp-metric {
+        font-size: 11px;
+    }
+    
+    .rdp-status-bar .ant-btn {
+        padding: 2px 6px;
+    }
+}
+
+/* 深色主题优化 */
+@media (prefers-color-scheme: dark) {
+    .rdp-terminal-container {
+        background: #0a0a0a;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+    
+    .rdp-status-bar {
+        background: linear-gradient(135deg, #1a1a1a, #2a2a2a);
+        border-bottom: 1px solid #404040;
+    }
+}
+
+/* 高对比度模式 */
+@media (prefers-contrast: high) {
+    .rdp-terminal-container {
+        border: 2px solid #fff;
+    }
+    
+    .rdp-canvas:focus {
+        outline: 3px solid #ff0;
+        outline-offset: 0;
+    }
+    
+    .rdp-status-dot {
+        border: 2px solid #fff;
+    }
+}
+
+/* 减少动画模式 */
+@media (prefers-reduced-motion: reduce) {
+    .rdp-terminal-container {
+        transition: none;
+    }
+    
+    .rdp-canvas {
+        transition: none;
+    }
+    
+    .rdp-status-dot {
+        animation: none;
+    }
+    
+    .rdp-status-bar .ant-btn {
+        transition: none;
+    }
+}
+
+/* 打印样式 */
+@media print {
+    .rdp-terminal-container {
+        background: #fff;
+        color: #000;
+        box-shadow: none;
+        border: 1px solid #000;
+    }
+    
+    .rdp-status-bar {
+        display: none;
+    }
+    
+    .rdp-canvas {
+        background: #fff;
+    }
+}
+
+/* 滚动条样式 */
+.rdp-terminal-container::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.rdp-terminal-container::-webkit-scrollbar-track {
+    background: #2c3e50;
+    border-radius: 4px;
+}
+
+.rdp-terminal-container::-webkit-scrollbar-thumb {
+    background: #52c41a;
+    border-radius: 4px;
+    transition: background 0.3s ease;
+}
+
+.rdp-terminal-container::-webkit-scrollbar-thumb:hover {
+    background: #389e0d;
+}
+
+/* 加载动画效果 */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.rdp-terminal-container[data-loading="false"] {
+    animation: fadeIn 0.5s ease-out;
+}
+
+/* 错误状态样式 */
+.rdp-terminal-container.error {
+    border: 2px solid #ff4d4f;
+    box-shadow: 0 0 10px rgba(255, 77, 79, 0.3);
+}
+
+/* 连接中状态样式 */
+.rdp-terminal-container.connecting {
+    border: 2px solid #faad14;
+    box-shadow: 0 0 10px rgba(250, 173, 20, 0.3);
+}
+
+/* 已连接状态样式 */
+.rdp-terminal-container.connected {
+    border: 2px solid #52c41a;
+    box-shadow: 0 0 10px rgba(82, 196, 26, 0.3);
+}
+
+/* 性能优化类 */
+.rdp-terminal-container.performance-mode .rdp-canvas {
+    image-rendering: auto;
+}
+
+.rdp-terminal-container.crisp-mode .rdp-canvas {
+    image-rendering: pixelated;
+}
+
+/* 辅助功能增强 */
+.rdp-terminal-container[aria-label]:focus-within {
+    outline: 3px solid #1890ff;
+    outline-offset: 2px;
+}
+
+/* 键盘导航指示器 */
+.rdp-canvas[data-keyboard-focused="true"] {
+    box-shadow: inset 0 0 0 2px #1890ff;
+}
+
+/* 延迟指示器 */
+.rdp-latency-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.rdp-latency-indicator::before {
+    content: '📶';
+    font-size: 12px;
+}
+
+.rdp-latency-indicator.good {
+    color: #52c41a;
+}
+
+.rdp-latency-indicator.medium {
+    color: #faad14;
+}
+
+.rdp-latency-indicator.poor {
+    color: #ff4d4f;
 } 

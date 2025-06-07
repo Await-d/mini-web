@@ -2,13 +2,25 @@
  * @Author: Await
  * @Date: 2025-05-25 10:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-04 20:51:32
+ * @LastEditTime: 2025-06-07 17:29:42
  * @Description: WebSocket管理器组件
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Drawer, Button, Tabs, Badge, notification, Switch, Form, InputNumber, Divider, Card } from 'antd';
-import { LinkOutlined, SettingOutlined, BarChartOutlined, WarningOutlined } from '@ant-design/icons';
+import {
+    Drawer,
+    Button,
+    Tabs,
+    Badge,
+    Switch,
+    Form,
+    InputNumber,
+    Divider,
+    Card,
+    Space,
+    App
+} from 'antd';
+import { LinkOutlined, SettingOutlined, BarChartOutlined } from '@ant-design/icons';
 import webSocketService from '../services/WebSocketService';
 import WebSocketStatistics from './WebSocketStatistics';
 import WebSocketConnectionDetails from './WebSocketConnectionDetails';
@@ -68,6 +80,9 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
     // 获取终端上下文
     const { updateTab } = useTerminal();
 
+    // 获取Ant Design App API
+    const { notification, message } = App.useApp();
+
     // WebSocket统计状态
     const [stats, setStats] = useState(webSocketService.getStats());
 
@@ -76,6 +91,13 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
     const [activeTab, setActiveTab] = useState('stats');
     const [statusBadge, setStatusBadge] = useState<'success' | 'warning' | 'error' | 'processing'>('processing');
     const connectionCheckerRef = useRef<number | null>(null);
+
+    // 添加防重复通知状态
+    const [hasShownDisconnectNotification, setHasShownDisconnectNotification] = useState(false);
+
+    // 添加重连配置状态管理
+    const [reconnectConfig, setReconnectConfig] = useState(webSocketService.getReconnectConfig());
+    const [configForm] = Form.useForm();
 
     // 连接状态计算
     useEffect(() => {
@@ -91,17 +113,27 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
             return 'success';
         };
 
-        setStatusBadge(computeStatus() as 'success' | 'warning' | 'error' | 'processing');
+        const currentStatus = computeStatus();
+        setStatusBadge(currentStatus as 'success' | 'warning' | 'error' | 'processing');
 
-        // 如果出现错误，显示通知
-        if (computeStatus() === 'error' && stats.totalConnections > 0) {
-            notification.error({
-                message: 'WebSocket连接异常',
-                description: '所有WebSocket连接已断开，终端可能无法正常工作',
-                duration: 4
-            });
+        // 防重复通知机制
+        if (currentStatus === 'error' && stats.totalConnections > 0) {
+            // 只有在之前没有显示过通知时才显示
+            if (!hasShownDisconnectNotification) {
+                notification.error({
+                    message: 'WebSocket连接异常',
+                    description: '所有WebSocket连接已断开，终端可能无法正常工作',
+                    duration: 4
+                });
+                setHasShownDisconnectNotification(true);
+                console.log('WebSocketManager: 已显示断开连接通知');
+            }
+        } else if (currentStatus === 'success' && hasShownDisconnectNotification) {
+            // 当连接恢复时，重置通知状态
+            setHasShownDisconnectNotification(false);
+            console.log('WebSocketManager: 连接已恢复，重置通知状态');
         }
-    }, [stats]);
+    }, [stats, hasShownDisconnectNotification]);
 
     // 更新统计数据
     useEffect(() => {
@@ -131,10 +163,97 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
             }
             clearInterval(statsInterval);
         };
-    }, []);
+    }, []); // 移除所有依赖项，避免无限渲染
+
+    // 初始化表单值
+    useEffect(() => {
+        const config = webSocketService.getReconnectConfig();
+        setReconnectConfig(config);
+        configForm.setFieldsValue({
+            enabled: config.enabled,
+            maxRetries: config.maxRetries,
+            retryDelay: config.retryDelay / 1000, // 转换为秒
+            heartbeatInterval: config.heartbeatInterval / 1000 // 转换为秒
+        });
+    }, [configForm]);
+
+    // 处理重连配置变更
+    const handleConfigChange = (changedFields: any, allFields: any) => {
+        const newConfig = {
+            enabled: allFields.enabled,
+            maxRetries: allFields.maxRetries,
+            retryDelay: (allFields.retryDelay || 3) * 1000, // 转换为毫秒
+            heartbeatInterval: (allFields.heartbeatInterval || 30) * 1000 // 转换为毫秒
+        };
+
+        // 更新WebSocketService配置
+        webSocketService.setReconnectConfig(newConfig);
+        setReconnectConfig(newConfig);
+
+        try {
+            message.success('重连配置已更新');
+        } catch (error) {
+            console.warn('Message API error:', error);
+        }
+    };
+
+    // 重置配置到默认值
+    const resetConfigToDefault = () => {
+        const defaultConfig = {
+            enabled: true,
+            maxRetries: 5,
+            retryDelay: 3000,
+            heartbeatInterval: 30000
+        };
+
+        webSocketService.setReconnectConfig(defaultConfig);
+        setReconnectConfig(defaultConfig);
+
+        // 重置通知状态
+        setHasShownDisconnectNotification(false);
+
+        configForm.setFieldsValue({
+            enabled: true,
+            maxRetries: 5,
+            retryDelay: 3,
+            heartbeatInterval: 30
+        });
+
+        try {
+            message.success('配置已重置为默认值');
+        } catch (error) {
+            console.warn('Message API error:', error);
+        }
+    };
 
     // 创建WebSocket连接
     const handleCreateWebSocket = useCallback((tab: TerminalTab, handlers: WebSocketEventHandlers) => {
+        // 检查重连配置 - 防止绕过重连限制
+        const reconnectConfig = webSocketService.getReconnectConfig();
+        if (!reconnectConfig.enabled) {
+            console.warn(`自动重连已禁用，阻止创建新连接: ${tab.key}`);
+            updateTab(tab.key, {
+                isConnected: false,
+                status: 'disconnected',
+                error: '自动重连已禁用'
+            });
+            return null;
+        }
+
+        // 检查重连次数限制
+        const reconnectState = webSocketService.getReconnectState(tab.key);
+        if (reconnectState && reconnectState.retryCount >= reconnectConfig.maxRetries) {
+            console.warn(`已达到最大重试次数(${reconnectConfig.maxRetries})，阻止创建新连接: ${tab.key}`);
+            updateTab(tab.key, {
+                isConnected: false,
+                status: 'disconnected',
+                error: `已达到最大重试次数(${reconnectConfig.maxRetries})`
+            });
+            return null;
+        }
+
+        console.log(`WebSocketManager初始化: 为标签 ${tab.key} 创建WebSocket连接`);
+
         if (createWebSocketConnection && tab.sessionId) {
             return createWebSocketConnection(tab.sessionId, tab.key);
         } else if (onCreateWebSocket && tab.sessionId) {
@@ -202,32 +321,113 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
         return webSocketService.connect(tab, handlers);
     }, [createWebSocketConnection, onCreateWebSocket]);
 
-    // 关闭WebSocket连接
-    const handleCloseWebSocket = (tabKey: string) => {
-        if (onCloseWebSocket) {
-            onCloseWebSocket(tabKey);
-        } else {
-            webSocketService.closeConnection(tabKey);
-        }
-    };
-
     // 组件初始化 - 检查当前活动标签
     useEffect(() => {
+        // 立即检查全局停止状态，避免不必要的处理
+        if (webSocketService.globalReconnectStopped) {
+            console.log('WebSocketManager: 全局重连已停止，跳过初始化');
+            return;
+        }
+
+        let globalStopped = false;
+
+        // 监听全局重连停止事件
+        const handleGlobalStop = () => {
+            console.log('WebSocketManager: 收到全局停止信号');
+            globalStopped = true;
+            // 重置通知状态，避免遗留的通知状态
+            setHasShownDisconnectNotification(false);
+        };
+
+        window.addEventListener('global-reconnect-stopped', handleGlobalStop);
+
+        // 检查重连配置 - 如果重连被禁用，不进行初始化
+        const reconnectConfig = webSocketService.getReconnectConfig();
+        if (!reconnectConfig.enabled || globalStopped || webSocketService.globalReconnectStopped) {
+            if (!globalStopped && !webSocketService.globalReconnectStopped) {
+                console.log('WebSocketManager初始化: 重连已禁用，跳过初始化');
+            }
+            return () => {
+                window.removeEventListener('global-reconnect-stopped', handleGlobalStop);
+            };
+        }
+
+        // 强制检查所有标签的重连状态，防止无限重连
+        if (tabs.length > 0) {
+            for (const tab of tabs) {
+                const reconnectState = webSocketService.getReconnectState(tab.key);
+                if (reconnectState && reconnectState.retryCount >= reconnectConfig.maxRetries) {
+                    console.warn(`WebSocketManager初始化: 标签 ${tab.key} 已达到最大重试次数(${reconnectConfig.maxRetries})，跳过处理`);
+                    // 更新标签状态
+                    updateTab(tab.key, {
+                        isConnected: false,
+                        status: 'disconnected',
+                        error: `已达到最大重试次数(${reconnectConfig.maxRetries})`
+                    });
+                    continue; // 跳过这个标签
+                }
+            }
+        }
+
         // 如果有活动标签，检查其WebSocket连接状态
         if (tabs.length > 0) {
             // 查找活动标签
             const activeTab = tabs.find(tab => tab.key === tabs[0].key);
             if (activeTab) {
+                // 再次检查重连次数限制（双重保险）
+                const reconnectState = webSocketService.getReconnectState(activeTab.key);
+                if (reconnectState && reconnectState.retryCount >= reconnectConfig.maxRetries) {
+                    console.log(`WebSocketManager初始化: 已达到最大重试次数(${reconnectConfig.maxRetries})，跳过初始化: ${activeTab.key}`);
+                    updateTab(activeTab.key, {
+                        isConnected: false,
+                        status: 'disconnected',
+                        error: `已达到最大重试次数(${reconnectConfig.maxRetries})`
+                    });
+                    return () => {
+                        window.removeEventListener('global-reconnect-stopped', handleGlobalStop);
+                    };
+                }
+
                 // 检查WebSocket连接状态
                 const needConnection = !activeTab.webSocketRef?.current ||
                     (activeTab.webSocketRef.current.readyState !== WebSocket.OPEN &&
                         activeTab.webSocketRef.current.readyState !== WebSocket.CONNECTING);
 
-                if (needConnection && activeTab.sessionId) {
+                // 只有在需要连接且当前没有连接中的状态时才创建连接
+                if (needConnection && activeTab.sessionId && !activeTab.isConnected && activeTab.status !== 'connecting') {
                     console.log(`WebSocketManager初始化: 为标签 ${activeTab.key} 创建WebSocket连接`);
+
+                    // 先标记为连接中，防止重复创建
+                    updateTab(activeTab.key, {
+                        status: 'connecting'
+                    });
 
                     // 延迟创建连接，确保DOM已准备好
                     setTimeout(() => {
+                        // 再次检查重连配置（防止在延迟期间配置改变）
+                        const currentConfig = webSocketService.getReconnectConfig();
+                        if (!currentConfig.enabled) {
+                            console.log('WebSocketManager初始化: 延迟检查发现重连已禁用，取消连接创建');
+                            updateTab(activeTab.key, {
+                                isConnected: false,
+                                status: 'disconnected',
+                                error: '重连已禁用'
+                            });
+                            return;
+                        }
+
+                        // 最后一次检查重连次数限制
+                        const finalReconnectState = webSocketService.getReconnectState(activeTab.key);
+                        if (finalReconnectState && finalReconnectState.retryCount >= currentConfig.maxRetries) {
+                            console.log('WebSocketManager初始化: 延迟检查发现已达到最大重试次数，取消连接创建');
+                            updateTab(activeTab.key, {
+                                isConnected: false,
+                                status: 'disconnected',
+                                error: `已达到最大重试次数(${currentConfig.maxRetries})`
+                            });
+                            return;
+                        }
+
                         // 创建自定义处理函数
                         const handlers: WebSocketEventHandlers = {
                             onOpen: (ws) => {
@@ -268,26 +468,41 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
 
                         // 创建WebSocket连接
                         handleCreateWebSocket(activeTab, handlers);
-
-                        // 主动触发标签激活事件
-                        window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-                            detail: {
-                                tabKey: activeTab.key,
-                                connectionId: activeTab.connectionId,
-                                sessionId: activeTab.sessionId
-                            }
-                        }));
                     }, 500);
                 }
             }
         }
-    }, [tabs, handleCreateWebSocket, updateTab]);
+
+        // 清理函数
+        return () => {
+            window.removeEventListener('global-reconnect-stopped', handleGlobalStop);
+        };
+    }, [tabs.length]); // 仅依赖tabs.length，移除handleCreateWebSocket避免循环
 
     // 监听标签页激活事件，确保WebSocket连接建立
     useEffect(() => {
         const handleTabActivated = (event: CustomEvent) => {
+            // 立即检查全局停止状态
+            if (webSocketService.globalReconnectStopped) {
+                return;
+            }
+
             const { tabKey, connectionId, sessionId } = event.detail;
             console.log(`WebSocketManager收到标签激活事件: tabKey=${tabKey}`);
+
+            // 检查重连配置 - 防止无限重连循环
+            const reconnectConfig = webSocketService.getReconnectConfig();
+            if (!reconnectConfig.enabled) {
+                console.log(`自动重连已禁用，跳过标签页激活处理: ${tabKey}`);
+                return;
+            }
+
+            // 检查重连次数限制
+            const reconnectState = webSocketService.getReconnectState(tabKey);
+            if (reconnectState && reconnectState.retryCount >= reconnectConfig.maxRetries) {
+                console.log(`已达到最大重试次数(${reconnectConfig.maxRetries})，跳过标签页激活处理: ${tabKey}`);
+                return;
+            }
 
             // 延迟执行，确保DOM和React状态都已就绪
             setTimeout(() => {
@@ -304,8 +519,14 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
                     (wsRef.readyState !== WebSocket.OPEN &&
                         wsRef.readyState !== WebSocket.CONNECTING);
 
-                if (needConnection && tab.sessionId) {
+                // 添加更严格的检查条件，防止重复创建连接
+                if (needConnection && tab.sessionId && !tab.isConnected && tab.status !== 'connecting') {
                     console.log(`WebSocketManager: 为标签 ${tabKey} 创建WebSocket连接`);
+
+                    // 先更新状态为连接中，防止重复触发
+                    updateTab(tab.key, {
+                        status: 'connecting'
+                    });
 
                     // 创建自定义处理函数
                     const handlers: WebSocketEventHandlers = {
@@ -398,6 +619,30 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
             console.log(`WebSocketManager收到重连请求: tabKey=${tabKey}`);
 
             if (tab && tab.sessionId) {
+                // 检查WebSocketService的重连配置
+                const reconnectConfig = webSocketService.getReconnectConfig();
+                if (!reconnectConfig.enabled) {
+                    console.log(`自动重连已禁用，跳过重连请求: ${tabKey}`);
+                    updateTab(tab.key, {
+                        isConnected: false,
+                        status: 'disconnected',
+                        error: '自动重连已禁用'
+                    });
+                    return;
+                }
+
+                // 检查重连状态和限制
+                const reconnectState = webSocketService.getReconnectState?.(tabKey);
+                if (reconnectState && reconnectState.retryCount >= reconnectConfig.maxRetries) {
+                    console.warn(`已达到最大重试次数(${reconnectConfig.maxRetries})，跳过重连: ${tabKey}`);
+                    updateTab(tab.key, {
+                        isConnected: false,
+                        status: 'error',
+                        error: `已达到最大重试次数(${reconnectConfig.maxRetries})`
+                    });
+                    return;
+                }
+
                 // 设置手动重连标志，防止自动重连干扰
                 sessionStorage.setItem(`manual-reconnect-${tabKey}`, 'true');
                 // 创建自定义处理函数
@@ -454,7 +699,7 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
             window.removeEventListener('terminal-tab-activated', handleTabActivated as EventListener);
             window.removeEventListener('terminal-reconnect-request', handleReconnectRequest as EventListener);
         };
-    }, [tabs, updateTab, createWebSocketConnection]);
+    }, []); // 移除所有依赖项，使用空依赖数组
 
     // 显示管理器抽屉
     const showDrawer = () => {
@@ -545,74 +790,126 @@ const WebSocketManager: React.FC<WebSocketManagerProps> = ({
                             ),
                             children: (
                                 <div style={{ marginTop: '8px' }}>
-                                    <Card size="small" title="连接配置">
-                                        <Form layout="vertical" size="small">
+                                    <Card size="small" title="连接配置"
+                                        extra={
+                                            <Button size="small" onClick={resetConfigToDefault}>
+                                                重置默认
+                                            </Button>
+                                        }>
+                                        <Form
+                                            form={configForm}
+                                            layout="vertical"
+                                            size="small"
+                                            onValuesChange={handleConfigChange}
+                                            initialValues={{
+                                                enabled: reconnectConfig.enabled,
+                                                maxRetries: reconnectConfig.maxRetries,
+                                                retryDelay: reconnectConfig.retryDelay / 1000,
+                                                heartbeatInterval: reconnectConfig.heartbeatInterval / 1000
+                                            }}
+                                        >
                                             <Form.Item
+                                                name="enabled"
                                                 label="自动重连"
                                                 tooltip="连接断开时自动尝试重新连接"
                                                 style={{ marginBottom: '12px' }}
+                                                valuePropName="checked"
                                             >
-                                                <Switch defaultChecked size="small" />
+                                                <Switch size="small" />
                                             </Form.Item>
 
                                             <Form.Item
+                                                name="maxRetries"
                                                 label="重连最大次数"
                                                 style={{ marginBottom: '12px' }}
+                                                rules={[
+                                                    { required: true, message: '请输入重连最大次数' },
+                                                    { type: 'number', min: 1, max: 10, message: '请输入1-10之间的数字' }
+                                                ]}
                                             >
                                                 <InputNumber
                                                     min={1}
                                                     max={10}
-                                                    defaultValue={5}
                                                     size="small"
                                                     style={{ width: '100%' }}
+                                                    addonAfter="次"
                                                 />
                                             </Form.Item>
 
                                             <Form.Item
-                                                label="重连延迟(秒)"
+                                                name="retryDelay"
+                                                label="重连延迟"
                                                 style={{ marginBottom: '12px' }}
+                                                rules={[
+                                                    { required: true, message: '请输入重连延迟' },
+                                                    { type: 'number', min: 1, max: 30, message: '请输入1-30之间的数字' }
+                                                ]}
                                             >
                                                 <InputNumber
                                                     min={1}
                                                     max={30}
-                                                    defaultValue={3}
                                                     size="small"
                                                     style={{ width: '100%' }}
+                                                    addonAfter="秒"
                                                 />
                                             </Form.Item>
 
                                             <Form.Item
-                                                label="心跳间隔(秒)"
+                                                name="heartbeatInterval"
+                                                label="心跳间隔"
                                                 style={{ marginBottom: '12px' }}
+                                                rules={[
+                                                    { required: true, message: '请输入心跳间隔' },
+                                                    { type: 'number', min: 5, max: 120, message: '请输入5-120之间的数字' }
+                                                ]}
                                             >
                                                 <InputNumber
                                                     min={5}
-                                                    max={60}
-                                                    defaultValue={30}
+                                                    max={120}
                                                     size="small"
                                                     style={{ width: '100%' }}
+                                                    addonAfter="秒"
                                                 />
                                             </Form.Item>
+
+                                            <Form.Item style={{ marginBottom: 0 }}>
+                                                <div style={{ fontSize: '12px', color: '#666', lineHeight: '1.4' }}>
+                                                    <div>• 自动重连：连接意外断开时是否自动尝试重连</div>
+                                                    <div>• 重连延迟：每次重连尝试的间隔时间（会递增）</div>
+                                                    <div>• 心跳间隔：检测连接状态的频率</div>
+                                                    <div>• 当前配置立即生效，影响所有新连接</div>
+                                                </div>
+                                            </Form.Item>
+
+                                            <Form.Item>
+                                                <Space>
+                                                    <Button type="primary" onClick={() => configForm.submit()}>
+                                                        应用配置
+                                                    </Button>
+                                                    <Button onClick={resetConfigToDefault}>
+                                                        重置默认
+                                                    </Button>
+                                                </Space>
+                                            </Form.Item>
+
+
                                         </Form>
                                     </Card>
 
                                     <Card size="small" title="通知设置" style={{ marginTop: '12px' }}>
-                                        <Form layout="vertical" size="small">
-                                            <Form.Item
-                                                label="连接异常通知"
-                                                style={{ marginBottom: '8px' }}
-                                            >
+                                        <div style={{ padding: '12px' }}>
+                                            <div style={{ marginBottom: '8px' }}>
+                                                <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px' }}>连接异常通知</label>
                                                 <Switch defaultChecked size="small" />
-                                            </Form.Item>
-
-                                            <Form.Item
-                                                label="连接成功通知"
-                                                style={{ marginBottom: '8px' }}
-                                            >
+                                            </div>
+                                            <div style={{ marginBottom: '8px' }}>
+                                                <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px' }}>连接成功通知</label>
                                                 <Switch size="small" />
-                                            </Form.Item>
-                                        </Form>
+                                            </div>
+                                        </div>
                                     </Card>
+
+
                                 </div>
                             )
                         }

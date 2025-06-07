@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-21 15:32:12
  * @LastEditors: Await
- * @LastEditTime: 2025-06-04 20:50:43
+ * @LastEditTime: 2025-06-07 16:56:40
  * @Description: 终端事件管理器组件
  */
 import React, { useEffect } from 'react';
@@ -10,6 +10,7 @@ import { useTerminal } from '../../../contexts/TerminalContext';
 import type { TerminalEventManagerProps } from '../Terminal.d';
 import type { TerminalTab } from '../../../contexts/TerminalContext';
 import './TerminalEventManager.css'; // 引入CSS文件
+import webSocketService from '../services/WebSocketService';
 
 /**
  * 终端事件管理器组件
@@ -17,7 +18,7 @@ import './TerminalEventManager.css'; // 引入CSS文件
  */
 const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
     children,
-    tabs,
+    tabs = [],
     activeTabKey,
     setActiveTab,
     createWebSocketConnection
@@ -38,16 +39,89 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
 
     // 检查并连接活动标签页的WebSocket
     useEffect(() => {
+        let globalStopped = false;
+
+        // 监听全局重连停止事件
+        const handleGlobalStop = () => {
+            console.log('TerminalEventManager: 收到全局停止信号');
+            globalStopped = true;
+        };
+
+        // **处理连接最终失败事件**
+        const handleConnectionFailed = (event: Event) => {
+            const customEvent = event as CustomEvent;
+            const { tabKey, reason } = customEvent.detail;
+            console.log(`连接最终失败: ${tabKey}, 原因: ${reason}`);
+
+            // 找到对应的标签并更新状态
+            const tab = effectiveTabs.find(t => t.key === tabKey);
+            if (tab) {
+                updateTab(tabKey, {
+                    isConnected: false,
+                    status: 'error',
+                    error: reason || '连接失败'
+                });
+
+                // 清理WebSocket引用
+                if (tab.webSocketRef?.current) {
+                    try {
+                        tab.webSocketRef.current.close();
+                    } catch (e) {
+                        // 忽略关闭错误
+                    }
+                    tab.webSocketRef.current = null;
+                }
+            }
+        };
+
+        window.addEventListener('global-reconnect-stopped', handleGlobalStop);
+        window.addEventListener('terminal-connection-failed', handleConnectionFailed);
+
         if (effectiveActiveTabKey && effectiveTabs && effectiveTabs.length > 0) {
             const activeTab = effectiveTabs.find(tab => tab.key === effectiveActiveTabKey);
 
             if (activeTab && createWebSocketConnection) {
+                // 如果全局停止，静默退出
+                if (globalStopped) {
+                    return;
+                }
+
                 // 检查WebSocket是否需要建立连接
                 const needConnection = !activeTab.webSocketRef?.current ||
                     (activeTab.webSocketRef.current.readyState !== WebSocket.OPEN &&
                         activeTab.webSocketRef.current.readyState !== WebSocket.CONNECTING);
 
                 if (needConnection && activeTab.sessionId) {
+                    // 检查全局停止标志
+                    if (webSocketService.globalReconnectStopped) {
+                        console.log(`全局重连已停止，跳过为活动标签创建连接: ${activeTab.key}`);
+                        return;
+                    }
+
+                    // 检查重连配置
+                    const reconnectConfig = webSocketService.getReconnectConfig();
+                    if (!reconnectConfig.enabled) {
+                        console.log(`自动重连已禁用，跳过为活动标签创建连接: ${activeTab.key}`);
+                        updateTab(activeTab.key, {
+                            isConnected: false,
+                            status: 'disconnected',
+                            error: '自动重连已禁用'
+                        });
+                        return;
+                    }
+
+                    // **严格检查重连次数限制**
+                    const reconnectState = webSocketService.getReconnectState(activeTab.key);
+                    if (reconnectState && reconnectState.retryCount >= reconnectConfig.maxRetries) {
+                        console.log(`已达到最大重试次数(${reconnectConfig.maxRetries})，跳过为活动标签创建连接: ${activeTab.key}`);
+                        updateTab(activeTab.key, {
+                            isConnected: false,
+                            status: 'disconnected',
+                            error: `已达到最大重试次数(${reconnectConfig.maxRetries})`
+                        });
+                        return;
+                    }
+
                     console.log(`主动为活动标签 ${activeTab.key} 创建WebSocket连接`);
 
                     // 更新标签状态
@@ -109,7 +183,13 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
                 }
             }
         }
-    }, [effectiveActiveTabKey, effectiveTabs, createWebSocketConnection, updateTab]);
+
+        // 清理函数
+        return () => {
+            window.removeEventListener('global-reconnect-stopped', handleGlobalStop);
+            window.removeEventListener('terminal-connection-failed', handleConnectionFailed);
+        };
+    }, [effectiveActiveTabKey]); // 只依赖activeTabKey，避免无限渲染
 
     // 处理终端就绪事件
     useEffect(() => {
@@ -121,8 +201,8 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
             updateTab(tabKey, { isConnected: true });
 
             // 如果标签不是当前活动标签，则激活它
-            if (tabKey !== effectiveActiveTabKey) {
-                effectiveSetActiveTab(tabKey);
+            if (tabKey !== activeTabKey) {
+                setActiveTab(tabKey);
             }
         };
 
@@ -132,7 +212,7 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
             console.log(`收到终端重连事件: connectionId=${connectionId}, sessionId=${sessionId}`);
 
             // 找到匹配的标签
-            const tab = effectiveTabs.find(t =>
+            const tab = tabs.find(t =>
                 t.connectionId === connectionId &&
                 t.sessionId === sessionId
             );
@@ -142,98 +222,73 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
                 return;
             }
 
-            if (tab && createWebSocketConnection) {
-                console.log(`为标签 ${tab.key} 重新创建WebSocket连接`);
-
-                // 首先关闭现有的WebSocket连接（如果有）
-                if (tab.webSocketRef?.current) {
-                    try {
-                        tab.webSocketRef.current.close();
-                    } catch (e) {
-                        console.error(`关闭WebSocket时出错: ${e}`);
-                    }
-                    tab.webSocketRef.current = null;
-                }
-
-                // 标记为正在重连
+            // **严格检查WebSocketService的重连配置和状态**
+            const reconnectConfig = webSocketService.getReconnectConfig();
+            if (!reconnectConfig.enabled || webSocketService.globalReconnectStopped) {
+                console.log(`自动重连已禁用或全局停止，跳过重连: ${tab.key}`);
                 updateTab(tab.key, {
                     isConnected: false,
-                    status: 'reconnecting'
+                    status: 'disconnected',
+                    error: '自动重连已禁用'
                 });
+                return;
+            }
 
-                // 确保sessionId不为undefined
-                if (tab.sessionId) {
-                    // 创建WebSocket连接时需要传递会话ID和标签Key
-                    const ws = createWebSocketConnection(tab.sessionId, tab.key);
+            // **检查重连次数限制 - 防止绕过WebSocketService的限制**
+            const reconnectState = webSocketService.getReconnectState(tab.key);
+            if (reconnectState && reconnectState.retryCount >= reconnectConfig.maxRetries) {
+                console.warn(`已达到最大重试次数(${reconnectConfig.maxRetries})，阻止重连: ${tab.key}`);
+                updateTab(tab.key, {
+                    isConnected: false,
+                    status: 'disconnected',
+                    error: `连接失败：已达到最大重试次数(${reconnectConfig.maxRetries})`
+                });
+                return;
+            }
 
-                    if (ws && tab.webSocketRef) {
-                        tab.webSocketRef.current = ws;
+            console.log(`为标签 ${tab.key} 使用WebSocketService重新连接`);
 
-                        // 监听WebSocket打开事件
-                        ws.addEventListener('open', () => {
-                            console.log(`WebSocket连接已打开: tabKey=${tab.key}`);
-                            updateTab(tab.key, {
-                                isConnected: true,
-                                status: 'connected',
-                                lastReconnectTime: new Date().toISOString()
-                            });
+            // 使用WebSocketService的统一重连管理
+            const ws = webSocketService.refreshConnection(tab, {
+                onOpen: (ws) => {
+                    console.log(`WebSocket重连成功: ${tab.key}`);
+                    updateTab(tab.key, {
+                        isConnected: true,
+                        status: 'connected',
+                        error: undefined,
+                        lastReconnectTime: new Date().toISOString()
+                    });
 
-                            // 记录重连成功信息
-                            console.log(`标签 ${tab.key} 重连成功, 时间: ${new Date().toISOString()}`);
-
-                            // 触发终端就绪事件
-                            window.dispatchEvent(new CustomEvent('terminal-ready', {
-                                detail: {
-                                    tabKey: tab.key,
-                                    connectionId: tab.connectionId,
-                                    sessionId: tab.sessionId,
-                                    protocol: tab.protocol || 'ssh',
-                                    reconnected: true
-                                }
-                            }));
-                        });
-
-                        // 监听WebSocket关闭事件
-                        ws.addEventListener('close', () => {
-                            console.log(`WebSocket连接已关闭: tabKey=${tab.key}`);
-                            updateTab(tab.key, {
-                                isConnected: false,
-                                status: 'disconnected'
-                            });
-                        });
-
-                        // 监听WebSocket错误事件
-                        ws.addEventListener('error', (e) => {
-                            console.error(`WebSocket连接错误: tabKey=${tab.key}`, e);
-                            updateTab(tab.key, {
-                                isConnected: false,
-                                status: 'error',
-                                error: '连接出错，请尝试刷新'
-                            });
-                        });
-                    } else {
-                        console.error(`WebSocket创建失败: tabKey=${tab.key}`);
-                        updateTab(tab.key, {
-                            isConnected: false,
-                            status: 'error',
-                            error: 'WebSocket创建失败'
-                        });
-                    }
-                } else {
-                    console.error(`会话ID为空: tabKey=${tab.key}`);
+                    // 触发终端就绪事件
+                    window.dispatchEvent(new CustomEvent('terminal-ready', {
+                        detail: {
+                            tabKey: tab.key,
+                            connectionId: tab.connectionId,
+                            sessionId: tab.sessionId,
+                            protocol: tab.protocol || 'ssh',
+                            reconnected: true
+                        }
+                    }));
+                },
+                onClose: () => {
+                    console.log(`WebSocket重连后断开: ${tab.key}`);
+                    updateTab(tab.key, {
+                        isConnected: false,
+                        status: 'disconnected'
+                    });
+                },
+                onError: (event) => {
+                    console.error(`WebSocket重连失败: ${tab.key}`, event);
                     updateTab(tab.key, {
                         isConnected: false,
                         status: 'error',
-                        error: '会话ID无效'
+                        error: 'WebSocket重连失败'
                     });
                 }
-            } else if (!createWebSocketConnection) {
-                console.error('createWebSocketConnection函数未定义');
-                updateTab(tab.key, {
-                    isConnected: false,
-                    status: 'error',
-                    error: '终端服务不可用'
-                });
+            });
+
+            if (ws && tab.webSocketRef) {
+                tab.webSocketRef.current = ws;
             }
         };
 
@@ -243,7 +298,7 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
             console.log(`收到终端刷新事件: tabKey=${tabKey}`);
 
             // 找到要刷新的标签
-            const tab = effectiveTabs.find(t => t.key === tabKey);
+            const tab = tabs.find(t => t.key === tabKey);
             if (!tab) {
                 console.error(`未找到要刷新的标签: ${tabKey}`);
                 return;
@@ -295,7 +350,7 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
             console.log(`收到标签激活事件: tabKey=${tabKey}`);
 
             // 找到被激活的标签
-            const tab = effectiveTabs.find(t => t.key === tabKey);
+            const tab = tabs.find(t => t.key === tabKey);
             if (!tab) {
                 console.error(`未找到被激活的标签: ${tabKey}`);
                 return;
@@ -308,17 +363,41 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
                     wsRef.readyState !== WebSocket.CONNECTING);
 
             if (needConnection && tab.sessionId) {
-                // 尝试创建WebSocket连接
-                if (createWebSocketConnection && tab.sessionId) {
-                    try {
-                        console.log(`主动为活动标签 ${tabKey} 创建WebSocket连接`);
+                // 检查重连配置 - 防止绕过重连限制
+                const reconnectConfig = webSocketService.getReconnectConfig();
+                if (!reconnectConfig.enabled) {
+                    console.log(`自动重连已禁用，跳过标签激活连接创建: ${tabKey}`);
+                    updateTab(tabKey, {
+                        isConnected: false,
+                        status: 'disconnected',
+                        error: '自动重连已禁用'
+                    });
+                    return;
+                }
 
-                        // 更新标签状态为正在连接
-                        updateTab(tabKey, {
-                            isConnected: false,
-                            status: 'connecting'
-                        });
+                // 检查重连次数限制
+                const reconnectState = webSocketService.getReconnectState(tabKey);
+                if (reconnectState && reconnectState.retryCount >= reconnectConfig.maxRetries) {
+                    console.log(`已达到最大重试次数(${reconnectConfig.maxRetries})，跳过标签激活连接创建: ${tabKey}`);
+                    updateTab(tabKey, {
+                        isConnected: false,
+                        status: 'disconnected',
+                        error: `已达到最大重试次数(${reconnectConfig.maxRetries})`
+                    });
+                    return;
+                }
 
+                try {
+                    console.log(`主动为活动标签 ${tabKey} 创建WebSocket连接`);
+
+                    // 更新标签状态为正在连接
+                    updateTab(tabKey, {
+                        isConnected: false,
+                        status: 'connecting'
+                    });
+
+                    // 检查createWebSocketConnection是否可用
+                    if (createWebSocketConnection) {
                         const ws = createWebSocketConnection(tab.sessionId, tabKey);
                         if (ws) {
                             // 如果tab有webSocketRef，将创建的WebSocket实例保存到引用中
@@ -362,45 +441,20 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
                                 error: 'WebSocket连接创建失败'
                             });
 
-                            // 尝试使用备用方法
-                            window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-                                detail: {
-                                    tabKey,
-                                    connectionId: tab.connectionId,
-                                    sessionId: tab.sessionId
-                                }
-                            }));
+                            // 不再触发terminal-tab-activated事件，避免无限循环
                         }
-                    } catch (error: any) {
-                        console.error(`WebSocket创建错误: tabKey=${tabKey}`, error);
-
-                        // 标记为连接错误
-                        updateTab(tabKey, {
-                            isConnected: false,
-                            status: 'error',
-                            error: `连接错误: ${error.message || '未知错误'}`
-                        });
-
-                        // 尝试使用备用方法
-                        window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-                            detail: {
-                                tabKey,
-                                connectionId: tab.connectionId,
-                                sessionId: tab.sessionId
-                            }
-                        }));
                     }
-                } else {
-                    console.log(`无法创建WebSocket连接: createWebSocketConnection未定义或无效, tabKey=${tabKey}`);
+                } catch (error: any) {
+                    console.error(`WebSocket创建错误: tabKey=${tabKey}`, error);
 
-                    // 触发terminal-tab-activated事件，让WebSocketManager尝试创建
-                    window.dispatchEvent(new CustomEvent('terminal-tab-activated', {
-                        detail: {
-                            tabKey,
-                            connectionId: tab.connectionId,
-                            sessionId: tab.sessionId
-                        }
-                    }));
+                    // 标记为连接错误
+                    updateTab(tabKey, {
+                        isConnected: false,
+                        status: 'error',
+                        error: `连接错误: ${error.message || '未知错误'}`
+                    });
+
+                    // 不再触发terminal-tab-activated事件，避免无限循环
                 }
             } else {
                 console.log(`标签 ${tabKey} 已有WebSocket连接或无会话ID，无需创建新连接`);
@@ -420,7 +474,160 @@ const TerminalEventManager: React.FC<TerminalEventManagerProps> = ({
             window.removeEventListener('terminal-tab-refresh', handleTerminalRefresh as EventListener);
             window.removeEventListener('terminal-tab-activated', handleTabActivated as EventListener);
         };
-    }, [updateTab, effectiveTabs, effectiveActiveTabKey, effectiveSetActiveTab, createWebSocketConnection]);
+    }, []); // 空依赖项，避免无限渲染
+
+    // 监听连接事件和重连限制
+    useEffect(() => {
+        // 监听WebSocket连接事件
+        const handleWebSocketConnect = (event: CustomEvent) => {
+            const { tabKey, sessionId } = event.detail;
+
+            // 立即检查全局重连状态，避免绕过限制
+            if (webSocketService.globalReconnectStopped) {
+                console.warn(`TerminalEventManager: 全局重连已停止，阻止连接: ${tabKey}`);
+                return;
+            }
+
+            // 检查重连配置和次数限制
+            const reconnectConfig = webSocketService.getReconnectConfig();
+            const reconnectState = webSocketService.getReconnectState(tabKey);
+
+            if (!reconnectConfig.enabled) {
+                console.warn(`TerminalEventManager: 重连已禁用，阻止连接: ${tabKey}`);
+                return;
+            }
+
+            if (reconnectState && reconnectState.retryCount >= reconnectConfig.maxRetries) {
+                console.warn(`TerminalEventManager: 已达到最大重试次数(${reconnectConfig.maxRetries})，阻止连接: ${tabKey}`);
+                // 触发连接失败事件
+                window.dispatchEvent(new CustomEvent('terminal-connection-failed', {
+                    detail: {
+                        tabKey,
+                        reason: `已达到最大重试次数(${reconnectConfig.maxRetries})`,
+                        maxRetries: reconnectConfig.maxRetries,
+                        actualRetries: reconnectState.retryCount
+                    }
+                }));
+                return;
+            }
+
+            console.log(`TerminalEventManager: 处理WebSocket连接请求: ${tabKey}`);
+
+            if (createWebSocketConnection && sessionId) {
+                // 在创建连接前进行最后一次检查
+                if (webSocketService.globalReconnectStopped) {
+                    console.warn(`TerminalEventManager: 连接创建时检测到全局停止: ${tabKey}`);
+                    return;
+                }
+
+                try {
+                    createWebSocketConnection(sessionId, tabKey);
+                } catch (error) {
+                    console.error(`TerminalEventManager: 创建WebSocket连接失败: ${tabKey}`, error);
+                }
+            }
+        };
+
+        // 监听重连请求事件
+        const handleReconnectRequest = (event: CustomEvent) => {
+            const { tabKey } = event.detail;
+
+            // **重连请求的严格检查**
+            if (webSocketService.globalReconnectStopped) {
+                console.warn(`TerminalEventManager: 全局重连已停止，拒绝重连请求: ${tabKey}`);
+                return;
+            }
+
+            const reconnectConfig = webSocketService.getReconnectConfig();
+            const reconnectState = webSocketService.getReconnectState(tabKey);
+
+            if (!reconnectConfig.enabled) {
+                console.warn(`TerminalEventManager: 重连已禁用，拒绝重连请求: ${tabKey}`);
+                return;
+            }
+
+            if (reconnectState && reconnectState.retryCount >= reconnectConfig.maxRetries) {
+                console.error(`TerminalEventManager: 重连请求被拒绝，已达到最大重试次数: ${tabKey}`);
+
+                // 触发连接失败事件
+                window.dispatchEvent(new CustomEvent('terminal-connection-failed', {
+                    detail: {
+                        tabKey,
+                        reason: `重连请求被拒绝，已达到最大重试次数(${reconnectConfig.maxRetries})`,
+                        maxRetries: reconnectConfig.maxRetries,
+                        actualRetries: reconnectState.retryCount
+                    }
+                }));
+                return;
+            }
+
+            console.log(`TerminalEventManager: 处理重连请求: ${tabKey}`);
+
+            const tab = effectiveTabs.find(t => t.key === tabKey);
+            if (tab && tab.sessionId && createWebSocketConnection) {
+                // 延迟重连，避免立即重连
+                setTimeout(() => {
+                    // 再次检查全局状态，防止在延迟期间状态发生变化
+                    if (webSocketService.globalReconnectStopped) {
+                        console.warn(`TerminalEventManager: 延迟重连时检测到全局停止: ${tabKey}`);
+                        return;
+                    }
+
+                    try {
+                        createWebSocketConnection(tab.sessionId!, tabKey);
+                    } catch (error) {
+                        console.error(`TerminalEventManager: 重连失败: ${tabKey}`, error);
+                    }
+                }, 1000); // 1秒延迟
+            }
+        };
+
+        // 监听连接失败事件
+        const handleConnectionFailed = (event: CustomEvent) => {
+            const { tabKey, reason, maxRetries, actualRetries } = event.detail;
+            console.log(`TerminalEventManager: 连接失败事件: ${tabKey}, 原因: ${reason}`);
+
+            // 更新标签状态
+            const tab = effectiveTabs.find(t => t.key === tabKey);
+            if (tab && updateTab) {
+                updateTab(tabKey, {
+                    isConnected: false,
+                    status: 'disconnected',
+                    error: `连接失败: ${reason}`
+                });
+            }
+        };
+
+        // 监听全局重连停止事件
+        const handleGlobalReconnectStopped = () => {
+            console.log('TerminalEventManager: 收到全局重连停止信号');
+
+            // 更新所有标签状态
+            effectiveTabs.forEach(tab => {
+                if (updateTab) {
+                    updateTab(tab.key, {
+                        isConnected: false,
+                        status: 'disconnected',
+                        error: '所有重连活动已停止'
+                    });
+                }
+            });
+        };
+
+        // 添加事件监听器
+        window.addEventListener('websocket-connect', handleWebSocketConnect as EventListener);
+        window.addEventListener('reconnect-request', handleReconnectRequest as EventListener);
+        window.addEventListener('terminal-connection-failed', handleConnectionFailed as EventListener);
+        window.addEventListener('global-reconnect-stopped', handleGlobalReconnectStopped);
+
+        // 清理函数
+        return () => {
+            window.removeEventListener('websocket-connect', handleWebSocketConnect as EventListener);
+            window.removeEventListener('reconnect-request', handleReconnectRequest as EventListener);
+            window.removeEventListener('terminal-connection-failed', handleConnectionFailed as EventListener);
+            window.removeEventListener('global-reconnect-stopped', handleGlobalReconnectStopped);
+        };
+    }, [effectiveTabs, updateTab, createWebSocketConnection]);
 
     return (
         <div className="terminal-event-manager">

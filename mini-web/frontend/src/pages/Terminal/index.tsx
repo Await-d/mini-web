@@ -2,11 +2,11 @@
  * @Author: Await
  * @Date: 2025-05-10 21:34:58
  * @LastEditors: Await
- * @LastEditTime: 2025-05-31 20:56:26
+ * @LastEditTime: 2025-06-07 17:28:01
  * @Description: 终端页面组件
  */
 import React, { useCallback, useEffect, createRef } from 'react';
-import { Layout, message } from 'antd';
+import { Layout, App } from 'antd';
 import { useTerminal } from '../../contexts/TerminalContext';
 import TerminalTabs from './components/TerminalTabs';
 import TerminalContainers from './components/TerminalContainers';
@@ -38,6 +38,9 @@ const { Content } = Layout;
 const Terminal: React.FC = () => {
   // 使用导航和位置钩子
   const navigate = useNavigate();
+
+  // 获取Ant Design App API
+  const { message } = App.useApp();
 
   // 使用终端上下文
   const { state, addTab, updateTab, closeTab, setActiveTab, clearTabs } = useTerminal();

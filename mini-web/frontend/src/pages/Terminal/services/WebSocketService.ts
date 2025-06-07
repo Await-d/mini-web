@@ -1,8 +1,15 @@
 /*
  * @Author: Await
+ * @Date: 2025-05-23 20:08:17
+ * @LastEditors: Await
+ * @LastEditTime: 2025-06-07 17:26:06
+ * @Description: 请填写简介
+ */
+/*
+ * @Author: Await
  * @Date: 2025-05-25 09:30:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-06 19:19:17
+ * @LastEditTime: 2025-06-07 17:24:48
  * @Description: WebSocket服务，管理终端WebSocket连接
  */
 
@@ -61,6 +68,21 @@ export interface WebSocketEventHandlers {
     onSpecialCommand?: (specialData: any) => void;
 }
 
+// 在WebSocketService类的开头添加重连配置接口和重连状态管理
+export interface ReconnectConfig {
+    enabled: boolean;          // 是否启用自动重连
+    maxRetries: number;        // 最大重试次数
+    retryDelay: number;        // 重连延迟(毫秒)
+    heartbeatInterval: number; // 心跳间隔(毫秒)
+}
+
+interface ReconnectState {
+    retryCount: number;        // 当前重试次数
+    lastRetryTime: number;     // 最后重试时间
+    enabled: boolean;          // 是否允许重连
+    timeoutId?: NodeJS.Timeout; // 重连计时器ID
+}
+
 /**
  * WebSocket服务类
  * 管理所有终端的WebSocket连接，支持二进制+JSON协议
@@ -101,6 +123,19 @@ export class WebSocketService {
             other: 0
         }
     };
+
+    // 重连配置
+    private reconnectConfig: ReconnectConfig = {
+        enabled: true,
+        maxRetries: 5,
+        retryDelay: 3000,
+        heartbeatInterval: 30000
+    };
+    private reconnectStates: Map<string, ReconnectState> = new Map();
+    private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
+
+    // 全局重连停止标志
+    public globalReconnectStopped: boolean = false;
 
     // 心跳检测间隔(毫秒) - 调整为5秒，便于快速显示延迟信息
     private heartbeatInterval: number = 5000;
@@ -157,12 +192,78 @@ export class WebSocketService {
             // 获取连接的协议类型 - 有效值为: ssh, rdp, vnc, telnet
             let connProtocol = 'ssh'; // 默认使用ssh
 
-            // 如果标签页存在且有连接信息，则获取实际协议类型
+            // Debug: 打印标签页信息
+            console.log('🔍 WebSocket调试信息:');
+            console.log('标签页对象:', tab);
+            console.log('标签页连接信息:', tab?.connection);
+            console.log('标签页协议:', tab?.connection?.protocol);
+            console.log('标签页protocol属性:', tab?.protocol);
+
+            // 多种方式尝试获取协议信息
+            let detectedProtocol = null;
+
+            // 方式1: 从tab.connection.protocol获取
             if (tab?.connection?.protocol) {
-                // 确保协议类型是有效的
-                const protocol = tab.connection.protocol.toLowerCase();
-                if (['ssh', 'rdp', 'vnc', 'telnet'].includes(protocol)) {
-                    connProtocol = protocol;
+                detectedProtocol = tab.connection.protocol.toLowerCase();
+                console.log('🔍 从tab.connection.protocol检测到协议:', detectedProtocol);
+            }
+
+            // 方式2: 从tab.protocol获取
+            else if (tab?.protocol) {
+                detectedProtocol = tab.protocol.toLowerCase();
+                console.log('🔍 从tab.protocol检测到协议:', detectedProtocol);
+            }
+
+            // 方式3: 从连接ID获取（如果其他方式失败，重新查询连接信息）
+            else if (tab?.connectionId) {
+                console.log('🔍 协议信息缺失，尝试从连接ID重新获取:', tab.connectionId);
+                try {
+                    // 这里可以调用API重新获取连接信息
+                    // 但为了避免异步问题，先使用默认值
+                    console.warn('⚠️ 需要重新获取连接信息，当前使用默认SSH协议');
+                } catch (error) {
+                    console.error('❌ 重新获取连接信息失败:', error);
+                }
+            }
+
+            // 方式4: 从tab的graphical属性推断（RDP/VNC都是图形化的）
+            else if (tab?.isGraphical && tab?.connection?.port) {
+                console.log('🔍 检测到图形化终端，可能是RDP或VNC');
+                const port = tab.connection.port;
+                // 如果端口是3389，可能是RDP
+                if (port === 3389 || port === 3390) {
+                    detectedProtocol = 'rdp';
+                    console.log('🔍 根据端口3389/3390推断为RDP协议');
+                } else if (port === 5900 || (port >= 5901 && port <= 5999)) {
+                    detectedProtocol = 'vnc';
+                    console.log('🔍 根据端口5900-5999推断为VNC协议');
+                }
+            }
+
+            // 验证检测到的协议是否有效
+            if (detectedProtocol && ['ssh', 'rdp', 'vnc', 'telnet'].includes(detectedProtocol)) {
+                connProtocol = detectedProtocol;
+                console.log('✅ 使用检测到的协议:', connProtocol);
+            } else {
+                if (detectedProtocol) {
+                    console.warn('❌ 检测到无效的协议类型:', detectedProtocol);
+                }
+                console.warn('❌ 未找到有效协议信息，使用默认SSH协议');
+            }
+
+            console.log('🚀 最终使用的协议:', connProtocol);
+
+            // 额外的验证：如果协议和端口不匹配，发出警告
+            if (tab?.connection?.port) {
+                const port = tab.connection.port;
+                if (connProtocol === 'ssh' && ![22, 2222].includes(port)) {
+                    console.warn('⚠️ SSH协议但端口不是22/2222，当前端口:', port);
+                } else if (connProtocol === 'rdp' && ![3389, 3390].includes(port)) {
+                    console.warn('⚠️ RDP协议但端口不是3389/3390，当前端口:', port);
+                } else if (connProtocol === 'vnc' && !(port >= 5900 && port <= 5999)) {
+                    console.warn('⚠️ VNC协议但端口不在5900-5999范围，当前端口:', port);
+                } else if (connProtocol === 'telnet' && port !== 23) {
+                    console.warn('⚠️ Telnet协议但端口不是23，当前端口:', port);
                 }
             }
 
@@ -497,16 +598,16 @@ export class WebSocketService {
 
         // 关闭事件处理
         ws.onclose = (event) => {
-            console.log(`WebSocket连接已关闭: ${tab.key}`);
+            console.log(`WebSocket连接已关闭: ${tab.key}, 代码: ${event.code}, 原因: ${event.reason}`);
 
-            // 更新连接状态为已断开
+            // 更新连接状态为断开
             this.connectionStates.set(tab.key, 'disconnected');
 
-            // 更新统计信息 - 只有在连接映射中存在时才减少计数
-            if (this.connections.has(tab.key)) {
-                this.stats.activeConnections = Math.max(0, this.stats.activeConnections - 1);
-                this.stats.lastDisconnectionTime = new Date().toISOString();
+            // 更新统计信息
+            if (this.stats.activeConnections > 0) {
+                this.stats.activeConnections--;
             }
+            this.stats.lastDisconnectionTime = new Date().toISOString();
 
             // 清除心跳检测
             this.clearHeartbeat(tab.key);
@@ -516,11 +617,37 @@ export class WebSocketService {
                 tabHandlers.onClose();
             }
 
-            // 从连接映射中移除
-            this.connections.delete(tab.key);
+            // 检查是否需要自动重连
+            // 只有在连接意外断开时才自动重连(code 1006 或 1011)
+            const shouldReconnect = (event.code === 1006 || event.code === 1011 || event.code === 1000) &&
+                this.reconnectConfig.enabled;
 
-            // 清理连接数据统计
-            this.stats.connectionDataStats.delete(tab.key);
+            if (shouldReconnect) {
+                // 检查重连次数限制
+                const reconnectState = this.reconnectStates.get(tab.key);
+                if (reconnectState && reconnectState.retryCount >= this.reconnectConfig.maxRetries) {
+                    console.warn(`已达到最大重试次数(${this.reconnectConfig.maxRetries})，停止自动重连: ${tab.key}`);
+
+                    // 触发重连失败事件
+                    window.dispatchEvent(new CustomEvent('terminal-reconnect-failed', {
+                        detail: {
+                            tabKey: tab.key,
+                            reason: `已达到最大重试次数(${this.reconnectConfig.maxRetries})`,
+                            finalRetryCount: reconnectState.retryCount
+                        }
+                    }));
+                    return;
+                }
+
+                console.log(`连接意外断开，尝试自动重连: ${tab.key}`);
+
+                // 触发自动重连
+                setTimeout(() => {
+                    this.attemptReconnect(tab, tabHandlers);
+                }, 1000); // 给1秒缓冲时间
+            } else {
+                console.log(`不触发自动重连: ${tab.key}, 代码: ${event.code}, 自动重连: ${this.reconnectConfig.enabled}`);
+            }
 
             // 触发终端断开事件
             window.dispatchEvent(new CustomEvent('terminal-ws-disconnected', {
@@ -538,6 +665,32 @@ export class WebSocketService {
             // 调用自定义处理函数
             if (tabHandlers?.onError) {
                 tabHandlers.onError(event);
+            }
+
+            // 在错误发生后也可能需要重连
+            if (this.reconnectConfig.enabled) {
+                // 检查重连次数限制
+                const reconnectState = this.reconnectStates.get(tab.key);
+                if (reconnectState && reconnectState.retryCount >= this.reconnectConfig.maxRetries) {
+                    console.warn(`WebSocket错误：已达到最大重试次数(${this.reconnectConfig.maxRetries})，停止自动重连: ${tab.key}`);
+
+                    // 触发重连失败事件
+                    window.dispatchEvent(new CustomEvent('terminal-reconnect-failed', {
+                        detail: {
+                            tabKey: tab.key,
+                            reason: `WebSocket错误且已达到最大重试次数(${this.reconnectConfig.maxRetries})`,
+                            finalRetryCount: reconnectState.retryCount
+                        }
+                    }));
+                    return;
+                }
+
+                console.log(`WebSocket错误，尝试自动重连: ${tab.key}`);
+
+                // 延迟重连，给错误处理一些时间
+                setTimeout(() => {
+                    this.attemptReconnect(tab, tabHandlers);
+                }, 2000);
             }
 
             // 触发终端错误事件
@@ -707,6 +860,12 @@ export class WebSocketService {
             // 清除心跳检测
             this.clearHeartbeat(tabKey);
 
+            // 清理连接数据统计
+            this.stats.connectionDataStats.delete(tabKey);
+
+            // 清理协议支持记录
+            this.protocolSupport.delete(tabKey);
+
             // 根据参数决定是否移除处理函数
             if (!preserveHandlers) {
                 this.handlers.delete(tabKey);
@@ -737,14 +896,52 @@ export class WebSocketService {
     }
 
     /**
-     * 刷新指定标签的WebSocket连接
+     * 刷新WebSocket连接
      * @param tab 终端标签
-     * @param handlers 可选的事件处理函数
-     * @returns 新的WebSocket实例或null(如果创建失败)
+     * @param handlers 可选的事件处理器
+     * @returns WebSocket实例或null
      */
     refreshConnection(tab: TerminalTab, handlers?: WebSocketEventHandlers): WebSocket | null {
         if (!tab || !tab.key) {
-            console.error('无法刷新WebSocket连接: 标签缺少必要信息');
+            console.error('无法刷新连接: 标签缺少必要信息');
+            return null;
+        }
+
+        if (this.globalReconnectStopped) {
+            console.warn(`全局重连已停止，阻止刷新连接: ${tab.key}`);
+            return null;
+        }
+
+        if (!this.reconnectConfig.enabled) {
+            console.warn(`自动重连已禁用，阻止刷新连接: ${tab.key}`);
+            return null;
+        }
+
+        // **严格检查重连次数限制 - 防止无限重连**
+        const reconnectState = this.reconnectStates.get(tab.key);
+        if (reconnectState && reconnectState.retryCount >= this.reconnectConfig.maxRetries) {
+            console.warn(`已达到最大重试次数(${this.reconnectConfig.maxRetries})，阻止刷新连接: ${tab.key}`);
+            // 强制禁用重连并清理状态
+            reconnectState.enabled = false;
+            if (reconnectState.timeoutId) {
+                clearTimeout(reconnectState.timeoutId);
+                reconnectState.timeoutId = undefined;
+            }
+            this.reconnectStates.delete(tab.key);
+
+            // 触发最终失败事件
+            window.dispatchEvent(new CustomEvent('terminal-connection-failed', {
+                detail: {
+                    tabKey: tab.key,
+                    reason: `已达到最大重试次数(${this.reconnectConfig.maxRetries})`
+                }
+            }));
+            return null;
+        }
+
+        // 检查重连是否被禁用
+        if (reconnectState && !reconnectState.enabled) {
+            console.warn(`该连接的重连已被禁用: ${tab.key}`);
             return null;
         }
 
@@ -766,6 +963,19 @@ export class WebSocketService {
 
         // 等待短暂时间确保连接完全关闭
         setTimeout(() => {
+            // 再次检查是否应该继续重连
+            if (this.globalReconnectStopped) {
+                console.warn(`全局重连已停止，取消延迟重连: ${tab.key}`);
+                return;
+            }
+
+            // 再次检查重连次数
+            const currentReconnectState = this.reconnectStates.get(tab.key);
+            if (currentReconnectState && currentReconnectState.retryCount >= this.reconnectConfig.maxRetries) {
+                console.warn(`延迟检查：已达到最大重试次数，取消重连: ${tab.key}`);
+                return;
+            }
+
             // 更新统计信息
             this.stats.reconnections++;
 
@@ -1244,6 +1454,397 @@ export class WebSocketService {
      */
     setConnectionState(tabKey: string, state: 'connecting' | 'connected' | 'disconnecting' | 'disconnected'): void {
         this.connectionStates.set(tabKey, state);
+    }
+
+    /**
+     * 设置重连配置
+     * @param config 重连配置
+     */
+    setReconnectConfig(config: Partial<ReconnectConfig>): void {
+        this.reconnectConfig = { ...this.reconnectConfig, ...config };
+        console.log('更新重连配置:', this.reconnectConfig);
+
+        // 更新心跳间隔
+        if (config.heartbeatInterval) {
+            this.heartbeatInterval = config.heartbeatInterval;
+        }
+    }
+
+    /**
+     * 获取重连配置
+     * @returns 当前重连配置
+     */
+    getReconnectConfig(): ReconnectConfig {
+        return { ...this.reconnectConfig };
+    }
+
+    /**
+     * 获取指定连接的重连状态
+     * @param tabKey 标签键
+     * @returns 重连状态，如果不存在则返回undefined
+     */
+    getReconnectState(tabKey: string): ReconnectState | undefined {
+        return this.reconnectStates.get(tabKey);
+    }
+
+    /**
+     * 重置重连状态
+     * @param tabKey 标签键
+     */
+    resetReconnectState(tabKey: string): void {
+        this.reconnectStates.delete(tabKey);
+        const timer = this.reconnectTimers.get(tabKey);
+        if (timer) {
+            clearTimeout(timer);
+            this.reconnectTimers.delete(tabKey);
+        }
+    }
+
+    /**
+     * 尝试重新连接
+     * @param tab 标签页对象
+     * @param handlers 事件处理器
+     * @returns 是否启动重连
+     */
+    private attemptReconnect(tab: TerminalTab, handlers?: WebSocketEventHandlers): boolean {
+        console.log('=== 尝试重连调试信息 ===');
+        console.log('Tab Key:', tab.key);
+        console.log('重连配置:', JSON.stringify(this.reconnectConfig, null, 2));
+        console.log('全局重连停止标志:', this.globalReconnectStopped);
+
+        // **立即检查全局停止标志 - 最高优先级**
+        if (this.globalReconnectStopped) {
+            console.warn(`❌ 全局重连已停止，阻止重连: ${tab.key}`);
+            this.forceStopReconnect(tab.key);
+            return false;
+        }
+
+        // **检查重连配置 - 第二优先级**
+        if (!this.reconnectConfig.enabled) {
+            console.warn(`❌ 重连已禁用，阻止重连: ${tab.key}`);
+            this.forceStopReconnect(tab.key);
+            return false;
+        }
+
+        // 获取或创建重连状态
+        let reconnectState = this.reconnectStates.get(tab.key);
+        if (!reconnectState) {
+            reconnectState = {
+                retryCount: 0,
+                lastRetryTime: 0,
+                enabled: true
+            };
+            this.reconnectStates.set(tab.key, reconnectState);
+        }
+
+        console.log('当前重连状态:', JSON.stringify(reconnectState, null, 2));
+
+        // **严格检查重连次数限制 - 第三优先级**
+        if (reconnectState.retryCount >= this.reconnectConfig.maxRetries) {
+            console.error(`❌ 已达到最大重试次数(${this.reconnectConfig.maxRetries})，当前次数: ${reconnectState.retryCount}，强制停止: ${tab.key}`);
+            this.forceStopReconnect(tab.key);
+
+            // 触发连接失败事件
+            window.dispatchEvent(new CustomEvent('terminal-connection-failed', {
+                detail: {
+                    tabKey: tab.key,
+                    reason: `已达到最大重试次数(${this.reconnectConfig.maxRetries})`,
+                    maxRetries: this.reconnectConfig.maxRetries,
+                    actualRetries: reconnectState.retryCount
+                }
+            }));
+
+            return false;
+        }
+
+        // **额外检查：如果这次重连后会超过限制，也要停止**
+        if (reconnectState.retryCount + 1 > this.reconnectConfig.maxRetries) {
+            console.error(`❌ 下次重连将超过最大重试次数(${this.reconnectConfig.maxRetries})，当前次数: ${reconnectState.retryCount}，强制停止: ${tab.key}`);
+            this.forceStopReconnect(tab.key);
+
+            // 触发连接失败事件
+            window.dispatchEvent(new CustomEvent('terminal-connection-failed', {
+                detail: {
+                    tabKey: tab.key,
+                    reason: `即将超过最大重试次数(${this.reconnectConfig.maxRetries})`,
+                    maxRetries: this.reconnectConfig.maxRetries,
+                    actualRetries: reconnectState.retryCount
+                }
+            }));
+
+            return false;
+        }
+
+        // **检查重连状态是否被禁用**
+        if (!reconnectState.enabled) {
+            console.warn(`❌ 重连状态被禁用: ${tab.key}`);
+            return false;
+        }
+
+        // 检查是否已经有重连计时器在运行
+        if (reconnectState.timeoutId) {
+            console.warn(`⚠️ 重连计时器已存在，跳过重复重连: ${tab.key}`);
+            return false;
+        }
+
+        // 计算延迟时间
+        // 使用配置的基础延迟 + 适度递增（避免过度递增）
+        const baseDelay = this.reconnectConfig.retryDelay;
+        const incrementFactor = Math.min(reconnectState.retryCount * 0.5, 2); // 最多翻倍
+        const delay = Math.min(
+            baseDelay + (baseDelay * incrementFactor),
+            Math.max(baseDelay * 3, 30000) // 最大延迟为基础延迟的3倍或30秒，取较大值
+        );
+
+        console.log(`🔄 第${reconnectState.retryCount + 1}次重连尝试，延迟${delay}ms: ${tab.key}`);
+
+        // 使用递增延迟重试
+        const timeoutId = setTimeout(() => {
+            // **重连执行前的最终检查**
+            const currentReconnectState = this.reconnectStates.get(tab.key);
+
+            // 清除timeoutId
+            if (currentReconnectState && currentReconnectState.timeoutId) {
+                currentReconnectState.timeoutId = undefined;
+            }
+
+            // **再次检查全局停止标志**
+            if (this.globalReconnectStopped || !this.reconnectConfig.enabled) {
+                console.warn(`❌ 重连执行时检测到停止信号: ${tab.key}`);
+                this.forceStopReconnect(tab.key);
+                return;
+            }
+
+            // **再次检查重试次数限制 - 在增加次数之前检查**
+            if (currentReconnectState && currentReconnectState.retryCount >= this.reconnectConfig.maxRetries) {
+                console.error(`❌ 重连执行时检测到超出最大重试次数: ${tab.key}`);
+                this.forceStopReconnect(tab.key);
+
+                // 触发连接失败事件
+                window.dispatchEvent(new CustomEvent('terminal-connection-failed', {
+                    detail: {
+                        tabKey: tab.key,
+                        reason: `执行重连时发现已达到最大重试次数(${this.reconnectConfig.maxRetries})`,
+                        maxRetries: this.reconnectConfig.maxRetries,
+                        actualRetries: currentReconnectState.retryCount
+                    }
+                }));
+                return;
+            }
+
+            // **检查即将进行的重连是否会超过限制**
+            if (currentReconnectState && currentReconnectState.retryCount + 1 > this.reconnectConfig.maxRetries) {
+                console.error(`❌ 即将进行的重连会超过最大重试次数(${this.reconnectConfig.maxRetries})，当前次数: ${currentReconnectState.retryCount}，停止重连: ${tab.key}`);
+                this.forceStopReconnect(tab.key);
+
+                // 触发连接失败事件
+                window.dispatchEvent(new CustomEvent('terminal-connection-failed', {
+                    detail: {
+                        tabKey: tab.key,
+                        reason: `重连次数即将超过最大限制(${this.reconnectConfig.maxRetries})`,
+                        maxRetries: this.reconnectConfig.maxRetries,
+                        actualRetries: currentReconnectState.retryCount
+                    }
+                }));
+                return;
+            }
+
+            console.log(`⚡ 开始第${currentReconnectState ? currentReconnectState.retryCount + 1 : 1}次重连: ${tab.key}`);
+
+            // 更新重试状态 - 现在安全更新
+            if (currentReconnectState) {
+                currentReconnectState.retryCount++;
+                currentReconnectState.lastRetryTime = Date.now();
+
+                // **立即检查更新后的次数**
+                if (currentReconnectState.retryCount >= this.reconnectConfig.maxRetries) {
+                    console.error(`❌ 更新重连次数后发现已达到最大值，立即停止: ${tab.key}`);
+                    this.forceStopReconnect(tab.key);
+                    return;
+                }
+            }
+
+            // 执行重连
+            this.refreshConnection(tab, handlers);
+        }, delay);
+
+        // 保存计时器ID
+        reconnectState.timeoutId = timeoutId;
+        return true;
+    }
+
+    /**
+     * 强制停止指定连接的重连活动
+     * @param tabKey 标签键
+     */
+    private forceStopReconnect(tabKey: string): void {
+        console.log(`🛑 强制停止重连: ${tabKey}`);
+
+        const reconnectState = this.reconnectStates.get(tabKey);
+        if (reconnectState) {
+            // 清除重连计时器
+            if (reconnectState.timeoutId) {
+                clearTimeout(reconnectState.timeoutId);
+                reconnectState.timeoutId = undefined;
+            }
+
+            // 禁用重连
+            reconnectState.enabled = false;
+        }
+
+        // 从状态映射中移除
+        this.reconnectStates.delete(tabKey);
+
+        // 清除其他计时器
+        const timerId = this.reconnectTimers.get(tabKey);
+        if (timerId) {
+            clearTimeout(timerId);
+            this.reconnectTimers.delete(tabKey);
+        }
+
+        // 清除心跳计时器
+        this.clearHeartbeat(tabKey);
+
+        // 清理连接相关数据
+        this.stats.connectionDataStats.delete(tabKey);
+        this.protocolSupport.delete(tabKey);
+
+        console.log(`✅ 已强制停止重连: ${tabKey}`);
+    }
+
+    /**
+     * 禁用指定连接的自动重连
+     * @param tabKey 标签键
+     */
+    disableAutoReconnect(tabKey: string): void {
+        const reconnectState = this.reconnectStates.get(tabKey);
+        if (reconnectState) {
+            reconnectState.enabled = false;
+        } else {
+            this.reconnectStates.set(tabKey, {
+                retryCount: 0,
+                lastRetryTime: 0,
+                enabled: false
+            });
+        }
+        console.log(`禁用自动重连: ${tabKey}`);
+    }
+
+    /**
+     * 启用指定连接的自动重连
+     * @param tabKey 标签键
+     */
+    enableAutoReconnect(tabKey: string): void {
+        const reconnectState = this.reconnectStates.get(tabKey);
+        if (reconnectState) {
+            reconnectState.enabled = true;
+        } else {
+            this.reconnectStates.set(tabKey, {
+                retryCount: 0,
+                lastRetryTime: 0,
+                enabled: true
+            });
+        }
+        console.log(`启用自动重连: ${tabKey}`);
+    }
+
+    /**
+     * 调试方法：强制停止所有重连活动
+     */
+    debugStopAllReconnects(): void {
+        console.log('🚨 紧急停止所有重连活动');
+        this.globalReconnectStopped = true;
+        this.reconnectConfig.enabled = false;
+
+        // 清除所有重连计时器
+        for (const [tabKey, reconnectState] of this.reconnectStates.entries()) {
+            if (reconnectState.timeoutId) {
+                clearTimeout(reconnectState.timeoutId);
+                console.log(`清除重连计时器: ${tabKey}`);
+            }
+        }
+
+        // 清除所有重连状态
+        this.reconnectStates.clear();
+        this.reconnectTimers.clear();
+
+        // 清除所有心跳计时器
+        for (const [tabKey, timerId] of this.heartbeatTimers.entries()) {
+            if (timerId) {
+                clearInterval(timerId);
+                console.log(`清除心跳计时器: ${tabKey}`);
+            }
+        }
+        this.heartbeatTimers.clear();
+
+        // 关闭所有活动连接
+        for (const [tabKey, ws] of this.connections.entries()) {
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                console.log(`强制关闭连接: ${tabKey}`);
+                try {
+                    ws.close(1000, '管理员强制停止');
+                } catch (e) {
+                    console.warn(`关闭连接时出错: ${tabKey}`, e);
+                }
+            }
+        }
+
+        // 清除所有连接引用
+        this.connections.clear();
+        this.handlers.clear();
+        this.connectionStates.clear();
+
+        // 触发全局事件，通知所有组件停止重连检查
+        window.dispatchEvent(new CustomEvent('global-reconnect-stopped', {
+            detail: { stopped: true }
+        }));
+
+        console.log('✅ 所有重连活动已停止');
+    }
+
+    /**
+     * 立即清理所有连接和状态 - 紧急情况使用
+     */
+    emergencyCleanup(): void {
+        console.log('🚨 执行紧急清理');
+
+        // 停止所有重连
+        this.debugStopAllReconnects();
+
+        // 重置所有统计信息
+        this.stats = {
+            totalConnections: 0,
+            activeConnections: 0,
+            connectionsByProtocol: {},
+            failedConnections: 0,
+            reconnections: 0,
+            totalDataSent: 0,
+            totalDataReceived: 0,
+            lastConnectionTime: null,
+            lastDisconnectionTime: null,
+            fileTransferStats: {
+                uploadCount: 0,
+                downloadCount: 0,
+                totalUploadSize: 0,
+                totalDownloadSize: 0,
+            },
+            connectionDataStats: new Map(),
+            messageTypeStats: {
+                terminalData: 0,
+                fileTransfer: 0,
+                heartbeat: 0,
+                protocolNegotiation: 0,
+                specialCommand: 0,
+                other: 0,
+            },
+        };
+
+        // 清理所有网络延迟记录
+        this.networkLatencies.clear();
+        this.heartbeatTimestamps.clear();
+        this.protocolSupport.clear();
+
+        console.log('✅ 紧急清理完成');
     }
 }
 

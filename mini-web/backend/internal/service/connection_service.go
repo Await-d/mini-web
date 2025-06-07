@@ -1,3 +1,10 @@
+/*
+ * @Author: Await
+ * @Date: 2025-05-08 18:19:21
+ * @LastEditors: Await
+ * @LastEditTime: 2025-06-07 14:43:36
+ * @Description: 请填写简介
+ */
 package service
 
 import (
@@ -115,7 +122,7 @@ func (s *ConnectionService) CreateConnection(userID uint, req *model.ConnectionR
 func (s *ConnectionService) UpdateConnection(userID uint, id uint, req *model.ConnectionRequest) (*model.Connection, error) {
 	var conn *model.Connection
 	var err error
-	
+
 	// 使用修复后的方法获取连接，处理NULL值问题
 	if repo, ok := s.connRepo.(*sqlite.ConnectionRepository); ok {
 		conn, err = repo.GetByIDFixed(id)
@@ -123,7 +130,7 @@ func (s *ConnectionService) UpdateConnection(userID uint, id uint, req *model.Co
 		// 回退到原始方法
 		conn, err = s.connRepo.GetByID(id)
 	}
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("获取连接信息时出错: %w", err)
 	}
@@ -169,7 +176,7 @@ func (s *ConnectionService) UpdateConnection(userID uint, id uint, req *model.Co
 func (s *ConnectionService) DeleteConnection(userID uint, id uint) error {
 	var conn *model.Connection
 	var err error
-	
+
 	// 使用修复后的方法获取连接，处理NULL值问题
 	if repo, ok := s.connRepo.(*sqlite.ConnectionRepository); ok {
 		conn, err = repo.GetByIDFixed(id)
@@ -177,7 +184,7 @@ func (s *ConnectionService) DeleteConnection(userID uint, id uint) error {
 		// 回退到原始方法
 		conn, err = s.connRepo.GetByID(id)
 	}
-	
+
 	if err != nil {
 		return fmt.Errorf("获取连接信息时出错: %w", err)
 	}
@@ -202,7 +209,7 @@ func (s *ConnectionService) DeleteConnection(userID uint, id uint) error {
 func (s *ConnectionService) GetConnection(userID uint, id uint) (*model.Connection, error) {
 	var conn *model.Connection
 	var err error
-	
+
 	// 使用修复后的方法获取连接，处理NULL值问题
 	if repo, ok := s.connRepo.(*sqlite.ConnectionRepository); ok {
 		conn, err = repo.GetByIDFixed(id)
@@ -210,7 +217,7 @@ func (s *ConnectionService) GetConnection(userID uint, id uint) (*model.Connecti
 		// 回退到原始方法
 		conn, err = s.connRepo.GetByID(id)
 	}
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("获取连接信息时出错: %w", err)
 	}
@@ -237,7 +244,7 @@ func (s *ConnectionService) GetUserConnections(userID uint) ([]*model.Connection
 		}
 		return connections, nil
 	}
-	
+
 	// 回退到原始方法
 	connections, err := s.connRepo.GetByUserID(userID)
 	if err != nil {
@@ -376,14 +383,14 @@ func (s *ConnectionService) CreateTerminalSession(protocol string, connection *m
 // createSSHSession 创建SSH会话
 func (s *ConnectionService) createSSHSession(connection *model.Connection) (TerminalSession, error) {
 	log.Printf("创建SSH终端会话: %s@%s:%d", connection.Username, connection.Host, connection.Port)
-	
+
 	// 使用我们实现的SSH终端
 	session, err := createSSHTerminalSession(connection)
 	if err != nil {
 		log.Printf("SSH终端创建失败: %v", err)
 		return nil, err
 	}
-	
+
 	log.Printf("SSH终端会话创建成功")
 	return session, nil
 }
@@ -391,14 +398,14 @@ func (s *ConnectionService) createSSHSession(connection *model.Connection) (Term
 // createRDPSession 创建RDP会话
 func (s *ConnectionService) createRDPSession(connection *model.Connection) (TerminalSession, error) {
 	log.Printf("创建RDP远程桌面会话: %s@%s:%d", connection.Username, connection.Host, connection.Port)
-	
-	// 使用增强版的RDP终端，支持图形界面
-	session, err := createRDPTerminalSession(connection)
+
+	// 使用简化的RDP终端实现
+	session, err := createRDPTerminalSessionSimple(connection)
 	if err != nil {
 		log.Printf("RDP终端创建失败: %v", err)
 		return nil, err
 	}
-	
+
 	log.Printf("RDP远程桌面会话创建成功")
 	return session, nil
 }
@@ -406,14 +413,14 @@ func (s *ConnectionService) createRDPSession(connection *model.Connection) (Term
 // createVNCSession 创建VNC会话
 func (s *ConnectionService) createVNCSession(connection *model.Connection) (TerminalSession, error) {
 	log.Printf("创建VNC远程桌面会话: %s@%s:%d", connection.Username, connection.Host, connection.Port)
-	
+
 	// 使用修复版的VNC终端，支持图形界面
 	session, err := createVNCTerminalSession(connection)
 	if err != nil {
 		log.Printf("VNC终端创建失败: %v", err)
 		return nil, err
 	}
-	
+
 	log.Printf("VNC远程桌面会话创建成功")
 	return session, nil
 }
@@ -421,14 +428,14 @@ func (s *ConnectionService) createVNCSession(connection *model.Connection) (Term
 // createTelnetSession 创建Telnet会话
 func (s *ConnectionService) createTelnetSession(connection *model.Connection) (TerminalSession, error) {
 	log.Printf("创建Telnet终端会话: %s:%d", connection.Host, connection.Port)
-	
+
 	// 使用修复版的Telnet终端
 	session, err := createTelnetTerminalSession(connection)
 	if err != nil {
 		log.Printf("Telnet终端创建失败: %v", err)
 		return nil, err
 	}
-	
+
 	log.Printf("Telnet终端会话创建成功")
 	return session, nil
 }

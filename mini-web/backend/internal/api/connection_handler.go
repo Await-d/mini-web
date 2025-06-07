@@ -603,6 +603,10 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 	log.Printf("获取连接信息成功: ID=%d, 协议=%s, 主机=%s, 端口=%d",
 		connectionInfo.ID, connectionInfo.Protocol, connectionInfo.Host, connectionInfo.Port)
 
+	// 使用数据库中的实际协议，而不是URL路径中的协议
+	actualProtocol := connectionInfo.Protocol
+	log.Printf("URL协议: %s, 数据库实际协议: %s, 将使用实际协议创建会话", protocol, actualProtocol)
+
 	// 升级HTTP连接为WebSocket
 	log.Printf("尝试升级HTTP连接为WebSocket...")
 
@@ -635,11 +639,11 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 
 	log.Printf("WebSocket连接升级成功")
 
-	// 创建终端会话
-	log.Printf("尝试创建终端会话: 协议=%s", protocol)
-	terminal, err := h.connService.CreateTerminalSession(protocol, connectionInfo)
+	// 创建终端会话 - 使用数据库中的实际协议
+	log.Printf("尝试创建终端会话: 协议=%s", actualProtocol)
+	terminal, err := h.connService.CreateTerminalSession(actualProtocol, connectionInfo)
 	if err != nil {
-		log.Printf("创建终端会话失败: 协议=%s, 错误: %v", protocol, err)
+		log.Printf("创建终端会话失败: 协议=%s, 错误: %v", actualProtocol, err)
 		wsConn.WriteMessage(websocket.TextMessage, []byte("创建终端会话失败: "+err.Error()))
 		return
 	}
