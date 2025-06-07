@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-04 20:42:57
+ * @LastEditTime: 2025-06-07 13:42:32
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -59,6 +59,7 @@ interface FileItem {
     type: 'file' | 'directory';
     size: number;
     permissions: string;
+    numericPermissions?: string; // 数字权限 (如 755)
     modified: string;
     path: string;
     owner?: string;
@@ -103,6 +104,9 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     const [renameVisible, setRenameVisible] = useState(false);
     const [renameTarget, setRenameTarget] = useState<string>('');
     const [newName, setNewName] = useState('');
+    const [permissionsVisible, setPermissionsVisible] = useState(false);
+    const [permissionsTarget, setPermissionsTarget] = useState<string>('');
+    const [newPermissions, setNewPermissions] = useState('');
     const [uploadProgress, setUploadProgress] = useState(0);
     const [clipboard, setClipboard] = useState<{ files: string[], operation: 'copy' | 'cut' | null }>({
         files: [],
@@ -250,8 +254,30 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             title: '权限',
             dataIndex: 'permissions',
             key: 'permissions',
-            width: 80,
+            width: 120,
             ellipsis: true,
+            render: (permissions: string, record: FileItem) => (
+                <Space>
+                    <Tooltip title={`符号权限: ${permissions}`}>
+                        <Tag color="blue" style={{ cursor: 'pointer', fontSize: '11px' }}>
+                            {record.numericPermissions || '---'}
+                        </Tag>
+                    </Tooltip>
+                    <Tooltip title="修改权限">
+                        <Button
+                            type="text"
+                            size="small"
+                            icon={<EditOutlined />}
+                            onClick={() => {
+                                setPermissionsTarget(record.name);
+                                setNewPermissions(record.numericPermissions || '755');
+                                setPermissionsVisible(true);
+                            }}
+                            style={{ padding: '0 2px' }}
+                        />
+                    </Tooltip>
+                </Space>
+            ),
         },
         {
             title: '修改时间',
@@ -447,6 +473,38 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         return isLs;
     }, []);
 
+    // 将符号权限转换为数字权限
+    const convertPermissionsToNumeric = useCallback((symbolic: string): string => {
+        if (symbolic.length < 10) {
+            return '000';
+        }
+
+        // 跳过第一个字符（文件类型标识符）
+        const perms = symbolic.substring(1);
+
+        let result = '';
+        for (let i = 0; i < 9; i += 3) {
+            if (i + 2 >= perms.length) {
+                break;
+            }
+
+            let value = 0;
+            if (perms[i] === 'r') {
+                value += 4;
+            }
+            if (perms[i + 1] === 'w') {
+                value += 2;
+            }
+            if (perms[i + 2] === 'x' || perms[i + 2] === 's' || perms[i + 2] === 't') {
+                value += 1;
+            }
+
+            result += value.toString();
+        }
+
+        return result;
+    }, []);
+
     // 解析ls命令输出
     const parseLsOutput = useCallback((output: string): FileItem[] => {
         // 添加类型检查
@@ -596,11 +654,15 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     fileType = 'file';
                 }
 
+                // 计算数字权限
+                const numericPermissions = convertPermissionsToNumeric(permissions);
+
                 const fileItem: FileItem = {
                     name: fileName,
                     type: fileType,
                     size,
                     permissions,
+                    numericPermissions,
                     modified: `${month} ${day} ${timeOrYear}`,
                     path: currentDirectory === '/' ? `/${fileName}` : `${currentDirectory}/${fileName}`,
                     owner,
@@ -618,7 +680,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             console.log('解析结果示例:', items.slice(0, 3));
         }
         return items;
-    }, [currentDirectory]);
+    }, [currentDirectory, convertPermissionsToNumeric]);
 
 
 
@@ -1007,6 +1069,12 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
     // 删除文件或目录
     const deleteItem = useCallback((fileName: string) => {
+        const file = files.find(f => f.name === fileName);
+        if (!file) {
+            message.error('文件不存在');
+            return;
+        }
+
         Modal.confirm({
             title: '确认删除',
             content: `确定要删除 "${fileName}" 吗？此操作不可撤销。`,
@@ -1014,11 +1082,34 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             okType: 'danger',
             cancelText: '取消',
             onOk: () => {
-                // TODO: 实现后端JSON格式的删除操作
-                message.info('删除功能正在开发中，将通过后端API实现');
+                if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+                    message.error('WebSocket连接未建立');
+                    return;
+                }
+
+                const requestId = `file_delete_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                const request = {
+                    type: 'file_delete',
+                    data: {
+                        path: file.path,
+                        isDirectory: file.type === 'directory',
+                        requestId: requestId
+                    }
+                };
+
+                console.log('🗑️ 发送删除请求:', request);
+
+                try {
+                    webSocketRef.current.send(JSON.stringify(request));
+                    message.loading('正在删除...', 0);
+                } catch (error) {
+                    console.error('发送删除请求失败:', error);
+                    message.error('发送请求失败');
+                }
             }
         });
-    }, []);
+    }, [files, webSocketRef]);
 
     // 创建目录
     const createDirectory = useCallback(() => {
@@ -1104,13 +1195,110 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             return;
         }
 
-        // TODO: 实现后端JSON格式的重命名操作
-        message.info('重命名功能正在开发中，将通过后端API实现');
+        if (newName === renameTarget) {
+            message.info('名称未更改');
+            setRenameVisible(false);
+            setRenameTarget('');
+            setNewName('');
+            return;
+        }
 
-        setRenameVisible(false);
-        setRenameTarget('');
-        setNewName('');
-    }, [newName, renameTarget]);
+        if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            message.error('WebSocket连接未建立');
+            setRenameVisible(false);
+            setRenameTarget('');
+            setNewName('');
+            return;
+        }
+
+        const file = files.find(f => f.name === renameTarget);
+        if (!file) {
+            message.error('原文件不存在');
+            setRenameVisible(false);
+            setRenameTarget('');
+            setNewName('');
+            return;
+        }
+
+        const requestId = `file_rename_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // 构建新的完整路径
+        const parentDir = file.path.substring(0, file.path.lastIndexOf('/') + 1);
+        const newPath = parentDir + newName;
+
+        const request = {
+            type: 'file_rename',
+            data: {
+                oldPath: file.path,
+                newPath: newPath,
+                requestId: requestId
+            }
+        };
+
+        console.log('📝 发送重命名请求:', request);
+
+        try {
+            webSocketRef.current.send(JSON.stringify(request));
+            message.loading('正在重命名...', 0);
+            setRenameVisible(false);
+            setRenameTarget('');
+            setNewName('');
+        } catch (error) {
+            console.error('发送重命名请求失败:', error);
+            message.error('发送请求失败');
+            setRenameVisible(false);
+            setRenameTarget('');
+            setNewName('');
+        }
+    }, [newName, renameTarget, files, webSocketRef]);
+
+    // 修改文件权限
+    const changePermissions = useCallback(() => {
+        if (!permissionsTarget || !newPermissions) {
+            message.error('请输入有效的权限');
+            return;
+        }
+
+        // 验证权限格式
+        if (!/^[0-7]{3}$/.test(newPermissions)) {
+            message.error('权限格式错误，应为3位数字（0-7）');
+            return;
+        }
+
+        if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            message.error('WebSocket连接未建立');
+            return;
+        }
+
+        const file = files.find(f => f.name === permissionsTarget);
+        if (!file) {
+            message.error('文件不存在');
+            setPermissionsVisible(false);
+            return;
+        }
+
+        const requestId = `file_permissions_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        const request = {
+            type: 'file_permissions',
+            data: {
+                path: file.path,
+                permissions: newPermissions,
+                requestId
+            }
+        };
+
+        try {
+            webSocketRef.current.send(JSON.stringify(request));
+            message.loading('正在修改权限...', 0);
+            setPermissionsVisible(false);
+            setPermissionsTarget('');
+            setNewPermissions('');
+        } catch (error) {
+            console.error('发送权限修改请求失败:', error);
+            message.error('发送权限修改请求失败');
+        }
+    }, [permissionsTarget, newPermissions, files, webSocketRef]);
 
     // 查看文件内容
     const viewFile = useCallback((fileName: string) => {
@@ -1744,6 +1932,45 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 if (data.type === 'file_upload_response') {
                     // 文件上传的响应在uploadFile函数中通过事件监听器处理
                     // 这里不需要额外处理，让uploadFile函数的监听器处理
+                    return;
+                }
+
+                // 处理文件删除响应
+                if (data.type === 'file_delete_response') {
+                    message.destroy(); // 清除loading消息
+                    if (data.data.success) {
+                        message.success('删除成功');
+                        // 刷新文件列表
+                        setTimeout(() => refreshDirectory(), 500);
+                    } else {
+                        message.error(`删除失败: ${data.data.error || '未知错误'}`);
+                    }
+                    return;
+                }
+
+                // 处理文件重命名响应
+                if (data.type === 'file_rename_response') {
+                    message.destroy(); // 清除loading消息
+                    if (data.data.success) {
+                        message.success('重命名成功');
+                        // 刷新文件列表
+                        setTimeout(() => refreshDirectory(), 500);
+                    } else {
+                        message.error(`重命名失败: ${data.data.error || '未知错误'}`);
+                    }
+                    return;
+                }
+
+                // 处理文件权限修改响应
+                if (data.type === 'file_permissions_response') {
+                    message.destroy(); // 清除loading消息
+                    if (data.data.success) {
+                        message.success('权限修改成功');
+                        // 刷新文件列表
+                        setTimeout(() => refreshDirectory(), 500);
+                    } else {
+                        message.error(`权限修改失败: ${data.data.error || '未知错误'}`);
+                    }
                     return;
                 }
 
@@ -2516,6 +2743,58 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     onBlur={(e) => e.stopPropagation()}
                     autoFocus
                 />
+            </Modal>
+
+            {/* 权限修改对话框 */}
+            <Modal
+                title="修改文件权限"
+                open={permissionsVisible}
+                onOk={changePermissions}
+                onCancel={() => {
+                    setPermissionsVisible(false);
+                    setPermissionsTarget('');
+                    setNewPermissions('');
+                }}
+                okText="确认修改"
+                cancelText="取消"
+                destroyOnClose
+            >
+                <div style={{ marginBottom: 16 }}>
+                    <p><strong>文件:</strong> {permissionsTarget}</p>
+                    <p><strong>当前权限:</strong> {files.find(f => f.name === permissionsTarget)?.permissions || 'N/A'}
+                        (<Tag color="blue">{files.find(f => f.name === permissionsTarget)?.numericPermissions || '---'}</Tag>)
+                    </p>
+                </div>
+
+                <Form layout="vertical">
+                    <Form.Item label="新的权限值 (数字格式)" required>
+                        <Input
+                            value={newPermissions}
+                            onChange={(e) => setNewPermissions(e.target.value)}
+                            placeholder="例如: 755, 644, 777"
+                            maxLength={3}
+                            style={{ width: 200 }}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            onKeyUp={(e) => e.stopPropagation()}
+                            onKeyPress={(e) => e.stopPropagation()}
+                            onInput={(e) => e.stopPropagation()}
+                            onCompositionStart={(e) => e.stopPropagation()}
+                            onCompositionEnd={(e) => e.stopPropagation()}
+                            onPaste={(e) => e.stopPropagation()}
+                            onFocus={(e) => e.stopPropagation()}
+                            onBlur={(e) => e.stopPropagation()}
+                        />
+                        <div style={{ fontSize: '12px', color: '#666', marginTop: 8 }}>
+                            <p><strong>常用权限:</strong></p>
+                            <Space direction="vertical" size={2}>
+                                <div><Tag color="green" style={{ cursor: 'pointer' }} onClick={() => setNewPermissions('755')}>755</Tag> - 拥有者读写执行，组和其他只读执行</div>
+                                <div><Tag color="blue" style={{ cursor: 'pointer' }} onClick={() => setNewPermissions('644')}>644</Tag> - 拥有者读写，组和其他只读</div>
+                                <div><Tag color="orange" style={{ cursor: 'pointer' }} onClick={() => setNewPermissions('777')}>777</Tag> - 所有用户读写执行</div>
+                                <div><Tag color="purple" style={{ cursor: 'pointer' }} onClick={() => setNewPermissions('600')}>600</Tag> - 仅拥有者读写</div>
+                            </Space>
+                        </div>
+                    </Form.Item>
+                </Form>
             </Modal>
         </div>
     );

@@ -1251,6 +1251,128 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 								log.Printf("解析文件创建请求数据失败: %v", err)
 								h.sendFileCreateError(wsConn, fileCreateData.RequestId, "请求数据格式错误")
 							}
+
+						case "file_delete":
+							// 处理文件/目录删除请求
+							var fileDeleteData struct {
+								Path        string `json:"path"`
+								IsDirectory bool   `json:"isDirectory"`
+								RequestId   string `json:"requestId,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &fileDeleteData); err == nil {
+								log.Printf("收到文件删除请求: 路径=%s, 是否为目录=%v, 请求ID=%s",
+									fileDeleteData.Path, fileDeleteData.IsDirectory, fileDeleteData.RequestId)
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										h.sendFileDeleteError(wsConn, fileDeleteData.RequestId, "SSH命令处理器不可用")
+										return
+									}
+
+									// 使用SSH命令处理器删除文件/目录
+									go func() {
+										err := commandHandler.ExecuteFileDeleteCommand(fileDeleteData.Path, fileDeleteData.IsDirectory)
+
+										if err != nil {
+											log.Printf("执行文件删除命令失败: %v", err)
+											h.sendFileDeleteError(wsConn, fileDeleteData.RequestId, fmt.Sprintf("删除失败: %v", err))
+										} else {
+											log.Printf("文件删除成功: %s", fileDeleteData.Path)
+											h.sendFileDeleteResponse(wsConn, fileDeleteData.RequestId)
+										}
+									}()
+								} else {
+									log.Printf("不是SSH终端，无法处理文件删除请求")
+									h.sendFileDeleteError(wsConn, fileDeleteData.RequestId, "仅SSH终端支持文件删除功能")
+								}
+							} else {
+								log.Printf("解析文件删除请求数据失败: %v", err)
+								h.sendFileDeleteError(wsConn, fileDeleteData.RequestId, "请求数据格式错误")
+							}
+
+						case "file_rename":
+							// 处理文件重命名请求
+							var fileRenameData struct {
+								OldPath   string `json:"oldPath"`
+								NewPath   string `json:"newPath"`
+								RequestId string `json:"requestId,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &fileRenameData); err == nil {
+								log.Printf("收到文件重命名请求: 旧路径=%s, 新路径=%s, 请求ID=%s",
+									fileRenameData.OldPath, fileRenameData.NewPath, fileRenameData.RequestId)
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										h.sendFileRenameError(wsConn, fileRenameData.RequestId, "SSH连接不可用")
+										break
+									}
+
+									// 异步执行重命名操作
+									go func() {
+										err := commandHandler.ExecuteFileRenameCommand(fileRenameData.OldPath, fileRenameData.NewPath)
+										if err != nil {
+											log.Printf("文件重命名失败: %v", err)
+											h.sendFileRenameError(wsConn, fileRenameData.RequestId, err.Error())
+										} else {
+											log.Printf("文件重命名成功")
+											h.sendFileRenameResponse(wsConn, fileRenameData.RequestId)
+										}
+									}()
+								} else {
+									log.Printf("不支持的终端类型进行文件重命名操作")
+									h.sendFileRenameError(wsConn, fileRenameData.RequestId, "当前终端类型不支持文件重命名")
+								}
+							} else {
+								log.Printf("解析文件重命名请求失败: %v", err)
+							}
+
+						case "file_permissions":
+							// 处理文件权限修改请求
+							var filePermData struct {
+								Path        string `json:"path"`
+								Permissions string `json:"permissions"`
+								RequestId   string `json:"requestId,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &filePermData); err == nil {
+								log.Printf("收到文件权限修改请求: 路径=%s, 权限=%s, 请求ID=%s",
+									filePermData.Path, filePermData.Permissions, filePermData.RequestId)
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										h.sendFilePermissionsError(wsConn, filePermData.RequestId, "SSH连接不可用")
+										break
+									}
+
+									// 异步执行权限修改操作
+									go func() {
+										err := commandHandler.ExecuteFilePermissionsCommand(filePermData.Path, filePermData.Permissions)
+										if err != nil {
+											log.Printf("文件权限修改失败: %v", err)
+											h.sendFilePermissionsError(wsConn, filePermData.RequestId, err.Error())
+										} else {
+											log.Printf("文件权限修改成功")
+											h.sendFilePermissionsResponse(wsConn, filePermData.RequestId)
+										}
+									}()
+								} else {
+									log.Printf("不支持的终端类型进行文件权限修改操作")
+									h.sendFilePermissionsError(wsConn, filePermData.RequestId, "当前终端类型不支持文件权限修改")
+								}
+							} else {
+								log.Printf("解析文件权限修改请求失败: %v", err)
+							}
 						case "folder_create":
 							// 处理文件夹创建请求
 							var folderCreateData struct {
@@ -2299,4 +2421,205 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// sendFileDeleteResponse 发送文件删除成功响应
+func (h *ConnectionHandler) sendFileDeleteResponse(wsConn *websocket.Conn, requestId string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		} `json:"data"`
+	}{
+		Type: "file_delete_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		}{
+			RequestId: requestId,
+			Success:   true,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件删除响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件删除响应失败: %v", err)
+	} else {
+		log.Printf("文件删除响应发送成功: %s", requestId)
+	}
+}
+
+// sendFileDeleteError 发送文件删除错误响应
+func (h *ConnectionHandler) sendFileDeleteError(wsConn *websocket.Conn, requestId string, errorMsg string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		} `json:"data"`
+	}{
+		Type: "file_delete_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		}{
+			RequestId: requestId,
+			Success:   false,
+			Error:     errorMsg,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件删除错误响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件删除错误响应失败: %v", err)
+	} else {
+		log.Printf("文件删除错误响应发送成功: %s - %s", requestId, errorMsg)
+	}
+}
+
+// sendFileRenameResponse 发送文件重命名成功响应
+func (h *ConnectionHandler) sendFileRenameResponse(wsConn *websocket.Conn, requestId string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		} `json:"data"`
+	}{
+		Type: "file_rename_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		}{
+			RequestId: requestId,
+			Success:   true,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件重命名响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件重命名响应失败: %v", err)
+	} else {
+		log.Printf("文件重命名响应发送成功: %s", requestId)
+	}
+}
+
+// sendFileRenameError 发送文件重命名错误响应
+func (h *ConnectionHandler) sendFileRenameError(wsConn *websocket.Conn, requestId string, errorMsg string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		} `json:"data"`
+	}{
+		Type: "file_rename_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		}{
+			RequestId: requestId,
+			Success:   false,
+			Error:     errorMsg,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件重命名错误响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件重命名错误响应失败: %v", err)
+	} else {
+		log.Printf("文件重命名错误响应发送成功: %s - %s", requestId, errorMsg)
+	}
+}
+
+// sendFilePermissionsResponse 发送文件权限修改成功响应
+func (h *ConnectionHandler) sendFilePermissionsResponse(wsConn *websocket.Conn, requestId string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		} `json:"data"`
+	}{
+		Type: "file_permissions_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		}{
+			RequestId: requestId,
+			Success:   true,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件权限修改响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件权限修改响应失败: %v", err)
+	} else {
+		log.Printf("文件权限修改响应发送成功: %s", requestId)
+	}
+}
+
+// sendFilePermissionsError 发送文件权限修改错误响应
+func (h *ConnectionHandler) sendFilePermissionsError(wsConn *websocket.Conn, requestId string, errorMsg string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		} `json:"data"`
+	}{
+		Type: "file_permissions_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		}{
+			RequestId: requestId,
+			Success:   false,
+			Error:     errorMsg,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件权限修改错误响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件权限修改错误响应失败: %v", err)
+	} else {
+		log.Printf("文件权限修改错误响应发送成功: %s - %s", requestId, errorMsg)
+	}
 }
