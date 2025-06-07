@@ -1602,21 +1602,24 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 
 					// 对于图形协议消息，记录更详细的信息
 					if prefix == "RDP_" || prefix == "VNC_" {
-						parts := bytes.SplitN(buf[:n], []byte(":"), 2)
-						if len(parts) > 0 {
-							msgType := string(parts[0])
-							log.Printf("终端输出图形消息: 类型=%s, 总长度=%d字节", msgType, n)
+						msgType := string(buf[:n])
+						log.Printf("终端输出图形消息: 类型=%s, 总长度=%d字节", msgType, n)
 
-							// 对于屏幕截图消息，额外记录信息
-							if msgType == "RDP_SCREENSHOT" || msgType == "VNC_SCREENSHOT" {
-								parts := bytes.SplitN(buf[:n], []byte(":"), 4)
-								if len(parts) >= 4 {
-									width := string(parts[1])
-									height := string(parts[2])
-									dataLen := n - len(parts[0]) - len(parts[1]) - len(parts[2]) - 3 // 减去分隔符的长度
-									log.Printf("屏幕截图数据: 类型=%s, 宽度=%s, 高度=%s, 数据长度=%d字节",
-										msgType, width, height, dataLen)
-								}
+						// 检查是否为心跳消息，如果是心跳消息则跳过发送
+						if msgType == "RDP_HEARTBEAT" || msgType == "VNC_HEARTBEAT" {
+							log.Printf("收到%s心跳消息，跳过发送", msgType)
+							continue // 跳过心跳消息的发送
+						}
+
+						// 对于屏幕截图消息，额外记录信息
+						if msgType == "RDP_SCREENSHOT" || msgType == "VNC_SCREENSHOT" {
+							parts := bytes.SplitN(buf[:n], []byte(":"), 4)
+							if len(parts) >= 4 {
+								width := string(parts[1])
+								height := string(parts[2])
+								dataLen := n - len(parts[0]) - len(parts[1]) - len(parts[2]) - 3 // 减去分隔符的长度
+								log.Printf("屏幕截图数据: 类型=%s, 宽度=%s, 高度=%s, 数据长度=%d字节",
+									msgType, width, height, dataLen)
 							}
 						}
 					} else if n < 100 {

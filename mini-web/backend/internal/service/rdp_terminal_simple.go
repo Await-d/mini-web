@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-06-07 14:45:23
  * @LastEditors: Await
- * @LastEditTime: 2025-06-07 15:00:44
+ * @LastEditTime: 2025-06-07 17:38:20
  * @Description: 请填写简介
  */
 package service
@@ -46,6 +46,13 @@ type RDPSessionSimple struct {
 
 	// 模拟连接
 	tcpConn net.Conn
+
+	// 读取状态管理
+	initialMessageSent bool
+	readChan           chan []byte
+
+	// WebSocket写入保护
+	wsWriteMutex sync.Mutex
 }
 
 // RDPMessageSimple RDP消息结构
@@ -78,6 +85,7 @@ func createRDPTerminalSessionSimple(conn *model.Connection) (*RDPSessionSimple, 
 		Connecting:   true,
 		ctx:          ctx,
 		cancel:       cancel,
+		readChan:     make(chan []byte, 100), // 缓冲通道用于数据传输
 	}
 
 	log.Printf("创建简化RDP会话: %s, 目标: %s@%s:%d",
@@ -244,11 +252,15 @@ func (s *RDPSessionSimple) generateTestImage(width, height int) string {
 	return blueSquare
 }
 
-// sendMessage 发送消息到WebSocket
+// sendMessage 发送消息到WebSocket（线程安全）
 func (s *RDPSessionSimple) sendMessage(msg *RDPMessageSimple) {
 	if s.WebSocket == nil {
 		return
 	}
+
+	// 使用互斥锁保护WebSocket写入
+	s.wsWriteMutex.Lock()
+	defer s.wsWriteMutex.Unlock()
 
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -382,6 +394,12 @@ func (s *RDPSessionSimple) Disconnect() error {
 		s.WebSocket = nil
 	}
 
+	// 关闭读取通道
+	if s.readChan != nil {
+		close(s.readChan)
+		s.readChan = nil
+	}
+
 	return nil
 }
 
@@ -389,20 +407,39 @@ func (s *RDPSessionSimple) Disconnect() error {
 
 // Read 读取数据（实现io.Reader接口）
 func (s *RDPSessionSimple) Read(p []byte) (n int, err error) {
-	// RDP是图形协议，我们返回一些标识信息供connection_handler识别
-	if !s.Connected && !s.Connecting {
-		return 0, fmt.Errorf("RDP连接未建立")
+	// 第一次读取时返回协议标识
+	if !s.initialMessageSent {
+		s.initialMessageSent = true
+		rdpPrefix := []byte("RDP_SESSION_READY")
+		if len(p) >= len(rdpPrefix) {
+			copy(p, rdpPrefix)
+			log.Printf("RDP发送初始协议标识: %s", string(rdpPrefix))
+			return len(rdpPrefix), nil
+		}
+		return 0, fmt.Errorf("缓冲区太小，需要至少 %d 字节", len(rdpPrefix))
 	}
 
-	// 返回RDP协议标识，让处理器知道这是RDP连接
-	rdpPrefix := []byte("RDP_SESSION_READY")
-	if len(p) >= len(rdpPrefix) {
-		copy(p, rdpPrefix)
-		return len(rdpPrefix), nil
+	// 后续读取从通道获取数据，或者阻塞等待
+	select {
+	case data := <-s.readChan:
+		if len(p) >= len(data) {
+			copy(p, data)
+			return len(data), nil
+		}
+		// 如果缓冲区太小，将数据放回通道
+		s.readChan <- data
+		return 0, fmt.Errorf("缓冲区太小，需要 %d 字节", len(data))
+	case <-s.ctx.Done():
+		return 0, s.ctx.Err()
+	case <-time.After(5 * time.Second):
+		// 5秒超时，返回心跳数据
+		heartbeat := []byte("RDP_HEARTBEAT")
+		if len(p) >= len(heartbeat) {
+			copy(p, heartbeat)
+			return len(heartbeat), nil
+		}
+		return 0, fmt.Errorf("缓冲区太小，需要 %d 字节", len(heartbeat))
 	}
-
-	// 如果缓冲区太小，返回需要的字节数
-	return 0, fmt.Errorf("缓冲区太小，需要至少 %d 字节", len(rdpPrefix))
 }
 
 // Write 写入数据（实现io.Writer接口）
