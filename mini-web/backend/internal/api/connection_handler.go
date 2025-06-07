@@ -681,20 +681,58 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 
 	log.Printf("开始处理终端会话WebSocket通信")
 
-	// 向终端发送一条测试消息
-	log.Printf("向终端发送测试消息")
-	terminal.Write([]byte{0}) // 发送空消息
+	// 检查是否为RDP会话，如果是，需要等待连接建立
+	var n int
+	var buf []byte
+	isRDP := false
 
-	// 从终端读取初始响应
-	buf := make([]byte, 512)
-	n, err := terminal.Read(buf)
-	if err != nil {
-		log.Printf("读取终端初始响应时出错: %v", err)
-	} else {
-		log.Printf("收到终端初始响应: %d 字节", n)
-		if n > 0 {
-			log.Printf("初始响应内容预览: %s", string(buf[:min(n, 100)]))
+	if rdpSession, ok := terminal.(*service.RDPWebSocketProxy); ok {
+		log.Printf("检测到RDP会话，等待连接建立...")
+		isRDP = true
+
+		// 等待RDP连接建立，最多等待30秒
+		maxWaitTime := 30 * time.Second
+		checkInterval := 100 * time.Millisecond
+		startTime := time.Now()
+
+		for {
+			if rdpSession.IsConnected() {
+				log.Printf("RDP连接已建立，耗时: %v", time.Since(startTime))
+				break
+			}
+
+			if time.Since(startTime) > maxWaitTime {
+				log.Printf("等待RDP连接超时 (%v)，继续处理", maxWaitTime)
+				break
+			}
+
+			time.Sleep(checkInterval)
 		}
+	}
+
+	// 对于非RDP协议或RDP连接已建立，尝试读取初始响应
+	if !isRDP {
+		// 向终端发送一条测试消息
+		log.Printf("向终端发送测试消息")
+		terminal.Write([]byte{0}) // 发送空消息
+
+		// 从终端读取初始响应
+		buf = make([]byte, 512)
+		var err error
+		n, err = terminal.Read(buf)
+		if err != nil {
+			log.Printf("读取终端初始响应时出错: %v", err)
+		} else {
+			log.Printf("收到终端初始响应: %d 字节", n)
+			if n > 0 {
+				log.Printf("初始响应内容预览: %s", string(buf[:min(n, 100)]))
+			}
+		}
+	} else {
+		// RDP协议不需要立即读取响应
+		log.Printf("RDP协议会话，跳过初始响应读取")
+		n = 0
+		buf = make([]byte, 512)
 	}
 
 	// 判断是否为图形协议
@@ -1561,7 +1599,31 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			close(done)
 		})
 
-		log.Printf("启动终端读取协程")
+		// 检查是否为RDP连接，如果是则不启动读取协程，避免与RDP代理冲突
+		if rdpSession, ok := terminal.(*service.RDPWebSocketProxy); ok {
+			log.Printf("检测到RDP代理连接，跳过通用终端读取协程，避免资源竞争")
+			log.Printf("RDP连接状态: %v", rdpSession.IsConnected())
+
+			// 对于RDP代理，直接等待其自身处理数据传输
+			// 不启动读取协程，避免与rdp_terminal_websocket_proxy.go中的读取逻辑冲突
+			for {
+				select {
+				case <-done:
+					log.Printf("RDP代理会话结束")
+					return
+				case <-time.After(5 * time.Second):
+					// 定期检查RDP连接状态
+					if !rdpSession.IsConnected() {
+						log.Printf("RDP代理连接已断开")
+						errChan <- fmt.Errorf("RDP代理连接断开")
+						return
+					}
+					log.Printf("RDP代理连接正常，继续监控...")
+				}
+			}
+		}
+
+		log.Printf("启动终端读取协程（非RDP协议）")
 
 		buf := make([]byte, 1024*1024*2) // 增加缓冲区大小到2MB以处理大型图形数据
 		for {
@@ -1727,6 +1789,34 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			log.Printf("终端会话处理已完成")
 			return
 		case err := <-errChan:
+			// 对于RDP连接的初始错误，更加宽容处理
+			if rdpSession, ok := terminal.(*service.RDPWebSocketProxy); ok {
+				// 检查是否为"RDP连接未建立"错误
+				if strings.Contains(err.Error(), "RDP连接未建立") {
+					log.Printf("RDP连接初始错误（可能是正常的初始化阶段）: %v", err)
+					// 给RDP连接更多时间建立
+					time.Sleep(2 * time.Second)
+
+					// 如果RDP现在已连接，继续运行
+					if rdpSession.IsConnected() {
+						log.Printf("RDP连接现在已建立，继续会话")
+						continue
+					}
+
+					// 如果仍未连接，给出更多时间
+					log.Printf("RDP连接仍在建立中，等待...")
+					time.Sleep(3 * time.Second)
+
+					if rdpSession.IsConnected() {
+						log.Printf("RDP连接建立成功，继续会话")
+						continue
+					}
+
+					log.Printf("RDP连接建立超时，关闭会话")
+					return
+				}
+			}
+
 			log.Printf("检测到错误: %v，正在关闭会话", err)
 			return
 		case <-activeChan:

@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-08 18:19:21
  * @LastEditors: Await
- * @LastEditTime: 2025-06-07 14:43:36
+ * @LastEditTime: 2025-06-07 18:12:06
  * @Description: 请填写简介
  */
 package service
@@ -399,14 +399,28 @@ func (s *ConnectionService) createSSHSession(connection *model.Connection) (Term
 func (s *ConnectionService) createRDPSession(connection *model.Connection) (TerminalSession, error) {
 	log.Printf("创建RDP远程桌面会话: %s@%s:%d", connection.Username, connection.Host, connection.Port)
 
-	// 使用简化的RDP终端实现
-	session, err := createRDPTerminalSessionSimple(connection)
-	if err != nil {
-		log.Printf("RDP终端创建失败: %v", err)
+	// 生成会话ID
+	sessionID := fmt.Sprintf("rdp-%d-%d", connection.ID, time.Now().Unix())
+
+	// 使用基于WebSocket代理的实现
+	session := NewRDPWebSocketProxy(
+		sessionID,
+		int(connection.ID),
+		connection.Host,
+		connection.Port,
+		connection.Username,
+		connection.Password,
+		1024, // 默认宽度
+		768,  // 默认高度
+	)
+
+	// 启动RDP连接
+	if err := session.StartRDPConnection(); err != nil {
+		log.Printf("启动RDP连接失败: %v", err)
 		return nil, err
 	}
 
-	log.Printf("RDP远程桌面会话创建成功")
+	log.Printf("RDP WebSocket代理会话创建成功: %s", sessionID)
 	return session, nil
 }
 

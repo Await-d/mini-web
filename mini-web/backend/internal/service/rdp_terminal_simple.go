@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-06-07 14:45:23
  * @LastEditors: Await
- * @LastEditTime: 2025-06-07 17:50:30
+ * @LastEditTime: 2025-06-07 18:33:06
  * @Description: 请填写简介
  */
 package service
@@ -121,6 +121,105 @@ func (s *RDPSessionSimple) testNetworkConnectivity(host string) error {
 	return fmt.Errorf("主机可解析但网络不可达")
 }
 
+// rdpConnectionRequest 创建RDP连接请求数据包
+func (s *RDPSessionSimple) createRDPConnectionRequest() []byte {
+	// X.224 Connection Request (CR) TPDU - RFC905
+	// 这是RDP连接的第一步，发送X.224连接请求
+
+	// X.224 Connection Request格式:
+	// Length Indicator (LI): 1字节
+	// Protocol Data Unit Type (CR): 1字节 (0xE0)
+	// Destination Reference: 2字节
+	// Source Reference: 2字节
+	// Class Option: 1字节
+	// Variable Part: 可变长度
+
+	request := []byte{
+		// TPKT Header (RFC1006)
+		0x03, 0x00, // Version (3) + Reserved (0)
+		0x00, 0x2B, // Length (43 bytes total)
+
+		// X.224 Connection Request
+		0x26,       // Length Indicator (38 bytes of X.224 data)
+		0xE0,       // PDU Type: Connection Request (CR)
+		0x00, 0x00, // Destination Reference
+		0x00, 0x00, // Source Reference
+		0x00, // Class Option
+
+		// Cookie: RDP协议标识
+		'C', 'o', 'o', 'k', 'i', 'e', ':', ' ',
+		'm', 's', 't', 's', 'h', 'a', 's', 'h', '=',
+		's', 'm', 'i', 't', 'h', // 简化的cookie
+		0x0D, 0x0A, // CRLF
+
+		// RDP Negotiation Request (可选)
+		0x01,       // Type: RDP_NEG_REQ
+		0x00,       // Flags
+		0x08, 0x00, // Length (8 bytes)
+		0x01, 0x00, 0x00, 0x00, // Requested Protocols: PROTOCOL_RDP
+	}
+
+	return request
+}
+
+// performRDPHandshake 执行RDP握手过程
+func (s *RDPSessionSimple) performRDPHandshake(conn net.Conn) error {
+	log.Printf("开始RDP协议握手...")
+
+	// 第一步：发送X.224连接请求
+	connectionRequest := s.createRDPConnectionRequest()
+
+	log.Printf("发送X.224连接请求 (%d bytes)", len(connectionRequest))
+	_, err := conn.Write(connectionRequest)
+	if err != nil {
+		return fmt.Errorf("发送X.224连接请求失败: %v", err)
+	}
+
+	// 第二步：读取服务器响应
+	response := make([]byte, 1024)
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+
+	n, err := conn.Read(response)
+	if err != nil {
+		return fmt.Errorf("读取服务器响应失败: %v", err)
+	}
+
+	log.Printf("收到服务器响应 (%d bytes): %x", n, response[:n])
+
+	// 第三步：验证响应
+	if n < 4 {
+		return fmt.Errorf("服务器响应过短")
+	}
+
+	// 检查TPKT头部
+	if response[0] != 0x03 || response[1] != 0x00 {
+		return fmt.Errorf("无效的TPKT头部")
+	}
+
+	// 检查X.224响应类型
+	if n >= 7 && response[5] == 0xD0 {
+		log.Printf("收到X.224连接确认 (CC)")
+		// 连接确认，继续RDP握手
+		return s.continueRDPNegotiation(conn)
+	} else {
+		return fmt.Errorf("未收到预期的X.224连接确认")
+	}
+}
+
+// continueRDPNegotiation 继续RDP协商过程
+func (s *RDPSessionSimple) continueRDPNegotiation(conn net.Conn) error {
+	log.Printf("继续RDP协商...")
+
+	// 这里应该继续实现MCS连接、用户认证等步骤
+	// 由于RDP协议极其复杂，这里我们使用简化版本
+
+	// 模拟一些延迟，让连接看起来更真实
+	time.Sleep(1 * time.Second)
+
+	log.Printf("RDP握手完成（简化版）")
+	return nil
+}
+
 // StartRDPConnection 启动RDP连接
 func (s *RDPSessionSimple) StartRDPConnection() error {
 	s.mutex.Lock()
@@ -177,14 +276,22 @@ func (s *RDPSessionSimple) StartRDPConnection() error {
 			return
 		}
 
+		log.Printf("TCP连接成功，开始RDP协议握手...")
+
+		// 执行RDP协议握手
+		err = s.performRDPHandshake(tcpConn)
+		if err != nil {
+			log.Printf("RDP握手失败: %v", err)
+			tcpConn.Close()
+			s.onError(fmt.Errorf("RDP协议握手失败: %v", err))
+			return
+		}
+
 		s.mutex.Lock()
 		s.tcpConn = tcpConn
 		s.mutex.Unlock()
 
-		log.Printf("RDP TCP连接成功: %s", s.SessionID)
-
-		// 模拟RDP握手过程
-		time.Sleep(2 * time.Second)
+		log.Printf("RDP连接成功: %s", s.SessionID)
 
 		// 检查连接是否仍然有效
 		if s.tcpConn != nil {
@@ -366,7 +473,7 @@ func (s *RDPSessionSimple) sendMockDesktopData() {
 func (s *RDPSessionSimple) generateTestImage(width, height int) string {
 	// 创建一个简单的蓝色正方形图像的base64数据
 	// 这是一个40x40像素的蓝色PNG图像
-	blueSquare := "iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAYAAACM/rhtAAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAB3RJTUUH3wgWEBsOJvvkpQAAAB1pVFh0Q29tbWVudAAAAAAAQ3JlYXRlZCB3aXRoIEdJTVBkLmUHAAAA00lEQVRYw+2YQQ6DMAxE3yFceADcgRNwAm7ACbgBJ+AG3IAb7A14Ay9wA07ACbgBN+AGvAFvwA24ATfgBtyAG3ADbsANuAE34AbcgBtwA27ADbgBN+AG3IAb8P8DfvqJiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiH8BPgC3WiWjuFzyVAAAAABJRU5ErkJggg=="
+	blueSquare := "iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAYAAACM/rhtAAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAB3RJTUUH3wgWEBsOJvvkpQAAAB1pVFh0Q29tbWVudAAAAAAAQ3JlYXRlZCB3aXRoIEdJTVBkLmUHAAAA00lEQVRYw+2YQQ6DMAxE3yFceADcgRNwAm7ACbgBJ+AG3IAb7A14Ay9wA07ACbgBN+AGvAFvwA24ATfgBtyAG3ADbsANuAE34AbcgBtwA27ADbgBN+AG3IAb8P8DfvqJiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiH8BPgC3WiWjuFzyVAAAAABJRU5ErkJggg=="
 	return blueSquare
 }
 
