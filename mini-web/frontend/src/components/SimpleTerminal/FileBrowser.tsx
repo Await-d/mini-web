@@ -1332,7 +1332,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
         try {
             webSocketRef.current.send(JSON.stringify(request));
-            message.loading('正在修改权限...', 0);
+            message.loading('正在修改权限...', 5);
             setPermissionsVisible(false);
             setPermissionsTarget('');
             setNewPermissions('');
@@ -2011,7 +2011,13 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                         // 刷新文件列表
                         setTimeout(() => refreshDirectory(), 500);
                     } else {
-                        message.error(`权限修改失败: ${data.data.error || '未知错误'}`);
+                        // 更详细的错误信息显示
+                        const errorMsg = data.data.error || '未知错误';
+                        console.error('权限修改失败:', errorMsg);
+                        message.error({
+                            content: `权限修改失败: ${errorMsg}`,
+                            duration: 6, // 显示6秒，让用户有足够时间看到错误信息
+                        });
                     }
                     return;
                 }
