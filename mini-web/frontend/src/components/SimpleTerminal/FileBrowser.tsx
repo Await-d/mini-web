@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-26 20:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 18:41:54
+ * @LastEditTime: 2025-06-07 13:53:22
  * @Description: SSH终端文件浏览器组件
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -59,6 +59,7 @@ interface FileItem {
     type: 'file' | 'directory';
     size: number;
     permissions: string;
+    numericPermissions?: string; // 数字权限 (如 755)
     modified: string;
     path: string;
     owner?: string;
@@ -103,6 +104,14 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     const [renameVisible, setRenameVisible] = useState(false);
     const [renameTarget, setRenameTarget] = useState<string>('');
     const [newName, setNewName] = useState('');
+    const [permissionsVisible, setPermissionsVisible] = useState(false);
+    const [permissionsTarget, setPermissionsTarget] = useState<string>('');
+    const [newPermissions, setNewPermissions] = useState('');
+    const [permissionsMatrix, setPermissionsMatrix] = useState({
+        owner: { read: false, write: false, execute: false },
+        group: { read: false, write: false, execute: false },
+        others: { read: false, write: false, execute: false }
+    });
     const [uploadProgress, setUploadProgress] = useState(0);
     const [clipboard, setClipboard] = useState<{ files: string[], operation: 'copy' | 'cut' | null }>({
         files: [],
@@ -250,16 +259,44 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             title: '权限',
             dataIndex: 'permissions',
             key: 'permissions',
-            width: 80,
+            width: 100,
             ellipsis: true,
+            render: (permissions: string, record: FileItem) => (
+                <Tooltip title={`符号权限: ${permissions} - 点击修改权限`}>
+                    <Tag
+                        color="blue"
+                        style={{
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontFamily: 'monospace',
+                            minWidth: '40px',
+                            textAlign: 'center',
+                            userSelect: 'none'
+                        }}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            const currentPerms = record.numericPermissions || '755';
+                            setPermissionsTarget(record.name);
+                            setNewPermissions(currentPerms);
+                            setPermissionsMatrix(numericToPermissionsMatrix(currentPerms));
+                            setPermissionsVisible(true);
+                        }}
+                    >
+                        {record.numericPermissions || '---'}
+                    </Tag>
+                </Tooltip>
+            ),
         },
         {
             title: '修改时间',
             dataIndex: 'modified',
             key: 'modified',
-            width: 100,
+            width: 150,
             sorter: true,
             ellipsis: true,
+            render: (text: string) => (
+                <span style={{ fontSize: '12px', fontFamily: 'monospace' }}>{text}</span>
+            ),
         },
         {
             title: '操作',
@@ -447,6 +484,69 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         return isLs;
     }, []);
 
+    // 将符号权限转换为数字权限
+    const convertPermissionsToNumeric = useCallback((symbolic: string): string => {
+        if (symbolic.length < 10) {
+            return '000';
+        }
+
+        // 跳过第一个字符（文件类型标识符）
+        const perms = symbolic.substring(1);
+
+        let result = '';
+        for (let i = 0; i < 9; i += 3) {
+            if (i + 2 >= perms.length) {
+                break;
+            }
+
+            let value = 0;
+            if (perms[i] === 'r') {
+                value += 4;
+            }
+            if (perms[i + 1] === 'w') {
+                value += 2;
+            }
+            if (perms[i + 2] === 'x' || perms[i + 2] === 's' || perms[i + 2] === 't') {
+                value += 1;
+            }
+
+            result += value.toString();
+        }
+
+        return result;
+    }, []);
+
+    // 将数字权限转换为权限矩阵
+    const numericToPermissionsMatrix = useCallback((numeric: string) => {
+        const paddedNumeric = numeric.padStart(3, '0');
+        return {
+            owner: {
+                read: (parseInt(paddedNumeric[0]) & 4) !== 0,
+                write: (parseInt(paddedNumeric[0]) & 2) !== 0,
+                execute: (parseInt(paddedNumeric[0]) & 1) !== 0
+            },
+            group: {
+                read: (parseInt(paddedNumeric[1]) & 4) !== 0,
+                write: (parseInt(paddedNumeric[1]) & 2) !== 0,
+                execute: (parseInt(paddedNumeric[1]) & 1) !== 0
+            },
+            others: {
+                read: (parseInt(paddedNumeric[2]) & 4) !== 0,
+                write: (parseInt(paddedNumeric[2]) & 2) !== 0,
+                execute: (parseInt(paddedNumeric[2]) & 1) !== 0
+            }
+        };
+    }, []);
+
+    // 将权限矩阵转换为数字权限
+    const permissionsMatrixToNumeric = useCallback((matrix: typeof permissionsMatrix) => {
+        const calculateValue = (perms: { read: boolean; write: boolean; execute: boolean }) => {
+            return (perms.read ? 4 : 0) + (perms.write ? 2 : 0) + (perms.execute ? 1 : 0);
+        };
+
+        return `${calculateValue(matrix.owner)}${calculateValue(matrix.group)}${calculateValue(matrix.others)}`;
+    }, []);
+
     // 解析ls命令输出
     const parseLsOutput = useCallback((output: string): FileItem[] => {
         // 添加类型检查
@@ -596,11 +696,15 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     fileType = 'file';
                 }
 
+                // 计算数字权限
+                const numericPermissions = convertPermissionsToNumeric(permissions);
+
                 const fileItem: FileItem = {
                     name: fileName,
                     type: fileType,
                     size,
                     permissions,
+                    numericPermissions,
                     modified: `${month} ${day} ${timeOrYear}`,
                     path: currentDirectory === '/' ? `/${fileName}` : `${currentDirectory}/${fileName}`,
                     owner,
@@ -618,7 +722,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             console.log('解析结果示例:', items.slice(0, 3));
         }
         return items;
-    }, [currentDirectory]);
+    }, [currentDirectory, convertPermissionsToNumeric]);
 
 
 
@@ -1007,6 +1111,12 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
     // 删除文件或目录
     const deleteItem = useCallback((fileName: string) => {
+        const file = files.find(f => f.name === fileName);
+        if (!file) {
+            message.error('文件不存在');
+            return;
+        }
+
         Modal.confirm({
             title: '确认删除',
             content: `确定要删除 "${fileName}" 吗？此操作不可撤销。`,
@@ -1014,11 +1124,34 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             okType: 'danger',
             cancelText: '取消',
             onOk: () => {
-                // TODO: 实现后端JSON格式的删除操作
-                message.info('删除功能正在开发中，将通过后端API实现');
+                if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+                    message.error('WebSocket连接未建立');
+                    return;
+                }
+
+                const requestId = `file_delete_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                const request = {
+                    type: 'file_delete',
+                    data: {
+                        path: file.path,
+                        isDirectory: file.type === 'directory',
+                        requestId: requestId
+                    }
+                };
+
+                console.log('🗑️ 发送删除请求:', request);
+
+                try {
+                    webSocketRef.current.send(JSON.stringify(request));
+                    message.loading('正在删除...', 0);
+                } catch (error) {
+                    console.error('发送删除请求失败:', error);
+                    message.error('发送请求失败');
+                }
             }
         });
-    }, []);
+    }, [files, webSocketRef]);
 
     // 创建目录
     const createDirectory = useCallback(() => {
@@ -1104,13 +1237,110 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             return;
         }
 
-        // TODO: 实现后端JSON格式的重命名操作
-        message.info('重命名功能正在开发中，将通过后端API实现');
+        if (newName === renameTarget) {
+            message.info('名称未更改');
+            setRenameVisible(false);
+            setRenameTarget('');
+            setNewName('');
+            return;
+        }
 
-        setRenameVisible(false);
-        setRenameTarget('');
-        setNewName('');
-    }, [newName, renameTarget]);
+        if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            message.error('WebSocket连接未建立');
+            setRenameVisible(false);
+            setRenameTarget('');
+            setNewName('');
+            return;
+        }
+
+        const file = files.find(f => f.name === renameTarget);
+        if (!file) {
+            message.error('原文件不存在');
+            setRenameVisible(false);
+            setRenameTarget('');
+            setNewName('');
+            return;
+        }
+
+        const requestId = `file_rename_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // 构建新的完整路径
+        const parentDir = file.path.substring(0, file.path.lastIndexOf('/') + 1);
+        const newPath = parentDir + newName;
+
+        const request = {
+            type: 'file_rename',
+            data: {
+                oldPath: file.path,
+                newPath: newPath,
+                requestId: requestId
+            }
+        };
+
+        console.log('📝 发送重命名请求:', request);
+
+        try {
+            webSocketRef.current.send(JSON.stringify(request));
+            message.loading('正在重命名...', 0);
+            setRenameVisible(false);
+            setRenameTarget('');
+            setNewName('');
+        } catch (error) {
+            console.error('发送重命名请求失败:', error);
+            message.error('发送请求失败');
+            setRenameVisible(false);
+            setRenameTarget('');
+            setNewName('');
+        }
+    }, [newName, renameTarget, files, webSocketRef]);
+
+    // 修改文件权限
+    const changePermissions = useCallback(() => {
+        if (!permissionsTarget || !newPermissions) {
+            message.error('请输入有效的权限');
+            return;
+        }
+
+        // 验证权限格式
+        if (!/^[0-7]{3}$/.test(newPermissions)) {
+            message.error('权限格式错误，应为3位数字（0-7）');
+            return;
+        }
+
+        if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            message.error('WebSocket连接未建立');
+            return;
+        }
+
+        const file = files.find(f => f.name === permissionsTarget);
+        if (!file) {
+            message.error('文件不存在');
+            setPermissionsVisible(false);
+            return;
+        }
+
+        const requestId = `file_permissions_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        const request = {
+            type: 'file_permissions',
+            data: {
+                path: file.path,
+                permissions: newPermissions,
+                requestId
+            }
+        };
+
+        try {
+            webSocketRef.current.send(JSON.stringify(request));
+            message.loading('正在修改权限...', 5);
+            setPermissionsVisible(false);
+            setPermissionsTarget('');
+            setNewPermissions('');
+        } catch (error) {
+            console.error('发送权限修改请求失败:', error);
+            message.error('发送权限修改请求失败');
+        }
+    }, [permissionsTarget, newPermissions, files, webSocketRef]);
 
     // 查看文件内容
     const viewFile = useCallback((fileName: string) => {
@@ -1625,7 +1855,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             return;
         }
 
-        console.log('FileBrowser组件初始化开始...');
 
         // 清除之前的初始化定时器
         if (initializationTimerRef.current) {
@@ -1638,7 +1867,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             // 标记已经初始化，防止重复
             hasInitializedRef.current = true;
 
-            console.log('开始FileBrowser初始化流程...');
 
             // 尝试恢复保存的路径
             let targetPath = currentDirectory;
@@ -1652,7 +1880,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             }
 
             // 执行目录刷新
-            console.log('FileBrowser初始化，加载目录:', targetPath);
             refreshDirectory(targetPath);
 
             initializationTimerRef.current = null;
@@ -1684,7 +1911,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             return;
         }
 
-        console.log('FileBrowser: 设置WebSocket消息监听器');
 
         // 消息统计
         let messageStats = {
@@ -1697,23 +1923,19 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 return;
             }
 
-            console.log('📨 FileBrowser收到WebSocket消息:', event.data.substring(0, 100) + '...');
             messageStats.total++;
 
             try {
                 const data = JSON.parse(event.data);
-                console.log('📨 解析后的消息类型:', data.type);
 
                 // 只处理FileBrowser相关的消息类型
                 if (data.type === 'file_list_response') {
-                    console.log('📨 处理文件列表响应，requestId:', data.data?.requestId, '当前请求ID:', currentRequestRef.current);
                     processFileListMessageAsync(event);
                     return;
                 }
 
                 // 处理分段消息
                 if (data.type === 'file_list_segment') {
-                    console.log('📨 处理分段消息');
                     handleSegmentedFileList({
                         requestId: data.data.requestId,
                         segmentId: data.data.segmentId,
@@ -1726,7 +1948,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
                 // 处理文件创建响应
                 if (data.type === 'file_create_response') {
-                    console.log('📄 处理文件创建响应:', data.data);
                     if (data.data.success) {
                         message.success('文件创建成功');
                         // 刷新文件列表
@@ -1739,7 +1960,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
                 // 处理文件夹创建响应
                 if (data.type === 'folder_create_response') {
-                    console.log('📁 处理文件夹创建响应:', data.data);
                     if (data.data.success) {
                         message.success('文件夹创建成功');
                         // 刷新文件列表
@@ -1752,16 +1972,59 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
                 // 处理文件上传响应
                 if (data.type === 'file_upload_response') {
-                    console.log('📤 处理文件上传响应:', data.data);
                     // 文件上传的响应在uploadFile函数中通过事件监听器处理
                     // 这里不需要额外处理，让uploadFile函数的监听器处理
+                    return;
+                }
+
+                // 处理文件删除响应
+                if (data.type === 'file_delete_response') {
+                    message.destroy(); // 清除loading消息
+                    if (data.data.success) {
+                        message.success('删除成功');
+                        // 刷新文件列表
+                        setTimeout(() => refreshDirectory(), 500);
+                    } else {
+                        message.error(`删除失败: ${data.data.error || '未知错误'}`);
+                    }
+                    return;
+                }
+
+                // 处理文件重命名响应
+                if (data.type === 'file_rename_response') {
+                    message.destroy(); // 清除loading消息
+                    if (data.data.success) {
+                        message.success('重命名成功');
+                        // 刷新文件列表
+                        setTimeout(() => refreshDirectory(), 500);
+                    } else {
+                        message.error(`重命名失败: ${data.data.error || '未知错误'}`);
+                    }
+                    return;
+                }
+
+                // 处理文件权限修改响应
+                if (data.type === 'file_permissions_response') {
+                    message.destroy(); // 清除loading消息
+                    if (data.data.success) {
+                        message.success('权限修改成功');
+                        // 刷新文件列表
+                        setTimeout(() => refreshDirectory(), 500);
+                    } else {
+                        // 更详细的错误信息显示
+                        const errorMsg = data.data.error || '未知错误';
+                        console.error('权限修改失败:', errorMsg);
+                        message.error({
+                            content: `权限修改失败: ${errorMsg}`,
+                            duration: 6, // 显示6秒，让用户有足够时间看到错误信息
+                        });
+                    }
                     return;
                 }
 
                 // 对于其他消息类型（如file_view_response），不做任何处理
                 // 让它们能够被其他组件的监听器正常处理
                 // 这里什么都不做，事件会继续冒泡给其他监听器
-                console.log('📨 忽略消息类型:', data.type, '- 让其他组件处理');
             } catch (error) {
                 console.error('❌ 解析WebSocket消息失败:', error);
             }
@@ -1773,21 +2036,13 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         const processFileListMessageAsync = (event: MessageEvent) => {
             try {
                 const data = JSON.parse(event.data);
-                console.log('📁 processFileListMessageAsync - 数据类型:', data.type);
 
                 if (data.type === 'file_list_response') {
-                    console.log('📁 请求ID检查:', {
-                        responseRequestId: data.data.requestId,
-                        currentRequestId: currentRequestRef.current,
-                        match: data.data.requestId === currentRequestRef.current
-                    });
 
                     if (data.data.requestId !== currentRequestRef.current) {
-                        console.log('📁 请求ID不匹配，忽略响应');
                         return;
                     }
 
-                    console.log('📁 开始处理文件列表响应');
 
                     // 清理超时和状态
                     if (requestTimeoutRef.current) {
@@ -1800,13 +2055,11 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     currentRequestRef.current = null;
 
                     if (data.data.error) {
-                        console.error('📁 文件列表错误:', data.data.error);
                         message.error(`获取文件列表失败: ${data.data.error}`);
                         return;
                     }
 
                     if (data.data.files && Array.isArray(data.data.files)) {
-                        console.log(`📁 收到文件列表，共 ${data.data.files.length} 个文件`);
 
                         // 处理文件列表，确保每个文件都有正确的path属性
                         const processedFiles = data.data.files.map((file: FileItem) => {
@@ -1853,8 +2106,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         ws.addEventListener('message', handleMessage);
 
         return () => {
-            console.log('FileBrowser: 移除WebSocket消息监听器');
-
             if (ws && ws.readyState !== WebSocket.CLOSED) {
                 ws.removeEventListener('message', handleMessage);
             }
@@ -2540,6 +2791,225 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     onBlur={(e) => e.stopPropagation()}
                     autoFocus
                 />
+            </Modal>
+
+            {/* 权限修改对话框 */}
+            <Modal
+                title="修改文件权限"
+                open={permissionsVisible}
+                onOk={changePermissions}
+                onCancel={() => {
+                    setPermissionsVisible(false);
+                    setPermissionsTarget('');
+                    setNewPermissions('');
+                }}
+                okText="确认修改"
+                cancelText="取消"
+                destroyOnHidden
+                width={500}
+            >
+                <div style={{ marginBottom: 20 }}>
+                    <p><strong>文件:</strong> {permissionsTarget}</p>
+                    <p><strong>当前权限:</strong> {files.find(f => f.name === permissionsTarget)?.permissions || 'N/A'}</p>
+                </div>
+
+                {/* 可视化权限设置 */}
+                <div style={{ marginBottom: 20 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                            <tr style={{ backgroundColor: '#f5f5f5' }}>
+                                <th style={{ padding: '8px', textAlign: 'left', border: '1px solid #d9d9d9' }}></th>
+                                <th style={{ padding: '8px', textAlign: 'center', border: '1px solid #d9d9d9' }}>读取</th>
+                                <th style={{ padding: '8px', textAlign: 'center', border: '1px solid #d9d9d9' }}>写入</th>
+                                <th style={{ padding: '8px', textAlign: 'center', border: '1px solid #d9d9d9' }}>可执行</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', fontWeight: 'bold' }}>所有者</td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.owner.read}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                owner: { ...permissionsMatrix.owner, read: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.owner.write}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                owner: { ...permissionsMatrix.owner, write: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.owner.execute}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                owner: { ...permissionsMatrix.owner, execute: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', fontWeight: 'bold' }}>用户组</td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.group.read}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                group: { ...permissionsMatrix.group, read: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.group.write}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                group: { ...permissionsMatrix.group, write: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.group.execute}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                group: { ...permissionsMatrix.group, execute: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', fontWeight: 'bold' }}>公共</td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.others.read}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                others: { ...permissionsMatrix.others, read: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.others.write}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                others: { ...permissionsMatrix.others, write: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                                <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                                    <Checkbox
+                                        checked={permissionsMatrix.others.execute}
+                                        onChange={(e) => {
+                                            const newMatrix = {
+                                                ...permissionsMatrix,
+                                                others: { ...permissionsMatrix.others, execute: e.target.checked }
+                                            };
+                                            setPermissionsMatrix(newMatrix);
+                                            setNewPermissions(permissionsMatrixToNumeric(newMatrix));
+                                        }}
+                                    />
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* 权限数字输入 */}
+                <Form layout="vertical">
+                    <Form.Item label="权限">
+                        <Input
+                            value={newPermissions}
+                            onChange={(e) => {
+                                const value = e.target.value;
+                                if (/^[0-7]{0,3}$/.test(value)) {
+                                    setNewPermissions(value);
+                                    if (value.length === 3) {
+                                        setPermissionsMatrix(numericToPermissionsMatrix(value));
+                                    }
+                                }
+                            }}
+                            placeholder="例如: 755"
+                            maxLength={3}
+                            style={{ width: 200, fontFamily: 'monospace', fontSize: '16px' }}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            onKeyUp={(e) => e.stopPropagation()}
+                            onKeyPress={(e) => e.stopPropagation()}
+                            onInput={(e) => e.stopPropagation()}
+                            onCompositionStart={(e) => e.stopPropagation()}
+                            onCompositionEnd={(e) => e.stopPropagation()}
+                            onPaste={(e) => e.stopPropagation()}
+                            onFocus={(e) => e.stopPropagation()}
+                            onBlur={(e) => e.stopPropagation()}
+                        />
+                    </Form.Item>
+
+                    {/* 常用权限快速选择 */}
+                    <div style={{ marginTop: 16 }}>
+                        <p style={{ marginBottom: 8 }}><strong>常用权限:</strong></p>
+                        <Space wrap>
+                            {[
+                                { value: '755', desc: '拥有者全权限，其他读执行', color: 'green' },
+                                { value: '644', desc: '拥有者读写，其他只读', color: 'blue' },
+                                { value: '777', desc: '所有用户全权限', color: 'orange' },
+                                { value: '600', desc: '仅拥有者读写', color: 'purple' }
+                            ].map(perm => (
+                                <Tooltip key={perm.value} title={perm.desc}>
+                                    <Tag
+                                        color={perm.color}
+                                        style={{ cursor: 'pointer' }}
+                                        onClick={() => {
+                                            setNewPermissions(perm.value);
+                                            setPermissionsMatrix(numericToPermissionsMatrix(perm.value));
+                                        }}
+                                    >
+                                        {perm.value}
+                                    </Tag>
+                                </Tooltip>
+                            ))}
+                        </Space>
+                    </div>
+                </Form>
             </Modal>
         </div>
     );

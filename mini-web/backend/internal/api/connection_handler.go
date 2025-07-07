@@ -31,19 +31,92 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// SafeWebSocketConn 线程安全的WebSocket连接包装器
+type SafeWebSocketConn struct {
+	conn  *websocket.Conn
+	mutex sync.Mutex
+}
+
+// WriteMessage 线程安全的写入消息
+func (s *SafeWebSocketConn) WriteMessage(messageType int, data []byte) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.conn.WriteMessage(messageType, data)
+}
+
+// SetWriteDeadline 设置写入超时
+func (s *SafeWebSocketConn) SetWriteDeadline(t time.Time) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.conn.SetWriteDeadline(t)
+}
+
+// Close 关闭连接
+func (s *SafeWebSocketConn) Close() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.conn.Close()
+}
+
+// 其他WebSocket方法的包装
+func (s *SafeWebSocketConn) ReadMessage() (messageType int, p []byte, err error) {
+	return s.conn.ReadMessage()
+}
+
+func (s *SafeWebSocketConn) SetReadDeadline(t time.Time) error {
+	return s.conn.SetReadDeadline(t)
+}
+
+func (s *SafeWebSocketConn) SetPingHandler(h func(appData string) error) {
+	s.conn.SetPingHandler(h)
+}
+
+func (s *SafeWebSocketConn) SetPongHandler(h func(appData string) error) {
+	s.conn.SetPongHandler(h)
+}
+
+func (s *SafeWebSocketConn) SetCloseHandler(h func(code int, text string) error) {
+	s.conn.SetCloseHandler(h)
+}
+
+// NewSafeWebSocketConn 创建线程安全的WebSocket连接
+func NewSafeWebSocketConn(conn *websocket.Conn) *SafeWebSocketConn {
+	return &SafeWebSocketConn{
+		conn: conn,
+	}
+}
+
+// safeWriteMessage 线程安全地写入WebSocket消息
+func safeWriteMessage(wsConn *websocket.Conn, messageType int, data []byte, mutex *sync.Mutex) error {
+	mutex.Lock()
+	defer mutex.Unlock()
+	return wsConn.WriteMessage(messageType, data)
+}
+
+// safeSetWriteDeadline 线程安全地设置写入超时
+func safeSetWriteDeadline(wsConn *websocket.Conn, t time.Time, mutex *sync.Mutex) error {
+	mutex.Lock()
+	defer mutex.Unlock()
+	return wsConn.SetWriteDeadline(t)
+}
+
 // ConnectionHandler 连接处理器
 type ConnectionHandler struct {
-	connService     *service.ConnectionService
-	binaryProtocol  *service.BinaryProtocolHandler
-	specialDetector *service.SpecialCommandDetector
+	connService          *service.ConnectionService
+	binaryProtocol       *service.BinaryProtocolHandler
+	specialDetector      *service.SpecialCommandDetector
+	wsWriteMutex         sync.Mutex      // WebSocket写入互斥锁
+	cancelledRequests    map[string]bool // 取消的请求ID
+	cancelledRequestsMux sync.RWMutex    // 取消请求的读写锁
 }
 
 // NewConnectionHandler 创建连接处理器实例
 func NewConnectionHandler(connService *service.ConnectionService) *ConnectionHandler {
 	return &ConnectionHandler{
-		connService:     connService,
-		binaryProtocol:  service.NewBinaryProtocolHandler(),
-		specialDetector: service.NewSpecialCommandDetector(),
+		connService:       connService,
+		binaryProtocol:    service.NewBinaryProtocolHandler(),
+		specialDetector:   service.NewSpecialCommandDetector(),
+		cancelledRequests: make(map[string]bool),
 	}
 }
 
@@ -530,6 +603,10 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 	log.Printf("获取连接信息成功: ID=%d, 协议=%s, 主机=%s, 端口=%d",
 		connectionInfo.ID, connectionInfo.Protocol, connectionInfo.Host, connectionInfo.Port)
 
+	// 使用数据库中的实际协议，而不是URL路径中的协议
+	actualProtocol := connectionInfo.Protocol
+	log.Printf("URL协议: %s, 数据库实际协议: %s, 将使用实际协议创建会话", protocol, actualProtocol)
+
 	// 升级HTTP连接为WebSocket
 	log.Printf("尝试升级HTTP连接为WebSocket...")
 
@@ -562,17 +639,34 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 
 	log.Printf("WebSocket连接升级成功")
 
-	// 创建终端会话
-	log.Printf("尝试创建终端会话: 协议=%s", protocol)
-	terminal, err := h.connService.CreateTerminalSession(protocol, connectionInfo)
+	// 创建终端会话 - 使用数据库中的实际协议
+	log.Printf("尝试创建终端会话: 协议=%s", actualProtocol)
+	terminal, err := h.connService.CreateTerminalSession(actualProtocol, connectionInfo)
 	if err != nil {
-		log.Printf("创建终端会话失败: 协议=%s, 错误: %v", protocol, err)
+		log.Printf("创建终端会话失败: 协议=%s, 错误: %v", actualProtocol, err)
 		wsConn.WriteMessage(websocket.TextMessage, []byte("创建终端会话失败: "+err.Error()))
 		return
 	}
 	defer terminal.Close()
 
 	log.Printf("终端会话创建成功，开始处理WebSocket通信")
+
+	// 如果是RDP会话，需要设置WebSocket连接并启动连接
+	if actualProtocol == "rdp" {
+		if rdpSession, ok := terminal.(*service.RDPSessionSimple); ok {
+			log.Printf("设置RDP会话的WebSocket连接")
+			rdpSession.SetWebSocket(wsConn)
+
+			// 启动RDP连接
+			log.Printf("启动RDP连接")
+			if err := rdpSession.StartRDPConnection(); err != nil {
+				log.Printf("启动RDP连接失败: %v", err)
+				wsConn.WriteMessage(websocket.TextMessage, []byte("启动RDP连接失败: "+err.Error()))
+				return
+			}
+			log.Printf("RDP连接启动成功")
+		}
+	}
 
 	// 处理WebSocket连接
 	h.handleTerminalSession(wsConn, terminal)
@@ -587,20 +681,58 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 
 	log.Printf("开始处理终端会话WebSocket通信")
 
-	// 向终端发送一条测试消息
-	log.Printf("向终端发送测试消息")
-	terminal.Write([]byte{0}) // 发送空消息
+	// 检查是否为RDP会话，如果是，需要等待连接建立
+	var n int
+	var buf []byte
+	isRDP := false
 
-	// 从终端读取初始响应
-	buf := make([]byte, 512)
-	n, err := terminal.Read(buf)
-	if err != nil {
-		log.Printf("读取终端初始响应时出错: %v", err)
-	} else {
-		log.Printf("收到终端初始响应: %d 字节", n)
-		if n > 0 {
-			log.Printf("初始响应内容预览: %s", string(buf[:min(n, 100)]))
+	if rdpSession, ok := terminal.(*service.RDPWebSocketProxy); ok {
+		log.Printf("检测到RDP会话，等待连接建立...")
+		isRDP = true
+
+		// 等待RDP连接建立，最多等待30秒
+		maxWaitTime := 30 * time.Second
+		checkInterval := 100 * time.Millisecond
+		startTime := time.Now()
+
+		for {
+			if rdpSession.IsConnected() {
+				log.Printf("RDP连接已建立，耗时: %v", time.Since(startTime))
+				break
+			}
+
+			if time.Since(startTime) > maxWaitTime {
+				log.Printf("等待RDP连接超时 (%v)，继续处理", maxWaitTime)
+				break
+			}
+
+			time.Sleep(checkInterval)
 		}
+	}
+
+	// 对于非RDP协议或RDP连接已建立，尝试读取初始响应
+	if !isRDP {
+		// 向终端发送一条测试消息
+		log.Printf("向终端发送测试消息")
+		terminal.Write([]byte{0}) // 发送空消息
+
+		// 从终端读取初始响应
+		buf = make([]byte, 512)
+		var err error
+		n, err = terminal.Read(buf)
+		if err != nil {
+			log.Printf("读取终端初始响应时出错: %v", err)
+		} else {
+			log.Printf("收到终端初始响应: %d 字节", n)
+			if n > 0 {
+				log.Printf("初始响应内容预览: %s", string(buf[:min(n, 100)]))
+			}
+		}
+	} else {
+		// RDP协议不需要立即读取响应
+		log.Printf("RDP协议会话，跳过初始响应读取")
+		n = 0
+		buf = make([]byte, 512)
 	}
 
 	// 判断是否为图形协议
@@ -611,7 +743,7 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 		prefix := string(buf[:4])
 		log.Printf("终端响应前缀: %s", prefix)
 
-		if prefix == "RDP_" {
+		if prefix == "RDP_" || strings.Contains(string(buf[:n]), "RDP_SESSION_READY") {
 			isGraphical = true
 			protocol = model.ProtocolRDP
 			log.Printf("检测到RDP图形协议")
@@ -653,11 +785,11 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 	activityTimer := time.NewTicker(10 * time.Second)
 	defer activityTimer.Stop()
 
-	// 添加ping-pong机制检测连接状态
-	pingTimer := time.NewTicker(30 * time.Second)
-	defer pingTimer.Stop()
+	// 禁用原生ping/pong机制，使用二进制协议心跳代替
+	// pingTimer := time.NewTicker(30 * time.Second)
+	// defer pingTimer.Stop()
 
-	// 设置pong处理器
+	// 设置pong处理器（仍保留，以防客户端发送原生ping）
 	wsConn.SetPongHandler(func(appData string) error {
 		log.Printf("收到pong响应: %s", appData)
 		// 更新活动时间
@@ -735,10 +867,37 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 
 				// 处理心跳消息
 				if protocolMsg.Header.MessageType == service.MessageTypeHeartbeat {
-					log.Printf("收到心跳消息")
-					// 可以回复心跳响应
-					if heartbeatData, err := h.binaryProtocol.CreateHeartbeatMessage(); err == nil {
-						wsConn.WriteMessage(websocket.BinaryMessage, heartbeatData)
+					// 更新活动时间
+					select {
+					case activeChan <- struct{}{}:
+					default:
+					}
+
+					// 检查是否处于密码模式或其他特殊状态
+					shouldReplyHeartbeat := true
+
+					// 检查SSH终端的密码模式状态
+					if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+						if sshTerminal.IsInPasswordMode() {
+							log.Printf("收到心跳消息，但当前处于密码模式，跳过心跳响应")
+							shouldReplyHeartbeat = false
+						}
+					}
+
+					// 检查Telnet终端的密码模式状态
+					if telnetTerminal, ok := terminal.(*service.TelnetTerminalSession); ok {
+						if telnetTerminal.IsInPasswordMode() {
+							log.Printf("收到心跳消息，但当前处于密码模式，跳过心跳响应")
+							shouldReplyHeartbeat = false
+						}
+					}
+
+					if shouldReplyHeartbeat {
+						log.Printf("收到心跳消息，回复心跳响应")
+						// 回复心跳响应以便客户端测量延迟
+						if heartbeatReply, err := h.binaryProtocol.CreateHeartbeatMessage(); err == nil {
+							wsConn.WriteMessage(websocket.BinaryMessage, heartbeatReply)
+						}
 					}
 					continue
 				}
@@ -1048,6 +1207,26 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 								log.Printf("解析文件查看请求数据失败: %v", err)
 								h.sendFileViewError(wsConn, fileViewData.RequestId, "请求数据格式错误")
 							}
+						case "file_view_cancel":
+							// 处理文件查看取消请求
+							var cancelData struct {
+								RequestId string `json:"requestId"`
+								Reason    string `json:"reason,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &cancelData); err == nil {
+								log.Printf("收到文件查看取消请求: 请求ID=%s, 原因=%s", cancelData.RequestId, cancelData.Reason)
+
+								// 标记请求为已取消
+								h.markRequestCancelled(cancelData.RequestId)
+
+								// 发送取消确认响应
+								h.sendFileViewCancelResponse(wsConn, cancelData.RequestId, cancelData.Reason)
+
+								log.Printf("文件查看请求已标记为取消: %s", cancelData.RequestId)
+
+							} else {
+								log.Printf("解析文件查看取消请求数据失败: %v", err)
+							}
 						case "file_save":
 							// 处理文件保存请求
 							var fileSaveData struct {
@@ -1130,6 +1309,128 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 							} else {
 								log.Printf("解析文件创建请求数据失败: %v", err)
 								h.sendFileCreateError(wsConn, fileCreateData.RequestId, "请求数据格式错误")
+							}
+
+						case "file_delete":
+							// 处理文件/目录删除请求
+							var fileDeleteData struct {
+								Path        string `json:"path"`
+								IsDirectory bool   `json:"isDirectory"`
+								RequestId   string `json:"requestId,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &fileDeleteData); err == nil {
+								log.Printf("收到文件删除请求: 路径=%s, 是否为目录=%v, 请求ID=%s",
+									fileDeleteData.Path, fileDeleteData.IsDirectory, fileDeleteData.RequestId)
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										h.sendFileDeleteError(wsConn, fileDeleteData.RequestId, "SSH命令处理器不可用")
+										return
+									}
+
+									// 使用SSH命令处理器删除文件/目录
+									go func() {
+										err := commandHandler.ExecuteFileDeleteCommand(fileDeleteData.Path, fileDeleteData.IsDirectory)
+
+										if err != nil {
+											log.Printf("执行文件删除命令失败: %v", err)
+											h.sendFileDeleteError(wsConn, fileDeleteData.RequestId, fmt.Sprintf("删除失败: %v", err))
+										} else {
+											log.Printf("文件删除成功: %s", fileDeleteData.Path)
+											h.sendFileDeleteResponse(wsConn, fileDeleteData.RequestId)
+										}
+									}()
+								} else {
+									log.Printf("不是SSH终端，无法处理文件删除请求")
+									h.sendFileDeleteError(wsConn, fileDeleteData.RequestId, "仅SSH终端支持文件删除功能")
+								}
+							} else {
+								log.Printf("解析文件删除请求数据失败: %v", err)
+								h.sendFileDeleteError(wsConn, fileDeleteData.RequestId, "请求数据格式错误")
+							}
+
+						case "file_rename":
+							// 处理文件重命名请求
+							var fileRenameData struct {
+								OldPath   string `json:"oldPath"`
+								NewPath   string `json:"newPath"`
+								RequestId string `json:"requestId,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &fileRenameData); err == nil {
+								log.Printf("收到文件重命名请求: 旧路径=%s, 新路径=%s, 请求ID=%s",
+									fileRenameData.OldPath, fileRenameData.NewPath, fileRenameData.RequestId)
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										h.sendFileRenameError(wsConn, fileRenameData.RequestId, "SSH连接不可用")
+										break
+									}
+
+									// 异步执行重命名操作
+									go func() {
+										err := commandHandler.ExecuteFileRenameCommand(fileRenameData.OldPath, fileRenameData.NewPath)
+										if err != nil {
+											log.Printf("文件重命名失败: %v", err)
+											h.sendFileRenameError(wsConn, fileRenameData.RequestId, err.Error())
+										} else {
+											log.Printf("文件重命名成功")
+											h.sendFileRenameResponse(wsConn, fileRenameData.RequestId)
+										}
+									}()
+								} else {
+									log.Printf("不支持的终端类型进行文件重命名操作")
+									h.sendFileRenameError(wsConn, fileRenameData.RequestId, "当前终端类型不支持文件重命名")
+								}
+							} else {
+								log.Printf("解析文件重命名请求失败: %v", err)
+							}
+
+						case "file_permissions":
+							// 处理文件权限修改请求
+							var filePermData struct {
+								Path        string `json:"path"`
+								Permissions string `json:"permissions"`
+								RequestId   string `json:"requestId,omitempty"`
+							}
+							if err := json.Unmarshal(cmd.Data, &filePermData); err == nil {
+								log.Printf("收到文件权限修改请求: 路径=%s, 权限=%s, 请求ID=%s",
+									filePermData.Path, filePermData.Permissions, filePermData.RequestId)
+
+								// 检查是否是SSH终端
+								if sshTerminal, ok := terminal.(*service.SSHTerminalSession); ok {
+									// 检查命令处理器是否可用
+									commandHandler := sshTerminal.GetCommandHandler()
+									if commandHandler == nil {
+										log.Printf("SSH命令处理器不可用")
+										h.sendFilePermissionsError(wsConn, filePermData.RequestId, "SSH连接不可用")
+										break
+									}
+
+									// 异步执行权限修改操作
+									go func() {
+										err := commandHandler.ExecuteFilePermissionsCommand(filePermData.Path, filePermData.Permissions)
+										if err != nil {
+											log.Printf("文件权限修改失败: %v", err)
+											h.sendFilePermissionsError(wsConn, filePermData.RequestId, err.Error())
+										} else {
+											log.Printf("文件权限修改成功")
+											h.sendFilePermissionsResponse(wsConn, filePermData.RequestId)
+										}
+									}()
+								} else {
+									log.Printf("不支持的终端类型进行文件权限修改操作")
+									h.sendFilePermissionsError(wsConn, filePermData.RequestId, "当前终端类型不支持文件权限修改")
+								}
+							} else {
+								log.Printf("解析文件权限修改请求失败: %v", err)
 							}
 						case "folder_create":
 							// 处理文件夹创建请求
@@ -1298,7 +1599,31 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			close(done)
 		})
 
-		log.Printf("启动终端读取协程")
+		// 检查是否为RDP连接，如果是则不启动读取协程，避免与RDP代理冲突
+		if rdpSession, ok := terminal.(*service.RDPWebSocketProxy); ok {
+			log.Printf("检测到RDP代理连接，跳过通用终端读取协程，避免资源竞争")
+			log.Printf("RDP连接状态: %v", rdpSession.IsConnected())
+
+			// 对于RDP代理，直接等待其自身处理数据传输
+			// 不启动读取协程，避免与rdp_terminal_websocket_proxy.go中的读取逻辑冲突
+			for {
+				select {
+				case <-done:
+					log.Printf("RDP代理会话结束")
+					return
+				case <-time.After(5 * time.Second):
+					// 定期检查RDP连接状态
+					if !rdpSession.IsConnected() {
+						log.Printf("RDP代理连接已断开")
+						errChan <- fmt.Errorf("RDP代理连接断开")
+						return
+					}
+					log.Printf("RDP代理连接正常，继续监控...")
+				}
+			}
+		}
+
+		log.Printf("启动终端读取协程（非RDP协议）")
 
 		buf := make([]byte, 1024*1024*2) // 增加缓冲区大小到2MB以处理大型图形数据
 		for {
@@ -1339,21 +1664,24 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 
 					// 对于图形协议消息，记录更详细的信息
 					if prefix == "RDP_" || prefix == "VNC_" {
-						parts := bytes.SplitN(buf[:n], []byte(":"), 2)
-						if len(parts) > 0 {
-							msgType := string(parts[0])
-							log.Printf("终端输出图形消息: 类型=%s, 总长度=%d字节", msgType, n)
+						msgType := string(buf[:n])
+						log.Printf("终端输出图形消息: 类型=%s, 总长度=%d字节", msgType, n)
 
-							// 对于屏幕截图消息，额外记录信息
-							if msgType == "RDP_SCREENSHOT" || msgType == "VNC_SCREENSHOT" {
-								parts := bytes.SplitN(buf[:n], []byte(":"), 4)
-								if len(parts) >= 4 {
-									width := string(parts[1])
-									height := string(parts[2])
-									dataLen := n - len(parts[0]) - len(parts[1]) - len(parts[2]) - 3 // 减去分隔符的长度
-									log.Printf("屏幕截图数据: 类型=%s, 宽度=%s, 高度=%s, 数据长度=%d字节",
-										msgType, width, height, dataLen)
-								}
+						// 检查是否为心跳消息，如果是心跳消息则跳过发送
+						if msgType == "RDP_HEARTBEAT" || msgType == "VNC_HEARTBEAT" {
+							log.Printf("收到%s心跳消息，跳过发送", msgType)
+							continue // 跳过心跳消息的发送
+						}
+
+						// 对于屏幕截图消息，额外记录信息
+						if msgType == "RDP_SCREENSHOT" || msgType == "VNC_SCREENSHOT" {
+							parts := bytes.SplitN(buf[:n], []byte(":"), 4)
+							if len(parts) >= 4 {
+								width := string(parts[1])
+								height := string(parts[2])
+								dataLen := n - len(parts[0]) - len(parts[1]) - len(parts[2]) - 3 // 减去分隔符的长度
+								log.Printf("屏幕截图数据: 类型=%s, 宽度=%s, 高度=%s, 数据长度=%d字节",
+									msgType, width, height, dataLen)
 							}
 						}
 					} else if n < 100 {
@@ -1461,6 +1789,34 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 			log.Printf("终端会话处理已完成")
 			return
 		case err := <-errChan:
+			// 对于RDP连接的初始错误，更加宽容处理
+			if rdpSession, ok := terminal.(*service.RDPWebSocketProxy); ok {
+				// 检查是否为"RDP连接未建立"错误
+				if strings.Contains(err.Error(), "RDP连接未建立") {
+					log.Printf("RDP连接初始错误（可能是正常的初始化阶段）: %v", err)
+					// 给RDP连接更多时间建立
+					time.Sleep(2 * time.Second)
+
+					// 如果RDP现在已连接，继续运行
+					if rdpSession.IsConnected() {
+						log.Printf("RDP连接现在已建立，继续会话")
+						continue
+					}
+
+					// 如果仍未连接，给出更多时间
+					log.Printf("RDP连接仍在建立中，等待...")
+					time.Sleep(3 * time.Second)
+
+					if rdpSession.IsConnected() {
+						log.Printf("RDP连接建立成功，继续会话")
+						continue
+					}
+
+					log.Printf("RDP连接建立超时，关闭会话")
+					return
+				}
+			}
+
 			log.Printf("检测到错误: %v，正在关闭会话", err)
 			return
 		case <-activeChan:
@@ -1473,14 +1829,15 @@ func (h *ConnectionHandler) handleTerminalSession(wsConn *websocket.Conn, termin
 				wsConn.WriteMessage(websocket.TextMessage, []byte("会话超时，连接将被关闭"))
 				return
 			}
-		case <-pingTimer.C:
-			// 发送ping检测连接状态
-			log.Printf("发送ping检测连接状态")
-			wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if err := wsConn.WriteMessage(websocket.PingMessage, []byte("ping")); err != nil {
-				log.Printf("发送ping失败，连接可能已断开: %v", err)
-				return
-			}
+			// 移除原生ping机制，使用二进制协议心跳
+			// case <-pingTimer.C:
+			//	// 发送ping检测连接状态
+			//	log.Printf("发送ping检测连接状态")
+			//	wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			//	if err := wsConn.WriteMessage(websocket.PingMessage, []byte("ping")); err != nil {
+			//		log.Printf("发送ping失败，连接可能已断开: %v", err)
+			//		return
+			//	}
 		}
 	}
 }
@@ -1540,6 +1897,9 @@ func (h *ConnectionHandler) sendSegmentedResponse(wsConn *websocket.Conn, data [
 			return fmt.Errorf("WebSocket连接为空")
 		}
 
+		// 使用互斥锁保护WebSocket写入操作
+		h.wsWriteMutex.Lock()
+
 		// 设置写入超时
 		writeTimeout := 10 * time.Second
 		wsConn.SetWriteDeadline(time.Now().Add(writeTimeout))
@@ -1547,6 +1907,8 @@ func (h *ConnectionHandler) sendSegmentedResponse(wsConn *websocket.Conn, data [
 		// 发送分段消息
 		log.Printf("发送分段 %d/%d: 数据长度=%d字节", i+1, totalSegments, len(segmentData))
 		err = wsConn.WriteMessage(websocket.TextMessage, segmentBytes)
+
+		h.wsWriteMutex.Unlock()
 		if err != nil {
 			log.Printf("发送分段 %d 失败: %v", i, err)
 			return fmt.Errorf("发送分段 %d 失败: %v", i, err)
@@ -1711,6 +2073,65 @@ func (h *ConnectionHandler) sendFileViewError(wsConn *websocket.Conn, requestId 
 	}
 }
 
+// sendFileViewCancelResponse 发送文件查看取消确认响应
+func (h *ConnectionHandler) sendFileViewCancelResponse(wsConn *websocket.Conn, requestId string, reason string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Cancelled bool   `json:"cancelled"`
+			Reason    string `json:"reason,omitempty"`
+		} `json:"data"`
+	}{
+		Type: "file_view_cancel_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Cancelled bool   `json:"cancelled"`
+			Reason    string `json:"reason,omitempty"`
+		}{
+			RequestId: requestId,
+			Cancelled: true,
+			Reason:    reason,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件查看取消响应失败: %v", err)
+		return
+	}
+
+	wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件查看取消响应失败: %v", err)
+	} else {
+		log.Printf("文件查看取消响应发送成功，请求ID: %s, 原因: %s", requestId, reason)
+	}
+}
+
+// markRequestCancelled 标记请求为已取消
+func (h *ConnectionHandler) markRequestCancelled(requestId string) {
+	h.cancelledRequestsMux.Lock()
+	defer h.cancelledRequestsMux.Unlock()
+	h.cancelledRequests[requestId] = true
+	log.Printf("标记请求为已取消: %s", requestId)
+}
+
+// isRequestCancelled 检查请求是否已取消
+func (h *ConnectionHandler) isRequestCancelled(requestId string) bool {
+	h.cancelledRequestsMux.RLock()
+	defer h.cancelledRequestsMux.RUnlock()
+	return h.cancelledRequests[requestId]
+}
+
+// clearCancelledRequest 清理已取消的请求记录
+func (h *ConnectionHandler) clearCancelledRequest(requestId string) {
+	h.cancelledRequestsMux.Lock()
+	defer h.cancelledRequestsMux.Unlock()
+	delete(h.cancelledRequests, requestId)
+	log.Printf("清理已取消的请求记录: %s", requestId)
+}
+
 // sendSegmentedFileViewResponse 发送分段的文件查看响应
 func (h *ConnectionHandler) sendSegmentedFileViewResponse(wsConn *websocket.Conn, data []byte, requestId string) error {
 	const segmentSize = 16384 // 16KB 每段
@@ -1720,6 +2141,13 @@ func (h *ConnectionHandler) sendSegmentedFileViewResponse(wsConn *websocket.Conn
 	log.Printf("开始分段传输文件查看响应: 总大小=%d字节, 分段大小=%d字节, 总分段数=%d", totalSize, segmentSize, totalSegments)
 
 	for i := 0; i < totalSegments; i++ {
+		// 检查请求是否已被取消
+		if h.isRequestCancelled(requestId) {
+			log.Printf("检测到请求已取消，停止分段传输: %s (已传输 %d/%d 段)", requestId, i, totalSegments)
+			h.clearCancelledRequest(requestId) // 清理取消记录
+			return fmt.Errorf("传输已被取消")
+		}
+
 		start := i * segmentSize
 		end := start + segmentSize
 		if end > totalSize {
@@ -1761,20 +2189,38 @@ func (h *ConnectionHandler) sendSegmentedFileViewResponse(wsConn *websocket.Conn
 			return fmt.Errorf("序列化文件查看分段消息失败: %v", err)
 		}
 
+		// 使用互斥锁保护WebSocket写入操作
+		h.wsWriteMutex.Lock()
+
 		// 设置写入超时
 		wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 
 		// 发送分段消息
 		log.Printf("发送文件查看分段 %d/%d: 数据长度=%d字节", i+1, totalSegments, len(segmentData))
 		err = wsConn.WriteMessage(websocket.TextMessage, segmentBytes)
+
+		h.wsWriteMutex.Unlock()
 		if err != nil {
 			log.Printf("发送文件查看分段 %d 失败: %v", i, err)
 			return fmt.Errorf("发送文件查看分段 %d 失败: %v", i, err)
 		}
 
-		// 在分段之间添加延迟，防止网络拥塞
+		// 在分段之间添加自适应延迟，防止网络拥塞和前端处理不过来
 		if i < totalSegments-1 {
-			time.Sleep(50 * time.Millisecond)
+			// 根据分段总数自适应调整延迟时间
+			var delay time.Duration
+			if totalSegments > 500 {
+				delay = 200 * time.Millisecond // 超大文件：200ms延迟
+			} else if totalSegments > 100 {
+				delay = 150 * time.Millisecond // 大文件：150ms延迟
+			} else if totalSegments > 50 {
+				delay = 100 * time.Millisecond // 中等文件：100ms延迟
+			} else {
+				delay = 50 * time.Millisecond // 小文件：50ms延迟
+			}
+
+			log.Printf("分段传输延迟: %v (总分段数: %d)", delay, totalSegments)
+			time.Sleep(delay)
 		}
 	}
 
@@ -2089,4 +2535,205 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// sendFileDeleteResponse 发送文件删除成功响应
+func (h *ConnectionHandler) sendFileDeleteResponse(wsConn *websocket.Conn, requestId string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		} `json:"data"`
+	}{
+		Type: "file_delete_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		}{
+			RequestId: requestId,
+			Success:   true,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件删除响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件删除响应失败: %v", err)
+	} else {
+		log.Printf("文件删除响应发送成功: %s", requestId)
+	}
+}
+
+// sendFileDeleteError 发送文件删除错误响应
+func (h *ConnectionHandler) sendFileDeleteError(wsConn *websocket.Conn, requestId string, errorMsg string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		} `json:"data"`
+	}{
+		Type: "file_delete_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		}{
+			RequestId: requestId,
+			Success:   false,
+			Error:     errorMsg,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件删除错误响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件删除错误响应失败: %v", err)
+	} else {
+		log.Printf("文件删除错误响应发送成功: %s - %s", requestId, errorMsg)
+	}
+}
+
+// sendFileRenameResponse 发送文件重命名成功响应
+func (h *ConnectionHandler) sendFileRenameResponse(wsConn *websocket.Conn, requestId string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		} `json:"data"`
+	}{
+		Type: "file_rename_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		}{
+			RequestId: requestId,
+			Success:   true,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件重命名响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件重命名响应失败: %v", err)
+	} else {
+		log.Printf("文件重命名响应发送成功: %s", requestId)
+	}
+}
+
+// sendFileRenameError 发送文件重命名错误响应
+func (h *ConnectionHandler) sendFileRenameError(wsConn *websocket.Conn, requestId string, errorMsg string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		} `json:"data"`
+	}{
+		Type: "file_rename_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		}{
+			RequestId: requestId,
+			Success:   false,
+			Error:     errorMsg,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件重命名错误响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件重命名错误响应失败: %v", err)
+	} else {
+		log.Printf("文件重命名错误响应发送成功: %s - %s", requestId, errorMsg)
+	}
+}
+
+// sendFilePermissionsResponse 发送文件权限修改成功响应
+func (h *ConnectionHandler) sendFilePermissionsResponse(wsConn *websocket.Conn, requestId string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		} `json:"data"`
+	}{
+		Type: "file_permissions_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+		}{
+			RequestId: requestId,
+			Success:   true,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件权限修改响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件权限修改响应失败: %v", err)
+	} else {
+		log.Printf("文件权限修改响应发送成功: %s", requestId)
+	}
+}
+
+// sendFilePermissionsError 发送文件权限修改错误响应
+func (h *ConnectionHandler) sendFilePermissionsError(wsConn *websocket.Conn, requestId string, errorMsg string) {
+	response := struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		} `json:"data"`
+	}{
+		Type: "file_permissions_response",
+		Data: struct {
+			RequestId string `json:"requestId"`
+			Success   bool   `json:"success"`
+			Error     string `json:"error"`
+		}{
+			RequestId: requestId,
+			Success:   false,
+			Error:     errorMsg,
+		},
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("序列化文件权限修改错误响应失败: %v", err)
+		return
+	}
+
+	if err := wsConn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
+		log.Printf("发送文件权限修改错误响应失败: %v", err)
+	} else {
+		log.Printf("文件权限修改错误响应发送成功: %s - %s", requestId, errorMsg)
+	}
 }

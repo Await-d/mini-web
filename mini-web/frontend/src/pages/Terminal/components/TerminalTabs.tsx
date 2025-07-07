@@ -193,6 +193,32 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
     }
   };
 
+  // 渲染标签延迟徽章
+  const renderLatencyBadge = (latency: number | null | undefined) => {
+    if (latency === null || latency === undefined) {
+      return null;
+    }
+
+    let latencyClass = styles.latencyNormal;
+    let latencyText = `${latency}ms`;
+
+    if (latency < 100) {
+      latencyClass = styles.latencyGood;
+    } else if (latency >= 100 && latency < 300) {
+      latencyClass = styles.latencyNormal;
+    } else if (latency >= 300 && latency < 600) {
+      latencyClass = styles.latencyWarning;
+    } else {
+      latencyClass = styles.latencyBad;
+    }
+
+    return (
+      <span className={`${styles.latencyBadge} ${latencyClass}`} style={{ marginRight: '6px', fontSize: '10px' }}>
+        {latencyText}
+      </span>
+    );
+  };
+
   // 渲染标签标题
   const renderTabTitle = (tab: TerminalTab) => {
     const isConnected = tab.isConnected;
@@ -201,6 +227,7 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
     return (
       <div className={styles.tabTitleContainer}>
         <Badge color={statusColor} />
+        {renderLatencyBadge(tab.networkLatency)}
         <span className={styles.tabTitle}>
           {tab.title}
         </span>
@@ -211,7 +238,7 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
                 key: "refresh",
                 icon: <ReloadOutlined />,
                 label: "刷新连接",
-                onClick: (e) => {
+                onClick: (e: any) => {
                   e.domEvent.stopPropagation();
                   onTabRefresh?.(tab.key);
                 }
@@ -220,19 +247,19 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
                 key: "duplicate",
                 icon: <CopyOutlined />,
                 label: "复制标签页",
-                onClick: (e) => {
+                onClick: (e: any) => {
                   e.domEvent.stopPropagation();
                   onTabDuplicate?.(tab.key);
                 }
               },
               {
-                type: "divider"
+                type: "divider" as const
               },
               {
                 key: "close",
                 icon: <CloseOutlined />,
                 label: "关闭标签页",
-                onClick: (e) => {
+                onClick: (e: any) => {
                   e.domEvent.stopPropagation();
                   onTabClose(tab.key);
                 }

@@ -355,7 +355,7 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({
             open={visible}
             onCancel={onCancel}
             width={600}
-            destroyOnClose={true}
+            destroyOnHidden={true}
             footer={[
                 <Button key="reset" onClick={handleReset}>
                     重置默认

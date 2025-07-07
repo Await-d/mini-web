@@ -132,7 +132,24 @@ export const useWebSocketConnection = (
   // 重新连接
   const reconnect = useCallback(() => {
     if (!tab) return;
+
+    // 检查重连配置
+    const reconnectConfig = WebSocketService.getReconnectConfig();
+    if (!reconnectConfig.enabled) {
+      console.warn(`自动重连已禁用，跳过重连: ${tab.key}`);
+      return false;
+    }
+
+    // 检查重连状态和限制
+    const reconnectState = WebSocketService.getReconnectState?.(tab.key);
+    if (reconnectState && reconnectState.retryCount >= reconnectConfig.maxRetries) {
+      console.warn(`已达到最大重试次数(${reconnectConfig.maxRetries})，跳过重连: ${tab.key}`);
+      return false;
+    }
+
+    console.log(`Hook重连: ${tab.key}`);
     WebSocketService.refreshConnection(tab);
+    return true;
   }, [tab]);
 
   // 返回接口

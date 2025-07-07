@@ -132,6 +132,24 @@
   height: 100%;
 }
 
+.tabTitleContainer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  max-width: 160px; /* 限制标签页最大宽度 */
+}
+
+.tabMoreIcon {
+  margin-left: 4px;
+  opacity: 0.7;
+  transition: opacity 0.3s;
+}
+
+.tabMoreIcon:hover {
+  opacity: 1;
+}
+
 .tabIcon {
   display: inline-flex !important;
   align-items: center !important;

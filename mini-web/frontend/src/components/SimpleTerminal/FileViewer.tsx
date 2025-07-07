@@ -2,10 +2,10 @@
  * @Author: Await
  * @Date: 2025-01-02 10:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-01 18:05:39
+ * @LastEditTime: 2025-06-07 13:26:44
  * @Description: 文件查看器组件
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     Modal,
     Spin,
@@ -77,6 +77,124 @@ const FileViewer: React.FC<FileViewerProps> = ({
     const [editMode, setEditMode] = useState(false);
     const [editContent, setEditContent] = useState('');
     const [saving, setSaving] = useState(false);
+    const [loadingProgress, setLoadingProgress] = useState<{ current: number; total: number } | null>(null);
+    const [cancelling, setCancelling] = useState(false);
+
+    // 添加分段数据管理和强制停止控制
+    const segmentDataRef = useRef<Map<string, { segments: Map<number, string>, totalSegments: number }>>(new Map());
+    const currentRequestRef = useRef<string | null>(null);
+    const requestTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const messageHandlerRef = useRef<((event: MessageEvent) => void) | null>(null);
+    const forceStopRef = useRef<boolean>(false); // 强制停止标记
+    const isProcessingRef = useRef<boolean>(false); // 处理状态标记
+    const allActiveRequestsRef = useRef<Set<string>>(new Set()); // 跟踪所有活动请求
+
+    // 清理分段数据的函数
+    const clearSegmentData = useCallback((requestId?: string) => {
+        if (requestId) {
+            segmentDataRef.current.delete(requestId);
+            console.log('📄 清理特定请求的分段数据:', requestId);
+        } else {
+            segmentDataRef.current.clear();
+            console.log('📄 清理所有分段数据');
+        }
+    }, []);
+
+    // 清理超时定时器
+    const clearRequestTimeout = useCallback(() => {
+        if (requestTimeoutRef.current) {
+            clearTimeout(requestTimeoutRef.current);
+            requestTimeoutRef.current = null;
+        }
+    }, []);
+
+    // 清理消息监听器
+    const clearMessageHandler = useCallback(() => {
+        if (messageHandlerRef.current && webSocketRef.current) {
+            console.log('📄 清理消息监听器');
+            webSocketRef.current.removeEventListener('message', messageHandlerRef.current);
+            messageHandlerRef.current = null;
+        }
+    }, [webSocketRef]);
+
+    // 通知后端停止传输的函数
+    const notifyBackendStopTransmission = useCallback((requestId: string, reason: string) => {
+        console.log('📄 ⚠️ 开始通知后端停止传输 - requestId:', requestId, 'reason:', reason);
+        console.log('📄 ⚠️ WebSocket详细状态检查:');
+        console.log('📄   - WebSocket对象存在:', !!webSocketRef.current);
+        console.log('📄   - WebSocket readyState:', webSocketRef.current?.readyState);
+        console.log('📄   - OPEN状态值:', WebSocket.OPEN);
+        console.log('📄   - 是否相等:', webSocketRef.current?.readyState === WebSocket.OPEN);
+
+        if (webSocketRef.current) {
+            if (webSocketRef.current.readyState === WebSocket.OPEN) {
+                try {
+                    const stopRequest = {
+                        type: 'file_view_cancel',
+                        data: {
+                            requestId: requestId,
+                            reason: reason
+                        }
+                    };
+                    console.log('📄 ✅ 发送停止传输请求:', JSON.stringify(stopRequest));
+                    webSocketRef.current.send(JSON.stringify(stopRequest));
+                    console.log('📄 ✅ 停止传输请求已成功发送到WebSocket');
+                    return true;
+                } catch (error) {
+                    console.error('📄 ❌ 发送停止传输请求失败:', error);
+                    return false;
+                }
+            } else {
+                console.warn('📄 ⚠️ WebSocket连接状态不是OPEN，当前状态:', webSocketRef.current.readyState);
+                const states = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
+                console.warn('📄 ⚠️ 状态说明:', states[webSocketRef.current.readyState] || '未知状态');
+                return false;
+            }
+        } else {
+            console.error('📄 ❌ WebSocket对象不存在');
+            return false;
+        }
+    }, [webSocketRef]);
+
+    // 强制停止所有处理
+    const forceStopAllProcessing = useCallback(() => {
+        console.log('📄 强制停止所有处理 - 活动请求:', Array.from(allActiveRequestsRef.current));
+
+        // 取消所有活动请求
+        if (allActiveRequestsRef.current.size > 0) {
+            console.log('📄 🚨 发现多个活动请求，逐一取消:', Array.from(allActiveRequestsRef.current));
+            for (const requestId of allActiveRequestsRef.current) {
+                console.log('📄 🚨 取消活动请求:', requestId);
+                const success = notifyBackendStopTransmission(requestId, '强制停止所有请求');
+                console.log('📄 🚨 取消请求结果:', requestId, success ? '成功' : '失败');
+            }
+            // 清空活动请求列表
+            allActiveRequestsRef.current.clear();
+        }
+
+        // 设置强制停止标记
+        forceStopRef.current = true;
+        isProcessingRef.current = false;
+
+        // 清理所有状态
+        clearSegmentData();
+        clearRequestTimeout();
+        clearMessageHandler();
+        currentRequestRef.current = null;
+
+        // 重置UI状态
+        setLoading(false);
+        setLoadingProgress(null);
+        setCancelling(false);
+
+    }, [clearSegmentData, clearRequestTimeout, clearMessageHandler, notifyBackendStopTransmission]);
+
+    // 组件卸载时清理
+    useEffect(() => {
+        return () => {
+            forceStopAllProcessing();
+        };
+    }, [forceStopAllProcessing]);
 
     // 获取文件扩展名
     const getFileExtension = useCallback((filename: string): string => {
@@ -159,6 +277,33 @@ const FileViewer: React.FC<FileViewerProps> = ({
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }, []);
 
+    // 完整的错误清理函数 - 不包含移除事件监听器，因为那需要在调用点处理
+    const handleTransmissionError = useCallback((requestId: string, errorMessage: string, reason: string) => {
+        console.error('📄 传输错误:', errorMessage);
+
+        // 通知后端停止传输
+        notifyBackendStopTransmission(requestId, reason);
+
+        // 清理所有状态
+        clearSegmentData(requestId);
+        clearRequestTimeout();
+        currentRequestRef.current = null;
+
+        // 🆔 从活动请求列表中移除
+        allActiveRequestsRef.current.delete(requestId);
+        console.log('📄 🆔 请求出错，从活动列表移除:', requestId, '剩余:', allActiveRequestsRef.current.size);
+
+        // 更新UI状态
+        setLoading(false);
+        setLoadingProgress(null);
+        setCancelling(false);
+        setFileContent({
+            type: 'error',
+            content: '',
+            error: errorMessage
+        });
+    }, [notifyBackendStopTransmission, clearSegmentData, clearRequestTimeout]);
+
     // 加载文件内容
     const loadFileContent = useCallback(() => {
         console.log('📄 loadFileContent 开始 - 参数:', {
@@ -168,7 +313,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
             webSocketExists: !!webSocketRef.current,
             webSocketState: webSocketRef.current?.readyState,
             connectionId,
-            sessionId
+            sessionId,
+            currentRequest: currentRequestRef.current,
+            isLoading: loading,
+            isProcessing: isProcessingRef.current
         });
 
         if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
@@ -184,12 +332,44 @@ const FileViewer: React.FC<FileViewerProps> = ({
             return;
         }
 
+        // 🛡️ 防重复请求：如果已经在加载中，先强制停止现有请求
+        if (loading || currentRequestRef.current || isProcessingRef.current) {
+            console.log('📄 🛡️ 检测到重复请求，先取消现有请求:', {
+                loading,
+                currentRequest: currentRequestRef.current,
+                isProcessing: isProcessingRef.current
+            });
+
+            if (currentRequestRef.current) {
+                console.log('📄 🛡️ 发送取消旧请求指令:', currentRequestRef.current);
+                const success = notifyBackendStopTransmission(currentRequestRef.current, '新请求开始，取消旧请求');
+                console.log('📄 🛡️ 取消旧请求结果:', success ? '成功' : '失败');
+            }
+
+            // 强制停止所有处理
+            forceStopAllProcessing();
+            console.log('📄 🛡️ 已强制停止旧请求，继续新请求');
+        }
+
+        // 重置强制停止标记
+        forceStopRef.current = false;
+        isProcessingRef.current = true;
+
         setLoading(true);
         setFileContent(null);
+        setLoadingProgress(null);
+        setCancelling(false);
 
         try {
             const fileType = getFileType(fileName);
             const requestId = `file_view_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+            // 设置当前请求ID，用于取消检查
+            currentRequestRef.current = requestId;
+
+            // 🆔 添加到活动请求列表
+            allActiveRequestsRef.current.add(requestId);
+            console.log('📄 🆔 新请求已添加到活动列表:', requestId, '总数:', allActiveRequestsRef.current.size);
 
             // 发送文件查看请求
             const fileViewRequest = {
@@ -213,6 +393,9 @@ const FileViewer: React.FC<FileViewerProps> = ({
                     error: undefined
                 });
                 setLoading(false);
+                // 清理请求ID，因为没有真正的请求
+                currentRequestRef.current = null;
+                isProcessingRef.current = false;
                 return;
             }
 
@@ -220,64 +403,91 @@ const FileViewer: React.FC<FileViewerProps> = ({
             webSocketRef.current.send(JSON.stringify(fileViewRequest));
             console.log('📄 WebSocket消息已发送');
 
-            // 设置超时
-            const timeout = setTimeout(() => {
-                console.log('📄 文件加载超时');
-                setLoading(false);
-                message.error('文件加载超时');
-            }, 30000);
+            // 动态超时管理
+            let timeoutId: NodeJS.Timeout;
+            let lastActivity = Date.now();
 
-            // 分段数据存储
-            const segmentData = new Map<string, { segments: Map<number, string>, totalSegments: number }>();
+            const resetTimeout = () => {
+                if (timeoutId) clearTimeout(timeoutId);
+                lastActivity = Date.now();
+
+                // 根据文件大小动态设置超时时间：基础30秒 + 每MB增加10秒，最大5分钟
+                const baseTimeout = 30000; // 30秒
+                const sizeTimeoutBonus = Math.min(fileSize / (1024 * 1024) * 10000, 300000 - baseTimeout); // 最大5分钟
+                const totalTimeout = baseTimeout + sizeTimeoutBonus;
+
+                console.log(`📄 设置动态超时: ${Math.round(totalTimeout / 1000)}秒 (文件大小: ${formatFileSize(fileSize)})`);
+
+                timeoutId = setTimeout(() => {
+                    console.log('📄 文件加载超时，超时时间:', totalTimeout / 1000, '秒');
+                    setLoading(false);
+                    setLoadingProgress(null);
+                    setCancelling(false);
+                    message.error(`文件加载超时 (${Math.round(totalTimeout / 1000)}秒)`);
+                    webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+                }, totalTimeout);
+            };
+
+            // 初始设置超时
+            resetTimeout();
 
             // 监听响应的处理函数
             const handleFileViewResponse = (event: MessageEvent) => {
                 try {
+                    // 首先检查是否被强制停止
+                    if (forceStopRef.current) {
+                        console.log('📄 收到消息但已强制停止，忽略处理');
+                        return;
+                    }
+
+                    // 检查是否为心跳消息，如果是则忽略
+                    if ((event as any).__isHeartbeatMessage) {
+                        console.log('💓 FileViewer忽略心跳消息');
+                        return;
+                    }
+
                     // 检查数据类型
                     console.log('📄 FileViewer收到消息，数据类型:', typeof event.data, event.data?.constructor?.name);
 
-                    // 如果是Blob类型，说明后端返回的是二进制数据而不是JSON
+                    // 如果是Blob类型，尝试转换为文本后重新处理
                     if (event.data instanceof Blob) {
-                        console.error('📄 收到Blob数据，后端可能没有实现JSON格式的file_view API');
-                        clearTimeout(timeout);
-                        setLoading(false);
-                        setFileContent({
-                            type: 'error',
-                            content: '',
-                            error: '后端未实现JSON格式的文件查看API，请检查后端实现'
+                        console.warn('📄 收到Blob数据，尝试转换为文本');
+
+                        event.data.text().then(text => {
+                            console.log('📄 Blob转文本成功，重新处理:', text.substring(0, 100) + '...');
+                            // 创建新的事件对象，模拟文本消息
+                            const newEvent = {
+                                ...event,
+                                data: text
+                            } as MessageEvent;
+
+                            // 递归调用自己处理转换后的文本
+                            handleFileViewResponse(newEvent);
+                        }).catch(error => {
+                            console.error('📄 Blob转文本失败:', error);
+                            clearTimeout(timeoutId);
+                            handleTransmissionError(requestId, '无法将Blob数据转换为文本', 'blob_conversion_failed');
+                            webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+                            message.error('数据格式转换失败');
                         });
-                        message.error('后端API格式不正确，请联系管理员');
-                        webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
                         return;
                     }
 
                     // 检查是否是字符串
                     if (typeof event.data !== 'string') {
-                        console.error('📄 收到非字符串数据:', typeof event.data, event.data);
-                        clearTimeout(timeout);
-                        setLoading(false);
-                        setFileContent({
-                            type: 'error',
-                            content: '',
-                            error: '收到非文本格式的响应数据'
-                        });
-                        message.error('响应数据格式错误');
+                        clearTimeout(timeoutId);
+                        handleTransmissionError(requestId, '收到非文本格式的响应数据', 'non_string_data');
                         webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+                        message.error('响应数据格式错误');
                         return;
                     }
 
                     // 检查是否是"[object Blob]"这样的字符串
                     if (event.data === '[object Blob]' || event.data.startsWith('[object ')) {
-                        console.error('📄 收到对象字符串表示，可能是后端序列化错误:', event.data);
-                        clearTimeout(timeout);
-                        setLoading(false);
-                        setFileContent({
-                            type: 'error',
-                            content: '',
-                            error: '后端返回了对象字符串而不是JSON数据'
-                        });
-                        message.error('后端数据序列化错误');
+                        clearTimeout(timeoutId);
+                        handleTransmissionError(requestId, '后端返回了对象字符串而不是JSON数据', 'object_string_received');
                         webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+                        message.error('后端数据序列化错误');
                         return;
                     }
 
@@ -286,8 +496,10 @@ const FileViewer: React.FC<FileViewerProps> = ({
 
                     if (data.type === 'file_view_response' && data.data.requestId === requestId) {
                         console.log('📄 处理文件查看响应');
-                        clearTimeout(timeout);
+                        clearTimeout(timeoutId);
                         setLoading(false);
+                        setLoadingProgress(null);
+                        setCancelling(false);
 
                         if (data.data.error) {
                             console.error('📄 文件查看错误:', data.data.error);
@@ -307,75 +519,172 @@ const FileViewer: React.FC<FileViewerProps> = ({
                             });
                         }
 
-                        // 移除监听器
+                        // 清理当前请求ID并移除监听器
+                        currentRequestRef.current = null;
+                        isProcessingRef.current = false;
                         webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
-                    } else if (data.type === 'file_view_segment' && data.data.requestId === requestId) {
-                        console.log('📄 处理文件查看分段响应:', data.data.segmentId, '/', data.data.totalSegments);
+                    } else if (data.type === 'file_view_cancel_response' && data.data.requestId === requestId) {
+                        console.log('📄 收到取消确认响应:', data.data.reason);
+                        clearTimeout(timeoutId);
+                        setLoading(false);
+                        setLoadingProgress(null);
+                        setCancelling(false);
+
+                        // 清理当前请求ID并移除监听器
+                        currentRequestRef.current = null;
+                        isProcessingRef.current = false;
+
+                        // 🆔 从活动请求列表中移除
+                        allActiveRequestsRef.current.delete(requestId);
+                        console.log('📄 🆔 请求已取消，从活动列表移除:', requestId, '剩余:', allActiveRequestsRef.current.size);
+
+                        webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+
+                        setFileContent({
+                            type: 'error',
+                            content: '',
+                            error: '文件传输已取消'
+                        });
+                    } else if (data.type === 'file_view_segment') {
+                        // 🔍 详细检查分段请求有效性
+                        const segmentRequestId = data.data.requestId;
+                        console.log('📄 🔍 收到分段数据，详细检查:', {
+                            segmentRequestId,
+                            currentRequestId: currentRequestRef.current,
+                            expectedRequestId: requestId,
+                            forceStop: forceStopRef.current,
+                            isProcessing: isProcessingRef.current,
+                            segmentId: data.data.segmentId,
+                            totalSegments: data.data.totalSegments
+                        });
+
+                        // 检查请求ID是否匹配（期望的请求）
+                        if (segmentRequestId !== requestId) {
+                            console.log('📄 🛡️ 忽略不匹配的分段数据 - 期望:', requestId, '收到:', segmentRequestId);
+                            return;
+                        }
+
+                        // 检查请求是否仍然有效（避免处理已取消请求的分段）
+                        if (currentRequestRef.current !== requestId || forceStopRef.current) {
+                            console.log('📄 🛡️ 忽略已取消请求的分段数据:', requestId, 'forceStop:', forceStopRef.current, 'currentRef:', currentRequestRef.current);
+                            return;
+                        }
+
+                        console.log('📄 ✅ 分段数据有效，开始处理:', data.data.segmentId, '/', data.data.totalSegments);
+
+                        // 重置超时计时器，表示还在接收数据
+                        resetTimeout();
 
                         // 初始化分段数据
-                        if (!segmentData.has(requestId)) {
-                            segmentData.set(requestId, {
+                        if (!segmentDataRef.current.has(requestId)) {
+                            segmentDataRef.current.set(requestId, {
                                 segments: new Map(),
                                 totalSegments: data.data.totalSegments
                             });
                         }
 
-                        const segmentInfo = segmentData.get(requestId)!;
+                        const segmentInfo = segmentDataRef.current.get(requestId)!;
                         segmentInfo.segments.set(data.data.segmentId, data.data.data);
+
+                        // 更新进度显示
+                        setLoadingProgress({
+                            current: segmentInfo.segments.size,
+                            total: segmentInfo.totalSegments
+                        });
 
                         // 检查是否接收完所有分段
                         if (segmentInfo.segments.size === segmentInfo.totalSegments) {
                             console.log('📄 接收完所有分段，开始合并');
 
-                            // 按顺序合并分段
-                            let completeData = '';
-                            for (let i = 0; i < segmentInfo.totalSegments; i++) {
-                                completeData += segmentInfo.segments.get(i) || '';
-                            }
-
                             try {
-                                // 解析完整的JSON数据
-                                const completeJsonData = JSON.parse(completeData);
-                                console.log('📄 分段数据合并成功，处理最终响应');
-
-                                clearTimeout(timeout);
-                                setLoading(false);
-
-                                if (completeJsonData.data.error) {
-                                    console.error('📄 文件查看错误:', completeJsonData.data.error);
-                                    setFileContent({
-                                        type: 'error',
-                                        content: '',
-                                        error: completeJsonData.data.error
-                                    });
-                                    message.error(`文件加载失败: ${completeJsonData.data.error}`);
-                                } else {
-                                    console.log('📄 文件查看成功:', completeJsonData.data.fileType, completeJsonData.data.content?.length);
-                                    setFileContent({
-                                        type: completeJsonData.data.fileType || fileType,
-                                        content: completeJsonData.data.content || '',
-                                        encoding: completeJsonData.data.encoding,
-                                        mimeType: completeJsonData.data.mimeType
-                                    });
+                                // 使用流式合并避免大字符串拼接
+                                const segments: string[] = [];
+                                for (let i = 0; i < segmentInfo.totalSegments; i++) {
+                                    const segment = segmentInfo.segments.get(i);
+                                    if (segment === undefined) {
+                                        throw new Error(`缺少分段 ${i}`);
+                                    }
+                                    segments.push(segment);
                                 }
 
-                                // 清理分段数据
-                                segmentData.delete(requestId);
+                                // 分批处理大数据，避免UI阻塞
+                                const processSegments = async () => {
+                                    // 合并所有分段
+                                    const completeData = segments.join('');
+                                    console.log('📄 分段数据合并完成，数据大小:', completeData.length);
 
-                                // 移除监听器
-                                webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+                                    // 使用setTimeout让出主线程，避免UI阻塞
+                                    return new Promise<any>((resolve, reject) => {
+                                        setTimeout(() => {
+                                            try {
+                                                const completeJsonData = JSON.parse(completeData);
+                                                resolve(completeJsonData);
+                                            } catch (error) {
+                                                reject(error);
+                                            }
+                                        }, 0);
+                                    });
+                                };
 
-                            } catch (parseError) {
-                                console.error('📄 解析合并后的分段数据失败:', parseError);
-                                clearTimeout(timeout);
-                                setLoading(false);
-                                setFileContent({
-                                    type: 'error',
-                                    content: '',
-                                    error: '分段数据解析失败'
+                                processSegments().then(completeJsonData => {
+                                    console.log('📄 分段数据解析成功，处理最终响应');
+
+                                    // 再次检查是否被强制停止
+                                    if (forceStopRef.current) {
+                                        console.log('📄 分段处理完成但已被强制停止，忽略结果');
+                                        return;
+                                    }
+
+                                    clearTimeout(timeoutId);
+                                    setLoading(false);
+                                    setLoadingProgress(null);
+                                    setCancelling(false);
+
+                                    if (completeJsonData.data.error) {
+                                        console.error('📄 文件查看错误:', completeJsonData.data.error);
+                                        setFileContent({
+                                            type: 'error',
+                                            content: '',
+                                            error: completeJsonData.data.error
+                                        });
+                                        message.error(`文件加载失败: ${completeJsonData.data.error}`);
+                                    } else {
+                                        console.log('📄 文件查看成功:', completeJsonData.data.fileType, completeJsonData.data.content?.length);
+                                        setFileContent({
+                                            type: completeJsonData.data.fileType || fileType,
+                                            content: completeJsonData.data.content || '',
+                                            encoding: completeJsonData.data.encoding,
+                                            mimeType: completeJsonData.data.mimeType
+                                        });
+                                    }
+
+                                    // 清理分段数据
+                                    clearSegmentData(requestId);
+
+                                    // 清理当前请求ID并移除监听器
+                                    currentRequestRef.current = null;
+                                    isProcessingRef.current = false;
+
+                                    // 🆔 从活动请求列表中移除
+                                    allActiveRequestsRef.current.delete(requestId);
+                                    console.log('📄 🆔 请求已完成，从活动列表移除:', requestId, '剩余:', allActiveRequestsRef.current.size);
+
+                                    webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+
+                                }).catch(parseError => {
+                                    console.error('📄 解析合并后的分段数据失败:', parseError);
+                                    clearTimeout(timeoutId);
+                                    handleTransmissionError(requestId, '分段数据解析失败', 'parse_error');
+                                    webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+                                    message.error('分段数据解析失败');
                                 });
-                                message.error('分段数据解析失败');
+
+                            } catch (segmentError) {
+                                console.error('📄 分段处理失败:', segmentError);
+                                clearTimeout(timeoutId);
+                                handleTransmissionError(requestId, '分段数据处理失败', 'segment_processing_error');
                                 webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+                                message.error('分段数据处理失败');
                             }
                         }
                     }
@@ -385,28 +694,49 @@ const FileViewer: React.FC<FileViewerProps> = ({
                     console.error('📄 数据长度:', event.data?.length);
                     console.error('📄 数据前100字符:', typeof event.data === 'string' ? event.data.substring(0, 100) : 'N/A');
 
-                    clearTimeout(timeout);
-                    setLoading(false);
-                    setFileContent({
-                        type: 'error',
-                        content: '',
-                        error: `解析响应失败: ${error instanceof Error ? error.message : String(error)}`
-                    });
-                    message.error(`解析响应失败: ${error instanceof Error ? error.message : String(error)}`);
+                    clearTimeout(timeoutId);
+                    const errorMsg = `解析响应失败: ${error instanceof Error ? error.message : String(error)}`;
+                    handleTransmissionError(requestId, errorMsg, 'parse_json_error');
                     webSocketRef.current?.removeEventListener('message', handleFileViewResponse);
+                    message.error(errorMsg);
                 }
             };
 
-            // 添加监听器
+            // 保存消息处理器引用并添加监听器
+            messageHandlerRef.current = handleFileViewResponse;
             webSocketRef.current.addEventListener('message', handleFileViewResponse);
-            console.log('📄 已添加WebSocket消息监听器');
 
         } catch (error) {
             setLoading(false);
             console.error('📄 发送文件查看请求失败:', error);
             message.error('发送文件查看请求失败');
         }
-    }, [webSocketRef, fileName, filePath, getFileType, connectionId, sessionId]);
+    }, [webSocketRef, fileName, filePath, getFileType, connectionId, sessionId, fileSize, formatFileSize]);
+
+    // 取消文件加载
+    const cancelFileLoading = useCallback(() => {
+        console.log('📄 🛑 取消文件加载被调用 - currentRequestRef:', currentRequestRef.current);
+        setCancelling(true);
+
+        // 如果有正在进行的请求，立即通知后端停止传输
+        if (currentRequestRef.current) {
+            console.log('📄 🛑 发送取消加载指令:', currentRequestRef.current);
+            const success = notifyBackendStopTransmission(currentRequestRef.current, '用户取消了文件加载');
+            console.log('📄 🛑 取消指令发送结果:', success ? '成功' : '失败');
+        } else {
+            console.log('📄 🛑 没有活动请求需要取消');
+        }
+
+        // 强制停止所有处理
+        forceStopAllProcessing();
+
+        setFileContent({
+            type: 'error',
+            content: '',
+            error: '用户取消了文件加载'
+        });
+        message.info('已取消文件加载');
+    }, [notifyBackendStopTransmission, forceStopAllProcessing]);
 
     // 复制文件内容
     const copyContent = useCallback(() => {
@@ -549,26 +879,103 @@ const FileViewer: React.FC<FileViewerProps> = ({
         }
     }, [visible, fileName, filePath, loadFileContent]);
 
+    // 处理关闭预览的函数
+    const handleClosePreview = useCallback(() => {
+        console.log('📄 🚪 处理关闭预览 - currentRequestRef:', currentRequestRef.current, 'isProcessing:', isProcessingRef.current, 'loading:', loading);
+
+        // 如果有正在进行的请求，立即发送停止指令
+        if (currentRequestRef.current) {
+            console.log('📄 🚪 检测到活动请求，立即发送停止指令:', currentRequestRef.current);
+            const success = notifyBackendStopTransmission(currentRequestRef.current, '用户关闭了预览');
+            console.log('📄 🚪 停止指令发送结果:', success ? '成功' : '失败');
+        } else {
+            console.log('📄 🚪 没有活动请求需要取消');
+        }
+
+        // 强制停止所有处理
+        forceStopAllProcessing();
+
+        // 重置UI状态
+        setFileContent(null);
+        setActiveTab('content');
+        setImageScale(1);
+        setFullscreen(false);
+        setEditMode(false);
+        setEditContent('');
+        setSaving(false);
+    }, [notifyBackendStopTransmission, forceStopAllProcessing, loading]);
+
     // 重置状态
     useEffect(() => {
+        console.log('📄 useEffect重置状态 - visible:', visible, 'currentRequestRef:', currentRequestRef.current);
         if (!visible) {
-            setFileContent(null);
-            setActiveTab('content');
-            setImageScale(1);
-            setFullscreen(false);
-            setEditMode(false);
-            setEditContent('');
-            setSaving(false);
+            handleClosePreview();
         }
-    }, [visible]);
+    }, [visible, handleClosePreview]);
+
+    // 组件卸载时的清理
+    useEffect(() => {
+        return () => {
+            // 组件卸载时，如果有活动请求，则取消
+            if (currentRequestRef.current) {
+                console.log('📄 组件卸载，取消活动请求:', currentRequestRef.current);
+                notifyBackendStopTransmission(currentRequestRef.current, '组件卸载');
+            }
+
+            // 移除消息监听器
+            clearMessageHandler();
+        };
+    }, [notifyBackendStopTransmission, clearMessageHandler]);
 
     // 渲染文件内容
     const renderFileContent = () => {
         if (loading) {
             return (
                 <div style={{ textAlign: 'center', padding: '50px' }}>
-                    <Spin size="large" />
-                    <div style={{ marginTop: 16 }}>正在加载文件内容...</div>
+                    <Space direction="vertical" size="large">
+                        <Spin size="large" />
+                        <div>正在加载文件内容...</div>
+
+                        {loadingProgress && (
+                            <div>
+                                <div style={{ marginBottom: 8 }}>
+                                    <Text type="secondary">
+                                        正在接收分段数据：{loadingProgress.current} / {loadingProgress.total}
+                                    </Text>
+                                </div>
+                                <div style={{ width: 300, margin: '0 auto' }}>
+                                    <div style={{
+                                        width: '100%',
+                                        height: 6,
+                                        backgroundColor: '#f0f0f0',
+                                        borderRadius: 3,
+                                        overflow: 'hidden'
+                                    }}>
+                                        <div style={{
+                                            width: `${(loadingProgress.current / loadingProgress.total) * 100}%`,
+                                            height: '100%',
+                                            backgroundColor: '#1677ff',
+                                            transition: 'width 0.3s ease'
+                                        }} />
+                                    </div>
+                                </div>
+                                <div style={{ marginTop: 8 }}>
+                                    <Text type="secondary" style={{ fontSize: 12 }}>
+                                        {Math.round((loadingProgress.current / loadingProgress.total) * 100)}%
+                                    </Text>
+                                </div>
+                            </div>
+                        )}
+
+                        <Button
+                            onClick={cancelFileLoading}
+                            disabled={cancelling}
+                            danger
+                            type="text"
+                        >
+                            {cancelling ? '正在取消...' : '取消加载'}
+                        </Button>
+                    </Space>
                 </div>
             );
         }
@@ -837,6 +1244,17 @@ const FileViewer: React.FC<FileViewerProps> = ({
         );
     };
 
+    // 处理模态框关闭
+    const handleModalClose = useCallback(() => {
+        console.log('📄 🚪 模态框onCancel被调用 - 立即处理关闭');
+
+        // 立即处理关闭预览
+        handleClosePreview();
+
+        // 调用原始的onClose
+        onClose();
+    }, [handleClosePreview, onClose]);
+
     return (
         <Modal
             title={
@@ -848,12 +1266,12 @@ const FileViewer: React.FC<FileViewerProps> = ({
                 </Space>
             }
             open={visible}
-            onCancel={onClose}
+            onCancel={handleModalClose}
             width="80%"
             style={{ top: 20 }}
             footer={
                 <Space>
-                    <Button onClick={onClose} disabled={saving}>
+                    <Button onClick={handleModalClose} disabled={saving}>
                         关闭
                     </Button>
                     {fileContent && fileContent.type === 'text' && !editMode && (

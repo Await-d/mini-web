@@ -1,0 +1,149 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 前端二进制通讯规则
+
+## 核心原则
+
+前端与后端的所有通讯必须严格遵循二进制交互协议，确保数据传输的高效性和安全性。
+
+## WebSocket通讯协议
+
+### 连接管理
+- 使用 [connection_handler.go](mdc:backend/internal/api/connection_handler.go) 作为后端WebSocket处理器
+- 前端WebSocket连接通过 [FileBrowser.tsx](mdc:frontend/src/components/SimpleTerminal/FileBrowser.tsx) 等组件建立
+- 所有连接必须通过认证验证
+
+### 二进制数据格式规范
+
+#### 消息结构
+```
+[Header: 4字节] [Type: 2字节] [Length: 4字节] [Payload: N字节] [Checksum: 4字节]
+```
+
+#### 数据类型限制
+- **文件传输**: 必须使用分片二进制传输，参考 [BinaryProtocolHandler](mdc:backend/internal/service/binary_protocol_handler.go)
+- **终端数据**: 使用UTF-8编码的二进制流
+- **文件操作**: 命令和响应均使用JSON over Binary封装
+
+## 文件操作二进制协议
+
+### 文件删除操作
+```typescript
+// 二进制格式
+interface BinaryFileDeleteRequest {
+  header: Uint8Array(4);    // 固定头部
+  type: Uint16;             // 操作类型: 0x0001
+  pathLength: Uint32;       // 路径长度
+  path: Uint8Array;         // UTF-8编码路径
+  isDirectory: Uint8;       // 是否为目录: 0x00/0x01
+  requestId: Uint8Array(16); // 16字节请求ID
+}
+```
+
+### 文件重命名操作
+```typescript
+// 二进制格式
+interface BinaryFileRenameRequest {
+  header: Uint8Array(4);     // 固定头部
+  type: Uint16;              // 操作类型: 0x0002
+  oldPathLength: Uint32;     // 原路径长度
+  oldPath: Uint8Array;       // UTF-8编码原路径
+  newPathLength: Uint32;     // 新路径长度
+  newPath: Uint8Array;       // UTF-8编码新路径
+  requestId: Uint8Array(16); // 16字节请求ID
+}
+```
+
+## 安全限制
+
+### 数据验证
+- 所有二进制数据必须经过CRC32校验
+- 文件路径长度不得超过4096字节
+- 单次传输数据块不得超过64KB
+
+### 权限控制
+- 每个二进制请求必须包含有效的认证令牌
+- 文件操作需要路径权限验证
+- 禁止访问系统关键目录
+
+## 实现约束
+
+### 前端限制
+- 禁止使用纯文本JSON进行文件传输
+- 所有文件内容传输必须使用二进制流
+- WebSocket消息大小限制为1MB
+
+### 后端限制
+- 文件读取必须使用流式二进制处理
+- 内存缓冲区不得超过8MB
+- 超时时间设置为30秒
+
+## 错误处理
+
+### 二进制错误响应格式
+```typescript
+interface BinaryErrorResponse {
+  header: Uint8Array(4);    // 错误响应头部
+  type: Uint16;             // 错误类型
+  errorCode: Uint32;        // 错误代码
+  messageLength: Uint32;    // 错误消息长度
+  message: Uint8Array;      // UTF-8编码错误消息
+  requestId: Uint8Array(16); // 原请求ID
+}
+```
+
+### 错误代码定义
+- `0x1001`: 权限被拒绝
+- `0x1002`: 文件不存在
+- `0x1003`: 路径无效
+- `0x1004`: 操作超时
+- `0x1005`: 数据校验失败
+
+## 性能要求
+
+### 传输效率
+- 二进制传输比JSON传输至少提升30%效率
+- 文件分片大小建议为32KB
+- 并发连接数限制为100个
+
+### 内存管理
+- 前端缓冲区限制为16MB
+- 使用ArrayBuffer进行二进制数据处理
+- 及时释放不需要的二进制数据
+
+## 调试和监控
+
+### 日志记录
+- 记录所有二进制数据包的头部信息
+- 监控传输速度和错误率
+- 统计二进制协议使用情况
+
+### 开发工具
+- 提供二进制数据包解析工具
+- 实现协议调试界面
+- 监控WebSocket连接状态
+
+## 兼容性要求
+
+### 浏览器支持
+- 必须支持现代浏览器的ArrayBuffer API
+- 使用TypedArray进行高效数据操作
+- 确保WebSocket二进制模式兼容性
+
+### 后向兼容
+- 保持协议版本号管理
+- 支持协议降级机制
+- 提供JSON fallback选项（仅限调试）
+
+## 实施检查清单
+
+- [ ] 所有文件操作使用二进制协议
+- [ ] WebSocket连接启用二进制模式
+- [ ] 实现数据完整性校验
+- [ ] 添加性能监控指标
+- [ ] 完成安全性审计
+- [ ] 编写协议文档和示例
+

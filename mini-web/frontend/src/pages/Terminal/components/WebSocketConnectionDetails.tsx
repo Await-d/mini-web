@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-25 11:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-05-25 20:09:41
+ * @LastEditTime: 2025-06-06 19:52:06
  * @Description: WebSocket连接详情组件
  */
 

@@ -2,7 +2,7 @@
  * @Author: Await
  * @Date: 2025-05-09 18:05:28
  * @LastEditors: Await
- * @LastEditTime: 2025-06-02 18:40:23
+ * @LastEditTime: 2025-06-06 19:20:23
  * @Description: 终端连接包装器组件
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
@@ -153,13 +153,13 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
         },
 
         onMessage: (event: MessageEvent & { protocolMessage?: any; isBinaryProtocol?: boolean; isLegacyJson?: boolean; isRawBinary?: boolean }) => {
-          console.log(`🎯 [${tabKey}] 接收到WebSocket消息:`, {
-            isBinaryProtocol: event.isBinaryProtocol,
-            isLegacyJson: event.isLegacyJson,
-            isRawBinary: event.isRawBinary,
-            dataType: typeof event.data,
-            protocolMessageType: event.protocolMessage?.header?.messageType
-          });
+          // console.log(`🎯 [${tabKey}] 接收到WebSocket消息:`, {
+          //   isBinaryProtocol: event.isBinaryProtocol,
+          //   isLegacyJson: event.isLegacyJson,
+          //   isRawBinary: event.isRawBinary,
+          //   dataType: typeof event.data,
+          //   protocolMessageType: event.protocolMessage?.header?.messageType
+          // });
 
           // 对于已经解析过的消息，添加标记信息
           const messageData = {
@@ -231,24 +231,24 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
             isLegacyJson = messageData.isLegacyJson;
             isRawBinary = messageData.isRawBinary;
 
-            console.log(`📨 [${tabKey}] 收到带标记的消息:`, {
-              type: typeof data,
-              isBinaryProtocol,
-              isLegacyJson,
-              isRawBinary,
-              dataPreview: typeof data === 'string' ? `"${data.substring(0, 50)}${data.length > 50 ? '...' : ''}"` : data
-            });
+            // console.log(`📨 [${tabKey}] 收到带标记的消息:`, {
+            //   type: typeof data,
+            //   isBinaryProtocol,
+            //   isLegacyJson,
+            //   isRawBinary,
+            //   dataPreview: typeof data === 'string' ? `"${data.substring(0, 50)}${data.length > 50 ? '...' : ''}"` : data
+            // });
           } else {
             // 旧格式：直接数据
             data = messageData;
-            console.log(`📨 [${tabKey}] 收到原始数据:`, {
-              type: typeof data,
-              isBlob: data instanceof Blob,
-              isArrayBuffer: data instanceof ArrayBuffer,
-              isString: typeof data === 'string',
-              isObject: typeof data === 'object',
-              data: data
-            });
+            // console.log(`📨 [${tabKey}] 收到原始数据:`, {
+            //   type: typeof data,
+            //   isBlob: data instanceof Blob,
+            //   isArrayBuffer: data instanceof ArrayBuffer,
+            //   isString: typeof data === 'string',
+            //   isObject: typeof data === 'object',
+            //   data: data
+            // });
           }
 
           // 如果数据是Blob类型，需要先转换为文本
@@ -317,21 +317,21 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
               }));
             }
           } else if (typeof data === 'object' && data !== null) {
-            console.log(`🔧 [${tabKey}] 处理对象数据:`, data);
+            // console.log(`🔧 [${tabKey}] 处理对象数据:`, data);
 
             // 已解析的对象数据
             if (data.type === 'special_command') {
-              console.log(`🔥 [${tabKey}] 检测到对象形式的特殊命令: ${data.command || data.message}`);
+              // console.log(`🔥 [${tabKey}] 检测到对象形式的特殊命令: ${data.command || data.message}`);
               // 触发特殊命令事件
               window.dispatchEvent(new CustomEvent('terminal-special-command', {
                 detail: { tabKey, ...data }
               }));
-              console.log(`🚀 [${tabKey}] 特殊命令事件已触发`);
+              // console.log(`🚀 [${tabKey}] 特殊命令事件已触发`);
               return; // 特殊命令消息不显示在终端
             }
 
             // 其他对象数据
-            console.log(`📤 [${tabKey}] 发送对象消息事件:`, data);
+            // console.log(`📤 [${tabKey}] 发送对象消息事件:`, data);
             window.dispatchEvent(new CustomEvent('terminal-message', {
               detail: {
                 tabKey,
@@ -341,10 +341,10 @@ const TerminalConnectionWrapper: React.FC<TerminalConnectionWrapperProps> = ({
             }));
           } else {
             // 其他类型数据
-            console.log(`❓ [${tabKey}] 收到未知类型数据:`, {
-              type: typeof data,
-              data: data
-            });
+            // console.log(`❓ [${tabKey}] 收到未知类型数据:`, {
+            //   type: typeof data,
+            //   data: data
+            // });
             window.dispatchEvent(new CustomEvent('terminal-message', {
               detail: {
                 tabKey,

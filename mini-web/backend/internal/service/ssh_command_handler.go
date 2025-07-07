@@ -29,13 +29,15 @@ type CommandResponse struct {
 
 // FileInfo 文件信息
 type FileInfo struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"` // "file" or "directory"
-	Size        int64  `json:"size"`
-	Permissions string `json:"permissions"`
-	Modified    string `json:"modified"`
-	Owner       string `json:"owner"`
-	Group       string `json:"group"`
+	Name               string `json:"name"`
+	Type               string `json:"type"` // "file" or "directory"
+	Size               int64  `json:"size"`
+	Permissions        string `json:"permissions"`        // 符号权限 (如 drwxr-xr-x)
+	NumericPermissions string `json:"numericPermissions"` // 数字权限 (如 755)
+	Modified           string `json:"modified"`
+	Owner              string `json:"owner"`
+	Group              string `json:"group"`
+	Path               string `json:"path"` // 完整路径
 }
 
 // FileListResponse 文件列表响应
@@ -89,8 +91,8 @@ func (h *SSHCommandHandler) ExecuteFileListCommand(path string) (*FileListRespon
 		session.Close()
 	}()
 
-	// 直接执行简单的ls命令
-	cmd := fmt.Sprintf("ls -la '%s'", path)
+	// 使用ls命令获取完整时间格式，优先使用GNU ls的time-style参数
+	cmd := fmt.Sprintf("ls -la --time-style='+%%Y-%%m-%%d %%H:%%M:%%S' '%s' 2>/dev/null || ls -la '%s'", path, path)
 	log.Printf("执行文件列表命令: %s", cmd)
 
 	// 设置超时
@@ -178,9 +180,11 @@ func (h *SSHCommandHandler) parseLsOutput(path string, lines []string) (*FileLis
 		}
 
 		// 解析文件信息行
-		// 格式: drwxr-xr-x 2 user group 4096 Jan 1 12:00 filename
+		// 支持两种格式:
+		// 1. 新格式: drwxr-xr-x 2 user group 4096 2025-05-23 10:29:03 filename
+		// 2. 旧格式: drwxr-xr-x 2 user group 4096 Jan 1 12:00 filename
 		parts := strings.Fields(line)
-		if len(parts) < 9 {
+		if len(parts) < 8 {
 			continue
 		}
 
@@ -188,12 +192,36 @@ func (h *SSHCommandHandler) parseLsOutput(path string, lines []string) (*FileLis
 		owner := parts[2]
 		group := parts[3]
 		size := parts[4]
-		month := parts[5]
-		day := parts[6]
-		timeOrYear := parts[7]
 
-		// 文件名可能包含空格，从第8个部分开始
-		fileName := strings.Join(parts[8:], " ")
+		var fullTime string
+		var fileName string
+
+		// 检查是否是新的时间格式 (YYYY-MM-DD)
+		if len(parts) >= 8 && strings.Contains(parts[5], "-") && len(parts[5]) == 10 {
+			// 新格式: 2025-05-23 10:29:03
+			date := parts[5] // 2025-05-23
+			time := parts[6] // 10:29:03
+			fullTime = fmt.Sprintf("%s %s", date, time)
+			// 文件名从第7个部分开始
+			fileName = strings.Join(parts[7:], " ")
+		} else {
+			// 旧格式: Jan 1 12:00 或 Jan 1 2023
+			if len(parts) < 9 {
+				continue
+			}
+			month := parts[5]
+			day := parts[6]
+			timeOrYear := parts[7]
+
+			// 尝试转换为标准格式
+			if parsedTime := h.convertToStandardTime(month, day, timeOrYear); parsedTime != "" {
+				fullTime = parsedTime
+			} else {
+				fullTime = fmt.Sprintf("%s %s %s", month, day, timeOrYear)
+			}
+			// 文件名从第8个部分开始
+			fileName = strings.Join(parts[8:], " ")
+		}
 
 		// 处理符号链接
 		if strings.Contains(fileName, " -> ") {
@@ -218,19 +246,82 @@ func (h *SSHCommandHandler) parseLsOutput(path string, lines []string) (*FileLis
 		fmt.Sscanf(size, "%d", &fileSize)
 
 		fileInfo := FileInfo{
-			Name:        fileName,
-			Type:        fileType,
-			Size:        fileSize,
-			Permissions: permissions,
-			Modified:    fmt.Sprintf("%s %s %s", month, day, timeOrYear),
-			Owner:       owner,
-			Group:       group,
+			Name:               fileName,
+			Type:               fileType,
+			Size:               fileSize,
+			Permissions:        permissions,
+			NumericPermissions: convertPermissionsToNumeric(permissions),
+			Modified:           fullTime,
+			Owner:              owner,
+			Group:              group,
+			Path:               path,
 		}
 
 		response.Files = append(response.Files, fileInfo)
 	}
 
 	return response, nil
+}
+
+// convertPermissionsToNumeric 将符号权限转换为数字权限
+func convertPermissionsToNumeric(symbolic string) string {
+	if len(symbolic) < 10 {
+		return "000"
+	}
+
+	// 跳过第一个字符（文件类型标识符）
+	perms := symbolic[1:]
+
+	result := ""
+	for i := 0; i < 9; i += 3 {
+		if i+2 >= len(perms) {
+			break
+		}
+
+		value := 0
+		if perms[i] == 'r' {
+			value += 4
+		}
+		if perms[i+1] == 'w' {
+			value += 2
+		}
+		if perms[i+2] == 'x' || perms[i+2] == 's' || perms[i+2] == 't' {
+			value += 1
+		}
+
+		result += fmt.Sprintf("%d", value)
+	}
+
+	return result
+}
+
+// convertToStandardTime 将旧的时间格式转换为标准格式
+func (h *SSHCommandHandler) convertToStandardTime(month, day, timeOrYear string) string {
+	monthMap := map[string]string{
+		"Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04",
+		"May": "05", "Jun": "06", "Jul": "07", "Aug": "08",
+		"Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12",
+	}
+
+	monthNum, exists := monthMap[month]
+	if !exists {
+		return ""
+	}
+
+	// 补零天数
+	if len(day) == 1 {
+		day = "0" + day
+	}
+
+	// 检查是否包含冒号（时间）还是年份
+	if strings.Contains(timeOrYear, ":") {
+		// 包含时间，使用当前年份
+		currentYear := time.Now().Year()
+		return fmt.Sprintf("%d-%s-%s %s:00", currentYear, monthNum, day, timeOrYear)
+	} else {
+		// 只有年份，使用00:00:00作为时间
+		return fmt.Sprintf("%s-%s-%s 00:00:00", timeOrYear, monthNum, day)
+	}
 }
 
 // ExecuteFileViewCommand 执行文件查看命令
@@ -907,6 +998,379 @@ func (h *SSHCommandHandler) ExecuteFileUploadCommand(path string, content []byte
 		log.Printf("文件上传超时")
 		session.Close()
 		return fmt.Errorf("文件上传超时")
+	}
+}
+
+// ExecuteFileDeleteCommand 执行文件/目录删除命令
+func (h *SSHCommandHandler) ExecuteFileDeleteCommand(path string, isDirectory bool) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	log.Printf("开始执行删除命令，路径: %s, 是否为目录: %v", path, isDirectory)
+
+	// 创建一次性会话
+	session, err := h.client.NewSession()
+	if err != nil {
+		log.Printf("创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+	defer func() {
+		log.Printf("关闭SSH会话")
+		session.Close()
+	}()
+
+	// 1. 首先检查文件/目录是否存在
+	var checkCmd string
+	if isDirectory {
+		checkCmd = fmt.Sprintf("test -d '%s' && echo 'exists' || echo 'not_exists'", path)
+	} else {
+		checkCmd = fmt.Sprintf("test -f '%s' && echo 'exists' || echo 'not_exists'", path)
+	}
+
+	checkOutput, err := session.CombinedOutput(checkCmd)
+	if err != nil {
+		log.Printf("检查文件/目录是否存在失败: %v", err)
+		return fmt.Errorf("检查文件/目录失败: %v", err)
+	}
+
+	if strings.TrimSpace(string(checkOutput)) != "exists" {
+		log.Printf("文件/目录不存在: %s", path)
+		return fmt.Errorf("文件/目录不存在")
+	}
+
+	// 重新创建会话
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+
+	// 2. 检查父目录的写权限
+	parentDir := strings.TrimSuffix(path, "/"+path[strings.LastIndex(path, "/")+1:])
+	if parentDir == "" || parentDir == path {
+		parentDir = "."
+	}
+	permCmd := fmt.Sprintf("test -w '%s' && echo 'writable' || echo 'not_writable'", parentDir)
+	permOutput, err := session.CombinedOutput(permCmd)
+	if err != nil {
+		log.Printf("检查父目录权限失败: %v", err)
+		return fmt.Errorf("检查父目录权限失败: %v", err)
+	}
+
+	if strings.TrimSpace(string(permOutput)) != "writable" {
+		log.Printf("父目录没有写权限: %s", parentDir)
+		return fmt.Errorf("父目录没有写权限")
+	}
+
+	// 重新创建会话
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+
+	// 3. 构建删除命令
+	var cmd string
+	if isDirectory {
+		// 删除目录（递归删除）
+		// 首先尝试使用Unix/Linux标准命令
+		cmd = fmt.Sprintf("rm -rf '%s' 2>/dev/null || rmdir /S /Q \"%s\" 2>/dev/null || Remove-Item -Path '%s' -Recurse -Force 2>/dev/null", path, path, path)
+	} else {
+		// 删除文件
+		// 首先尝试使用Unix/Linux标准命令，然后尝试Windows命令
+		cmd = fmt.Sprintf("rm -f '%s' 2>/dev/null || del /F /Q \"%s\" 2>/dev/null || Remove-Item -Path '%s' -Force 2>/dev/null", path, path, path)
+	}
+
+	log.Printf("执行删除命令: %s", cmd)
+
+	// 设置超时
+	done := make(chan error, 1)
+
+	go func() {
+		defer close(done)
+		output, err := session.CombinedOutput(cmd)
+		if err != nil {
+			log.Printf("删除命令执行失败: %v, 输出: %s", err, string(output))
+			// 检查具体错误类型
+			if strings.Contains(string(output), "Permission denied") || strings.Contains(string(output), "Access is denied") {
+				done <- fmt.Errorf("权限被拒绝")
+			} else if strings.Contains(string(output), "No such file or directory") || strings.Contains(string(output), "cannot find") {
+				done <- fmt.Errorf("文件/目录不存在")
+			} else if strings.Contains(string(output), "Directory not empty") {
+				done <- fmt.Errorf("目录不为空")
+			} else if strings.Contains(string(output), "Operation not permitted") {
+				done <- fmt.Errorf("操作不被允许")
+			} else {
+				done <- fmt.Errorf("删除失败: %s", string(output))
+			}
+			return
+		}
+		log.Printf("删除命令执行完成")
+		done <- nil
+	}()
+
+	// 等待命令完成或超时
+	select {
+	case err := <-done:
+		if err != nil {
+			log.Printf("删除失败: %v", err)
+			return err
+		}
+		log.Printf("删除成功: %s", path)
+		return nil
+	case <-time.After(30 * time.Second):
+		log.Printf("删除操作超时")
+		session.Close()
+		return fmt.Errorf("删除操作超时")
+	}
+}
+
+// ExecuteFileRenameCommand 执行文件/目录重命名命令
+func (h *SSHCommandHandler) ExecuteFileRenameCommand(oldPath string, newPath string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	log.Printf("开始执行重命名命令，原路径: %s, 新路径: %s", oldPath, newPath)
+
+	// 创建一次性会话
+	session, err := h.client.NewSession()
+	if err != nil {
+		log.Printf("创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+	defer func() {
+		log.Printf("关闭SSH会话")
+		session.Close()
+	}()
+
+	// 1. 检查源文件/目录是否存在
+	checkCmd := fmt.Sprintf("test -e '%s' && echo 'exists' || echo 'not_exists'", oldPath)
+	checkOutput, err := session.CombinedOutput(checkCmd)
+	if err != nil {
+		log.Printf("检查源文件/目录是否存在失败: %v", err)
+		return fmt.Errorf("检查源文件/目录失败: %v", err)
+	}
+
+	if strings.TrimSpace(string(checkOutput)) != "exists" {
+		log.Printf("源文件/目录不存在: %s", oldPath)
+		return fmt.Errorf("源文件/目录不存在")
+	}
+
+	// 重新创建会话
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+
+	// 2. 检查目标文件/目录是否已存在
+	targetCheckCmd := fmt.Sprintf("test -e '%s' && echo 'exists' || echo 'not_exists'", newPath)
+	targetCheckOutput, err := session.CombinedOutput(targetCheckCmd)
+	if err != nil {
+		log.Printf("检查目标文件/目录是否存在失败: %v", err)
+		return fmt.Errorf("检查目标文件/目录失败: %v", err)
+	}
+
+	if strings.TrimSpace(string(targetCheckOutput)) == "exists" {
+		log.Printf("目标文件/目录已存在: %s", newPath)
+		return fmt.Errorf("目标文件/目录已存在")
+	}
+
+	// 重新创建会话
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+
+	// 3. 检查源路径的父目录写权限
+	oldParentDir := strings.TrimSuffix(oldPath, "/"+oldPath[strings.LastIndex(oldPath, "/")+1:])
+	if oldParentDir == "" || oldParentDir == oldPath {
+		oldParentDir = "."
+	}
+
+	// 4. 检查目标路径的父目录写权限
+	newParentDir := strings.TrimSuffix(newPath, "/"+newPath[strings.LastIndex(newPath, "/")+1:])
+	if newParentDir == "" || newParentDir == newPath {
+		newParentDir = "."
+	}
+
+	// 检查权限的命令
+	permCmd := fmt.Sprintf("test -w '%s' && test -w '%s' && echo 'writable' || echo 'not_writable'", oldParentDir, newParentDir)
+	permOutput, err := session.CombinedOutput(permCmd)
+	if err != nil {
+		log.Printf("检查目录权限失败: %v", err)
+		return fmt.Errorf("检查目录权限失败: %v", err)
+	}
+
+	if strings.TrimSpace(string(permOutput)) != "writable" {
+		log.Printf("源目录或目标目录没有写权限")
+		return fmt.Errorf("源目录或目标目录没有写权限")
+	}
+
+	// 重新创建会话
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+
+	// 5. 执行重命名命令
+	// 使用多种命令兼容不同系统：Unix/Linux (mv)、Windows CMD (ren/move)、PowerShell (Rename-Item/Move-Item)
+	cmd := fmt.Sprintf("mv '%s' '%s' 2>/dev/null || move \"%s\" \"%s\" 2>/dev/null || ren \"%s\" \"%s\" 2>/dev/null || Rename-Item -Path '%s' -NewName '%s' 2>/dev/null || Move-Item -Path '%s' -Destination '%s' 2>/dev/null", oldPath, newPath, oldPath, newPath, oldPath, newPath, oldPath, newPath, oldPath, newPath)
+	log.Printf("执行重命名命令: %s", cmd)
+
+	// 设置超时
+	done := make(chan error, 1)
+
+	go func() {
+		defer close(done)
+		output, err := session.CombinedOutput(cmd)
+		if err != nil {
+			log.Printf("重命名命令执行失败: %v, 输出: %s", err, string(output))
+			// 检查具体错误类型（兼容Unix/Linux和Windows错误消息）
+			if strings.Contains(string(output), "Permission denied") || strings.Contains(string(output), "Access is denied") {
+				done <- fmt.Errorf("权限被拒绝")
+			} else if strings.Contains(string(output), "No such file or directory") || strings.Contains(string(output), "cannot find") || strings.Contains(string(output), "The system cannot find") {
+				done <- fmt.Errorf("文件/目录不存在")
+			} else if strings.Contains(string(output), "File exists") || strings.Contains(string(output), "already exists") || strings.Contains(string(output), "A duplicate file name exists") {
+				done <- fmt.Errorf("目标文件/目录已存在")
+			} else if strings.Contains(string(output), "Cross-device link") {
+				// 跨设备移动，需要使用 cp + rm
+				done <- fmt.Errorf("跨设备重命名，请使用复制然后删除")
+			} else if strings.Contains(string(output), "Operation not permitted") || strings.Contains(string(output), "Access is denied") {
+				done <- fmt.Errorf("操作不被允许")
+			} else {
+				done <- fmt.Errorf("重命名失败: %s", string(output))
+			}
+			return
+		}
+		log.Printf("重命名命令执行完成")
+		done <- nil
+	}()
+
+	// 等待命令完成或超时
+	select {
+	case err := <-done:
+		if err != nil {
+			log.Printf("重命名失败: %v", err)
+			return err
+		}
+		log.Printf("重命名成功: %s -> %s", oldPath, newPath)
+		return nil
+	case <-time.After(30 * time.Second):
+		log.Printf("重命名操作超时")
+		session.Close()
+		return fmt.Errorf("重命名操作超时")
+	}
+}
+
+// ExecuteFilePermissionsCommand 执行文件权限修改命令
+func (h *SSHCommandHandler) ExecuteFilePermissionsCommand(path string, permissions string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	log.Printf("开始执行权限修改命令，路径: %s, 权限: %s", path, permissions)
+
+	// 验证权限格式
+	if len(permissions) != 3 {
+		return fmt.Errorf("权限格式错误，应为3位数字（如755）")
+	}
+
+	// 验证每个数字都在0-7范围内
+	for _, char := range permissions {
+		if char < '0' || char > '7' {
+			return fmt.Errorf("权限数字必须在0-7之间")
+		}
+	}
+
+	// 创建一次性会话
+	session, err := h.client.NewSession()
+	if err != nil {
+		log.Printf("创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+	defer func() {
+		log.Printf("关闭SSH会话")
+		session.Close()
+	}()
+
+	// 1. 首先检查文件是否存在
+	checkCmd := fmt.Sprintf("test -e '%s' && echo 'exists' || echo 'not_exists'", path)
+	checkOutput, err := session.CombinedOutput(checkCmd)
+	if err != nil {
+		log.Printf("检查文件是否存在失败: %v", err)
+		return fmt.Errorf("无法检查文件状态")
+	}
+
+	if strings.TrimSpace(string(checkOutput)) != "exists" {
+		log.Printf("文件不存在: %s", path)
+		return fmt.Errorf("文件或目录不存在")
+	}
+
+	// 重新创建会话
+	session.Close()
+	session, err = h.client.NewSession()
+	if err != nil {
+		log.Printf("重新创建SSH会话失败: %v", err)
+		return fmt.Errorf("无法创建SSH会话: %v", err)
+	}
+	defer session.Close()
+
+	// 2. 执行权限修改命令
+	// 使用多种命令兼容不同系统：Unix/Linux (chmod)、Windows (可能不支持)
+	cmd := fmt.Sprintf("chmod %s '%s'", permissions, path)
+	log.Printf("执行权限修改命令: %s", cmd)
+
+	done := make(chan error, 1)
+	var output []byte
+
+	go func() {
+		defer close(done)
+		var cmdErr error
+		output, cmdErr = session.CombinedOutput(cmd)
+		log.Printf("权限修改命令执行完成，输出: %s, 错误: %v", string(output), cmdErr)
+
+		if cmdErr != nil {
+			outputStr := strings.TrimSpace(string(output))
+			log.Printf("权限修改命令执行失败: %v, 输出: %s", cmdErr, outputStr)
+
+			// 检查具体错误类型
+			if strings.Contains(outputStr, "Permission denied") || strings.Contains(outputStr, "permission denied") {
+				done <- fmt.Errorf("权限被拒绝：您没有修改此文件权限的权限")
+			} else if strings.Contains(outputStr, "No such file or directory") || strings.Contains(outputStr, "cannot stat") {
+				done <- fmt.Errorf("文件或目录不存在")
+			} else if strings.Contains(outputStr, "Operation not permitted") || strings.Contains(outputStr, "operation not permitted") {
+				done <- fmt.Errorf("操作不被允许：可能是系统文件或只读文件系统")
+			} else if strings.Contains(outputStr, "Read-only file system") {
+				done <- fmt.Errorf("只读文件系统：无法修改权限")
+			} else if strings.Contains(outputStr, "chmod: command not found") || strings.Contains(outputStr, "is not recognized") {
+				done <- fmt.Errorf("系统不支持chmod命令（可能是Windows系统）")
+			} else if outputStr != "" {
+				done <- fmt.Errorf("权限修改失败: %s", outputStr)
+			} else {
+				// 如果没有输出但有错误，提供更通用的错误信息
+				done <- fmt.Errorf("权限修改失败，可能是权限不足或文件系统限制")
+			}
+		} else {
+			log.Printf("权限修改成功")
+			done <- nil
+		}
+	}()
+
+	// 等待命令完成或超时
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(15 * time.Second):
+		log.Printf("权限修改命令执行超时")
+		session.Close()
+		return fmt.Errorf("权限修改操作超时")
 	}
 }
 
