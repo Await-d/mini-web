@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { userAPI } from '../services/api';
 import { message } from 'antd';
 
-// 用户类型定义
+// 用户类型定义（与API保持一致）
 export interface User {
   id: number;
   username: string;
@@ -11,6 +11,8 @@ export interface User {
   role: string;
   avatar?: string;
   status: string;
+  last_login_at?: string;
+  login_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -28,7 +30,7 @@ export function useUsers() {
     try {
       const response = await userAPI.getUsers();
       if (response.data && response.data.code === 200) {
-        setUsers(response.data.data);
+        setUsers(response.data.data.list || []);
       } else {
         const errorMsg = response.data?.message || '获取用户失败';
         setError(errorMsg);
@@ -38,24 +40,28 @@ export function useUsers() {
       const errorMessage = err instanceof Error ? err.message : '获取用户失败';
       setError(errorMessage);
       message.error(errorMessage);
+      console.error('获取用户失败:', err);
     } finally {
       setLoading(false);
     }
   }, []);
 
   // 创建用户
-  const createUser = useCallback(async (userData: Omit<User, 'id' | 'created_at' | 'updated_at'>) => {
+  const createUser = useCallback(async (userData: {
+    username: string;
+    email: string;
+    password: string;
+    nickname: string;
+    role?: string;
+    status?: string;
+  }) => {
     setLoading(true);
     setError(null);
 
     try {
-      // 注意：需要在api.ts中添加createUser方法
-      // const response = await userAPI.createUser(userData);
-      message.error('创建用户功能尚未实现');
-      return false;
-      /* 
-      if (response.data && response.data.code === 200) {
-        setUsers(prevUsers => [...prevUsers, response.data.data as User]);
+      const response = await userAPI.createUser(userData);
+      if (response.data && response.data.code === 201) {
+        setUsers(prevUsers => [...prevUsers, response.data.data]);
         message.success('用户创建成功');
         return true;
       } else {
@@ -64,11 +70,11 @@ export function useUsers() {
         message.error(errorMsg);
         return false;
       }
-      */
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '创建用户失败';
       setError(errorMessage);
       message.error(errorMessage);
+      console.error('创建用户失败:', err);
       return false;
     } finally {
       setLoading(false);
@@ -81,14 +87,10 @@ export function useUsers() {
     setError(null);
 
     try {
-      // 注意：需要在api.ts中添加updateUser方法
-      // const response = await userAPI.updateUser(id, userData);
-      message.error('更新用户功能尚未实现');
-      return false;
-      /*
+      const response = await userAPI.updateUser(id, userData);
       if (response.data && response.data.code === 200) {
         setUsers(prevUsers => 
-          prevUsers.map(user => user.id === id ? { ...user, ...response.data.data } as User : user)
+          prevUsers.map(user => user.id === id ? { ...user, ...response.data.data } : user)
         );
         message.success('用户更新成功');
         return true;
@@ -98,11 +100,11 @@ export function useUsers() {
         message.error(errorMsg);
         return false;
       }
-      */
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '更新用户失败';
       setError(errorMessage);
       message.error(errorMessage);
+      console.error('更新用户失败:', err);
       return false;
     } finally {
       setLoading(false);
@@ -115,11 +117,7 @@ export function useUsers() {
     setError(null);
 
     try {
-      // 注意：需要在api.ts中添加deleteUser方法
-      // const response = await userAPI.deleteUser(id);
-      message.error('删除用户功能尚未实现');
-      return false;
-      /*
+      const response = await userAPI.deleteUser(id);
       if (response.data && response.data.code === 200) {
         setUsers(prevUsers => prevUsers.filter(user => user.id !== id));
         message.success('用户删除成功');
@@ -130,16 +128,45 @@ export function useUsers() {
         message.error(errorMsg);
         return false;
       }
-      */
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '删除用户失败';
       setError(errorMessage);
       message.error(errorMessage);
+      console.error('删除用户失败:', err);
       return false;
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // 批量操作用户
+  const batchUpdateUsers = useCallback(async (operation: string, userIds: number[]) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await userAPI.batchUpdateUsers(operation, userIds);
+      if (response.data && response.data.code === 200) {
+        // 重新获取用户列表
+        await fetchUsers();
+        message.success('批量操作成功');
+        return true;
+      } else {
+        const errorMsg = response.data?.message || '批量操作失败';
+        setError(errorMsg);
+        message.error(errorMsg);
+        return false;
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '批量操作失败';
+      setError(errorMessage);
+      message.error(errorMessage);
+      console.error('批量操作失败:', err);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchUsers]);
 
   // 初始加载用户
   useEffect(() => {
@@ -153,6 +180,7 @@ export function useUsers() {
     fetchUsers,
     createUser,
     updateUser,
-    deleteUser
+    deleteUser,
+    batchUpdateUsers
   };
 }

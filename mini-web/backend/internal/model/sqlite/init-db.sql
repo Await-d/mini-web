@@ -67,3 +67,59 @@ VALUES
      '测试服务器', 'Linux VNC服务器', 1),
     ('路由器Telnet', 'telnet', '192.168.1.1', 23, 'admin', '', 
      '网络设备', '办公室路由器', 1);
+
+-- 系统配置表
+CREATE TABLE IF NOT EXISTS system_configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT UNIQUE NOT NULL,
+    value TEXT NOT NULL,
+    description TEXT,
+    category TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'string',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 系统日志表
+CREATE TABLE IF NOT EXISTS system_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    level TEXT NOT NULL,
+    module TEXT NOT NULL,
+    message TEXT NOT NULL,
+    details TEXT,
+    user_id INTEGER,
+    ip_address TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- 默认系统配置
+INSERT OR IGNORE INTO system_configs (key, value, description, category, type)
+VALUES 
+    ('site_name', 'Mini Web 管理系统', '系统名称', 'general', 'string'),
+    ('site_description', '一个基于React和Go的Web管理系统', '系统描述', 'general', 'string'),
+    ('page_size', '10', '默认分页大小', 'general', 'number'),
+    ('theme', 'light', '主题模式', 'appearance', 'string'),
+    ('primary_color', '#1677ff', '主题色', 'appearance', 'string'),
+    ('compact_mode', 'false', '紧凑模式', 'appearance', 'boolean'),
+    ('animation_enabled', 'true', '启用动画', 'appearance', 'boolean'),
+    ('password_policy', 'medium', '密码策略', 'security', 'string'),
+    ('session_timeout', '30', '会话超时时间（分钟）', 'security', 'number'),
+    ('login_attempts', '5', '最大登录失败次数', 'security', 'number'),
+    ('two_factor_auth', 'false', '启用两步验证', 'security', 'boolean'),
+    ('log_retention_days', '30', '日志保留天数', 'system', 'number'),
+    ('max_connections', '100', '最大连接数', 'system', 'number'),
+    ('backup_enabled', 'true', '启用自动备份', 'system', 'boolean');
+
+-- 用户活动日志表
+CREATE TABLE IF NOT EXISTS user_activities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    details TEXT,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);

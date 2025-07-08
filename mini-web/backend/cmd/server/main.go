@@ -36,15 +36,21 @@ func main() {
 	userRepo := sqlite.NewUserRepository(sqlite.DB)
 	connRepo := sqlite.NewConnectionRepository(sqlite.DB)
 	sessionRepo := sqlite.NewSessionRepository(sqlite.DB)
+	configRepo := sqlite.NewSystemConfigRepository(sqlite.DB)
+	logRepo := sqlite.NewSystemLogRepository(sqlite.DB)
+	activityRepo := sqlite.NewUserActivityRepository(sqlite.DB)
 
 	// 创建服务
 	authService := service.NewAuthService(userRepo)
+	userService := service.NewUserService(userRepo)
 	connService := service.NewConnectionService(connRepo, sessionRepo)
+	systemService := service.NewSystemService(configRepo, logRepo)
 
 	// 创建处理器
 	authHandler := api.NewAuthHandler(authService)
-	userHandler := api.NewUserHandler()
+	userHandler := api.NewUserHandler(userService, activityRepo)
 	connHandler := api.NewConnectionHandler(connService)
+	systemHandler := api.NewSystemHandler(systemService)
 
 	// 创建中间件
 	authMiddleware := middleware.NewAuthMiddleware(authService)
@@ -148,6 +154,21 @@ func main() {
 	adminRouter.Use(authMiddleware.RoleAuth("admin"))
 	adminRouter.HandleFunc("/users", userHandler.GetUsers).Methods("GET", "OPTIONS")
 	adminRouter.HandleFunc("/users/{id}", userHandler.GetUserByID).Methods("GET", "OPTIONS")
+
+	// 系统配置路由
+	adminRouter.HandleFunc("/system/configs", systemHandler.GetAllConfigs).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/configs", systemHandler.CreateConfig).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/configs/batch", systemHandler.BatchUpdateConfigs).Methods("PUT", "OPTIONS")
+	adminRouter.HandleFunc("/system/configs/category/{category}", systemHandler.GetConfigsByCategory).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/configs/{key}", systemHandler.GetConfig).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/configs/{key}", systemHandler.UpdateConfig).Methods("PUT", "OPTIONS")
+	adminRouter.HandleFunc("/system/configs/{key}", systemHandler.DeleteConfig).Methods("DELETE", "OPTIONS")
+
+	// 系统日志路由
+	adminRouter.HandleFunc("/system/logs", systemHandler.GetLogs).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/logs/stats", systemHandler.GetLogStats).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/logs/clear", systemHandler.ClearLogs).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/logs/{id}", systemHandler.DeleteLog).Methods("DELETE", "OPTIONS")
 
 	// 设置服务器
 	server := &http.Server{

@@ -12,6 +12,8 @@ import { RequireAuth } from './contexts/AuthContext';
 // 懒加载页面组件
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
+const UserDetail = lazy(() => import('./pages/UserManagement/UserDetail'));
+const UserProfile = lazy(() => import('./pages/UserProfile'));
 const Login = lazy(() => import('./pages/Login'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Connections = lazy(() => import('./pages/Connections'));
@@ -89,6 +91,22 @@ export const router = createBrowserRouter(
             element: (
               <Suspense fallback={<PageLoader />}>
                 <UserManagement />
+              </Suspense>
+            ),
+          },
+          {
+            path: 'users/:id',
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <UserDetail />
+              </Suspense>
+            ),
+          },
+          {
+            path: 'profile',
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <UserProfile />
               </Suspense>
             ),
           },

@@ -305,3 +305,194 @@ func (r *UserRepository) GetAll() ([]*model.User, error) {
 
 	return users, nil
 }
+
+// Delete 删除用户
+func (r *UserRepository) Delete(id uint) error {
+	query := `DELETE FROM users WHERE id = ?`
+	
+	result, err := r.db.Exec(query, id)
+	if err != nil {
+		return err
+	}
+	
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	
+	if rowsAffected == 0 {
+		return errors.New("用户不存在")
+	}
+	
+	return nil
+}
+
+// BatchUpdateStatus 批量更新用户状态
+func (r *UserRepository) BatchUpdateStatus(userIDs []uint, status string) error {
+	if len(userIDs) == 0 {
+		return errors.New("用户ID列表不能为空")
+	}
+	
+	// 构建SQL查询，使用参数化查询避免SQL注入
+	query := `UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (`
+	args := []interface{}{status}
+	
+	for i, id := range userIDs {
+		if i > 0 {
+			query += ","
+		}
+		query += "?"
+		args = append(args, id)
+	}
+	query += ")"
+	
+	_, err := r.db.Exec(query, args...)
+	return err
+}
+
+// UpdateLoginInfo 更新用户登录信息
+func (r *UserRepository) UpdateLoginInfo(userID uint) error {
+	query := `
+	UPDATE users 
+	SET last_login_at = CURRENT_TIMESTAMP, 
+	    login_count = login_count + 1,
+	    updated_at = CURRENT_TIMESTAMP
+	WHERE id = ?
+	`
+	
+	_, err := r.db.Exec(query, userID)
+	return err
+}
+
+// UserActivityRepository 用户活动日志数据仓库
+type UserActivityRepository struct {
+	db *sql.DB
+}
+
+// NewUserActivityRepository 创建用户活动日志仓库实例
+func NewUserActivityRepository(db *sql.DB) *UserActivityRepository {
+	return &UserActivityRepository{db: db}
+}
+
+// Create 创建活动日志记录
+func (r *UserActivityRepository) Create(log *model.UserActivityLog) error {
+	query := `
+	INSERT INTO user_activity_logs (user_id, action, resource, details, ip_address, user_agent)
+	VALUES (?, ?, ?, ?, ?, ?)
+	`
+
+	result, err := r.db.Exec(
+		query,
+		log.UserID,
+		log.Action,
+		log.Resource,
+		log.Details,
+		log.IPAddress,
+		log.UserAgent,
+	)
+	if err != nil {
+		return err
+	}
+
+	// 获取自增ID
+	id, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	log.ID = uint(id)
+	log.CreatedAt = time.Now()
+	return nil
+}
+
+// GetByUserID 根据用户ID获取活动日志
+func (r *UserActivityRepository) GetByUserID(userID uint, limit int, offset int) ([]*model.UserActivityLog, error) {
+	query := `
+	SELECT id, user_id, action, resource, details, ip_address, user_agent, created_at
+	FROM user_activity_logs
+	WHERE user_id = ?
+	ORDER BY created_at DESC
+	LIMIT ? OFFSET ?
+	`
+
+	rows, err := r.db.Query(query, userID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []*model.UserActivityLog
+	for rows.Next() {
+		var log model.UserActivityLog
+		var createdAt string
+
+		err := rows.Scan(
+			&log.ID,
+			&log.UserID,
+			&log.Action,
+			&log.Resource,
+			&log.Details,
+			&log.IPAddress,
+			&log.UserAgent,
+			&createdAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// 解析时间
+		log.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		logs = append(logs, &log)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return logs, nil
+}
+
+// GetAll 获取所有活动日志
+func (r *UserActivityRepository) GetAll(limit int, offset int) ([]*model.UserActivityLog, error) {
+	query := `
+	SELECT id, user_id, action, resource, details, ip_address, user_agent, created_at
+	FROM user_activity_logs
+	ORDER BY created_at DESC
+	LIMIT ? OFFSET ?
+	`
+
+	rows, err := r.db.Query(query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []*model.UserActivityLog
+	for rows.Next() {
+		var log model.UserActivityLog
+		var createdAt string
+
+		err := rows.Scan(
+			&log.ID,
+			&log.UserID,
+			&log.Action,
+			&log.Resource,
+			&log.Details,
+			&log.IPAddress,
+			&log.UserAgent,
+			&createdAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// 解析时间
+		log.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		logs = append(logs, &log)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return logs, nil
+}

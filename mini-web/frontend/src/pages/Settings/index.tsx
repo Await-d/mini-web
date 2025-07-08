@@ -1,7 +1,9 @@
-import { useState } from 'react';
-import { Card, Tabs, Form, Input, Button, Switch, Select, Space, message, Typography, Divider, Alert } from 'antd';
-import { SaveOutlined, SettingOutlined, BulbOutlined, GlobalOutlined, LockOutlined } from '@ant-design/icons';
+import { useState, useEffect } from 'react';
+import { Card, Tabs, Form, Input, Button, Switch, Select, Space, message, Typography, Divider, Alert, Table, Tag, DatePicker, Modal } from 'antd';
+import { SaveOutlined, SettingOutlined, BulbOutlined, GlobalOutlined, LockOutlined, FileTextOutlined, DeleteOutlined, ClearOutlined, EyeOutlined } from '@ant-design/icons';
 import PermissionGuard from '../../components/PermissionGuard';
+import { systemAPI, SystemConfig, SystemLog } from '../../services/api';
+import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -11,18 +13,167 @@ const SettingsPage = () => {
   const [appearanceForm] = Form.useForm();
   const [securityForm] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  const [configs, setConfigs] = useState<Record<string, SystemConfig>>({});
+  const [logs, setLogs] = useState<SystemLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logStats, setLogStats] = useState<any>({});
+  const [logFilters, setLogFilters] = useState({
+    level: '',
+    module: '',
+    start_time: '',
+    end_time: ''
+  });
+  const [logDetailModal, setLogDetailModal] = useState<{
+    visible: boolean;
+    log: SystemLog | null;
+  }>({ visible: false, log: null });
 
-  // 模拟保存设置
-  const handleSave = async (values: any) => {
-    setSaving(true);
-    console.log('保存设置:', values);
-    
-    // 模拟API请求
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    message.success('设置已保存');
-    setSaving(false);
+  // 加载系统配置
+  const loadConfigs = async () => {
+    try {
+      const response = await systemAPI.getAllConfigs();
+      if (response.data && response.data.code === 200) {
+        const configMap: Record<string, SystemConfig> = {};
+        response.data.data.forEach(config => {
+          configMap[config.key] = config;
+        });
+        setConfigs(configMap);
+        
+        // 设置表单初始值
+        const generalValues: any = {};
+        const appearanceValues: any = {};
+        const securityValues: any = {};
+        
+        response.data.data.forEach(config => {
+          const value = config.type === 'boolean' ? config.value === 'true' : 
+                       config.type === 'number' ? parseInt(config.value) : config.value;
+          
+          if (config.category === 'general') {
+            generalValues[config.key] = value;
+          } else if (config.category === 'appearance') {
+            appearanceValues[config.key] = value;
+          } else if (config.category === 'security') {
+            securityValues[config.key] = value;
+          }
+        });
+        
+        generalForm.setFieldsValue(generalValues);
+        appearanceForm.setFieldsValue(appearanceValues);
+        securityForm.setFieldsValue(securityValues);
+      }
+    } catch (error) {
+      message.error('加载系统配置失败');
+    }
   };
+
+  // 保存设置
+  const handleSave = async (values: any, category: string) => {
+    setSaving(true);
+    try {
+      const updates: Record<string, string> = {};
+      Object.keys(values).forEach(key => {
+        let value = values[key];
+        if (typeof value === 'boolean') {
+          value = value.toString();
+        } else if (typeof value === 'number') {
+          value = value.toString();
+        }
+        updates[key] = value;
+      });
+      
+      const response = await systemAPI.batchUpdateConfigs(updates);
+      if (response.data && response.data.code === 200) {
+        message.success('设置已保存');
+        loadConfigs(); // 重新加载配置
+      } else {
+        message.error('保存设置失败');
+      }
+    } catch (error) {
+      message.error('保存设置失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // 加载系统日志
+  const loadLogs = async (filters?: any) => {
+    setLogsLoading(true);
+    try {
+      const params = {
+        limit: 50,
+        offset: 0,
+        ...filters
+      };
+      const response = await systemAPI.getLogs(params);
+      if (response.data && response.data.code === 200) {
+        setLogs(response.data.data.list);
+      }
+    } catch (error) {
+      message.error('加载系统日志失败');
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  // 加载日志统计
+  const loadLogStats = async () => {
+    try {
+      const response = await systemAPI.getLogStats();
+      if (response.data && response.data.code === 200) {
+        setLogStats(response.data.data);
+      }
+    } catch (error) {
+      message.error('加载日志统计失败');
+    }
+  };
+
+  // 删除日志
+  const handleDeleteLog = async (id: number) => {
+    try {
+      const response = await systemAPI.deleteLog(id);
+      if (response.data && response.data.code === 200) {
+        message.success('删除日志成功');
+        loadLogs(logFilters);
+        loadLogStats();
+      }
+    } catch (error) {
+      message.error('删除日志失败');
+    }
+  };
+
+  // 清除日志
+  const handleClearLogs = () => {
+    Modal.confirm({
+      title: '清除系统日志',
+      content: '确定要清除指定时间范围的日志吗？此操作不可恢复。',
+      onOk: async () => {
+        try {
+          const response = await systemAPI.clearLogs({
+            start_time: logFilters.start_time || dayjs().subtract(30, 'day').format('YYYY-MM-DD'),
+            end_time: logFilters.end_time || dayjs().format('YYYY-MM-DD')
+          });
+          if (response.data && response.data.code === 200) {
+            message.success('清除日志成功');
+            loadLogs(logFilters);
+            loadLogStats();
+          }
+        } catch (error) {
+          message.error('清除日志失败');
+        }
+      }
+    });
+  };
+
+  // 筛选日志
+  const handleFilterLogs = () => {
+    loadLogs(logFilters);
+  };
+
+  useEffect(() => {
+    loadConfigs();
+    loadLogs();
+    loadLogStats();
+  }, []);
 
   const tabItems = [
     {
@@ -37,15 +188,10 @@ const SettingsPage = () => {
         <Form
           form={generalForm}
           layout="vertical"
-          onFinish={handleSave}
-          initialValues={{
-            siteName: 'Mini Web 管理系统',
-            siteDescription: '一个基于React和Go的Web管理系统',
-            pageSize: 10
-          }}
+          onFinish={(values) => handleSave(values, 'general')}
         >
           <Form.Item
-            name="siteName"
+            name="site_name"
             label="系统名称"
             rules={[{ required: true, message: '请输入系统名称' }]}
           >
@@ -53,14 +199,14 @@ const SettingsPage = () => {
           </Form.Item>
           
           <Form.Item
-            name="siteDescription"
+            name="site_description"
             label="系统描述"
           >
             <Input.TextArea rows={3} placeholder="请输入系统描述" />
           </Form.Item>
           
           <Form.Item
-            name="pageSize"
+            name="page_size"
             label="默认分页大小"
             rules={[{ required: true, message: '请选择默认分页大小' }]}
           >
@@ -92,13 +238,7 @@ const SettingsPage = () => {
         <Form
           form={appearanceForm}
           layout="vertical"
-          onFinish={handleSave}
-          initialValues={{
-            theme: 'light',
-            primaryColor: '#1677ff',
-            compactMode: false,
-            animationEnabled: true
-          }}
+          onFinish={(values) => handleSave(values, 'appearance')}
         >
           <Form.Item
             name="theme"
@@ -112,7 +252,7 @@ const SettingsPage = () => {
           </Form.Item>
           
           <Form.Item
-            name="primaryColor"
+            name="primary_color"
             label="主题色"
           >
             <Select>
@@ -124,7 +264,7 @@ const SettingsPage = () => {
           </Form.Item>
           
           <Form.Item
-            name="compactMode"
+            name="compact_mode"
             label="紧凑模式"
             valuePropName="checked"
           >
@@ -132,7 +272,7 @@ const SettingsPage = () => {
           </Form.Item>
           
           <Form.Item
-            name="animationEnabled"
+            name="animation_enabled"
             label="启用动画"
             valuePropName="checked"
           >
@@ -170,16 +310,10 @@ const SettingsPage = () => {
           <Form
             form={securityForm}
             layout="vertical"
-            onFinish={handleSave}
-            initialValues={{
-              passwordPolicy: 'medium',
-              sessionTimeout: 30,
-              loginAttempts: 5,
-              twoFactorAuth: false
-            }}
+            onFinish={(values) => handleSave(values, 'security')}
           >
             <Form.Item
-              name="passwordPolicy"
+              name="password_policy"
               label="密码策略"
             >
               <Select>
@@ -190,7 +324,7 @@ const SettingsPage = () => {
             </Form.Item>
             
             <Form.Item
-              name="sessionTimeout"
+              name="session_timeout"
               label="会话超时时间（分钟）"
             >
               <Select>
@@ -203,7 +337,7 @@ const SettingsPage = () => {
             </Form.Item>
             
             <Form.Item
-              name="loginAttempts"
+              name="login_attempts"
               label="最大登录失败次数"
             >
               <Select>
@@ -215,7 +349,7 @@ const SettingsPage = () => {
             </Form.Item>
             
             <Form.Item
-              name="twoFactorAuth"
+              name="two_factor_auth"
               label="启用两步验证"
               valuePropName="checked"
             >
@@ -228,6 +362,255 @@ const SettingsPage = () => {
               </Button>
             </Form.Item>
           </Form>
+        </PermissionGuard>
+      ),
+    },
+    {
+      key: 'logs',
+      label: (
+        <span>
+          <FileTextOutlined />
+          系统日志
+        </span>
+      ),
+      children: (
+        <PermissionGuard 
+          permission="logs:access"
+          fallback={
+            <Alert
+              message="权限不足"
+              description="您没有访问系统日志的权限，请联系管理员。"
+              type="error"
+              showIcon
+            />
+          }
+        >
+          <div className="logs-management">
+            {/* 日志统计卡片 */}
+            <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+              <Card size="small" style={{ flex: 1 }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 24, fontWeight: 'bold', color: '#1677ff' }}>
+                    {logStats.total || 0}
+                  </div>
+                  <div>总日志数</div>
+                </div>
+              </Card>
+              <Card size="small" style={{ flex: 1 }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 24, fontWeight: 'bold', color: '#52c41a' }}>
+                    {logStats.today_count || 0}
+                  </div>
+                  <div>今日日志</div>
+                </div>
+              </Card>
+              <Card size="small" style={{ flex: 1 }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 24, fontWeight: 'bold', color: '#fa541c' }}>
+                    {logStats.by_level?.error || 0}
+                  </div>
+                  <div>错误日志</div>
+                </div>
+              </Card>
+              <Card size="small" style={{ flex: 1 }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 24, fontWeight: 'bold', color: '#faad14' }}>
+                    {logStats.by_level?.warn || 0}
+                  </div>
+                  <div>警告日志</div>
+                </div>
+              </Card>
+            </div>
+
+            {/* 日志筛选器 */}
+            <Card size="small" style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Select
+                  placeholder="选择日志级别"
+                  allowClear
+                  style={{ width: 120 }}
+                  value={logFilters.level || undefined}
+                  onChange={(value) => setLogFilters({ ...logFilters, level: value || '' })}
+                >
+                  <Option value="info">信息</Option>
+                  <Option value="warn">警告</Option>
+                  <Option value="error">错误</Option>
+                  <Option value="debug">调试</Option>
+                </Select>
+                <Select
+                  placeholder="选择模块"
+                  allowClear
+                  style={{ width: 120 }}
+                  value={logFilters.module || undefined}
+                  onChange={(value) => setLogFilters({ ...logFilters, module: value || '' })}
+                >
+                  <Option value="system">系统</Option>
+                  <Option value="auth">认证</Option>
+                  <Option value="user">用户</Option>
+                  <Option value="connection">连接</Option>
+                </Select>
+                <DatePicker
+                  placeholder="开始日期"
+                  style={{ width: 120 }}
+                  value={logFilters.start_time ? dayjs(logFilters.start_time) : null}
+                  onChange={(date) => setLogFilters({ 
+                    ...logFilters, 
+                    start_time: date ? date.format('YYYY-MM-DD') : '' 
+                  })}
+                />
+                <DatePicker
+                  placeholder="结束日期"
+                  style={{ width: 120 }}
+                  value={logFilters.end_time ? dayjs(logFilters.end_time) : null}
+                  onChange={(date) => setLogFilters({ 
+                    ...logFilters, 
+                    end_time: date ? date.format('YYYY-MM-DD') : '' 
+                  })}
+                />
+                <Button type="primary" onClick={handleFilterLogs}>
+                  筛选
+                </Button>
+                <Button onClick={() => {
+                  setLogFilters({ level: '', module: '', start_time: '', end_time: '' });
+                  loadLogs();
+                }}>
+                  重置
+                </Button>
+                <Button 
+                  type="primary" 
+                  danger 
+                  icon={<ClearOutlined />}
+                  onClick={handleClearLogs}
+                >
+                  清除日志
+                </Button>
+              </div>
+            </Card>
+
+            {/* 日志表格 */}
+            <Table
+              dataSource={logs}
+              loading={logsLoading}
+              rowKey="id"
+              size="small"
+              pagination={{
+                pageSize: 20,
+                showSizeChanger: true,
+                showQuickJumper: true,
+                showTotal: (total) => `共 ${total} 条记录`,
+              }}
+              columns={[
+                {
+                  title: '时间',
+                  dataIndex: 'created_at',
+                  width: 160,
+                  render: (text) => dayjs(text).format('YYYY-MM-DD HH:mm:ss'),
+                },
+                {
+                  title: '级别',
+                  dataIndex: 'level',
+                  width: 80,
+                  render: (level) => {
+                    const colors = {
+                      info: 'blue',
+                      warn: 'orange',
+                      error: 'red',
+                      debug: 'green',
+                    };
+                    return <Tag color={colors[level as keyof typeof colors]}>{level}</Tag>;
+                  },
+                },
+                {
+                  title: '模块',
+                  dataIndex: 'module',
+                  width: 100,
+                },
+                {
+                  title: '消息',
+                  dataIndex: 'message',
+                  ellipsis: true,
+                },
+                {
+                  title: '用户ID',
+                  dataIndex: 'user_id',
+                  width: 80,
+                  render: (id) => id || '-',
+                },
+                {
+                  title: 'IP地址',
+                  dataIndex: 'ip_address',
+                  width: 130,
+                  render: (ip) => ip || '-',
+                },
+                {
+                  title: '操作',
+                  width: 100,
+                  render: (_, record) => (
+                    <Space>
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<EyeOutlined />}
+                        onClick={() => setLogDetailModal({ visible: true, log: record })}
+                      >
+                        详情
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => {
+                          Modal.confirm({
+                            title: '删除日志',
+                            content: '确定要删除这条日志吗？',
+                            onOk: () => handleDeleteLog(record.id),
+                          });
+                        }}
+                      >
+                        删除
+                      </Button>
+                    </Space>
+                  ),
+                },
+              ]}
+            />
+
+            {/* 日志详情弹窗 */}
+            <Modal
+              title="日志详情"
+              open={logDetailModal.visible}
+              onCancel={() => setLogDetailModal({ visible: false, log: null })}
+              footer={[
+                <Button key="close" onClick={() => setLogDetailModal({ visible: false, log: null })}>
+                  关闭
+                </Button>
+              ]}
+              width={600}
+            >
+              {logDetailModal.log && (
+                <div>
+                  <p><strong>时间：</strong>{dayjs(logDetailModal.log.created_at).format('YYYY-MM-DD HH:mm:ss')}</p>
+                  <p><strong>级别：</strong>
+                    <Tag color={
+                      logDetailModal.log.level === 'error' ? 'red' :
+                      logDetailModal.log.level === 'warn' ? 'orange' :
+                      logDetailModal.log.level === 'info' ? 'blue' : 'green'
+                    }>
+                      {logDetailModal.log.level}
+                    </Tag>
+                  </p>
+                  <p><strong>模块：</strong>{logDetailModal.log.module}</p>
+                  <p><strong>消息：</strong>{logDetailModal.log.message}</p>
+                  {logDetailModal.log.details && (
+                    <p><strong>详情：</strong><br />{logDetailModal.log.details}</p>
+                  )}
+                  <p><strong>用户ID：</strong>{logDetailModal.log.user_id || '-'}</p>
+                  <p><strong>IP地址：</strong>{logDetailModal.log.ip_address || '-'}</p>
+                </div>
+              )}
+            </Modal>
+          </div>
         </PermissionGuard>
       ),
     }

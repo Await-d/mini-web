@@ -141,13 +141,14 @@ const AppLayout: React.FC = () => {
             }}>
               <Space>
                 <Avatar 
+                  src={currentUser?.avatar}
                   style={{ 
                     backgroundColor: token.colorPrimary,
                     cursor: 'pointer' 
                   }}
                   icon={<UserOutlined />}
                 />
-                <span>{currentUser?.username || '未登录'}</span>
+                <span>{currentUser?.nickname || currentUser?.username || '未登录'}</span>
               </Space>
             </Dropdown>
           </div>
