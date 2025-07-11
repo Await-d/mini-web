@@ -168,6 +168,160 @@ func createTables(db *sql.DB) error {
 		return fmt.Errorf("创建用户活动日志表失败: %w", err)
 	}
 
+	// 邮件配置表
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS email_configs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		smtp_host TEXT NOT NULL,
+		smtp_port INTEGER NOT NULL DEFAULT 587,
+		username TEXT,
+		password TEXT,
+		from_email TEXT NOT NULL,
+		from_name TEXT,
+		enable_tls BOOLEAN NOT NULL DEFAULT 1,
+		enable_ssl BOOLEAN NOT NULL DEFAULT 0,
+		test_email TEXT,
+		is_enabled BOOLEAN NOT NULL DEFAULT 0,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`)
+	if err != nil {
+		return fmt.Errorf("创建邮件配置表失败: %w", err)
+	}
+
+	// 邮件模板表
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS email_templates (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		subject TEXT NOT NULL,
+		body TEXT NOT NULL,
+		type TEXT NOT NULL,
+		is_default BOOLEAN NOT NULL DEFAULT 0,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`)
+	if err != nil {
+		return fmt.Errorf("创建邮件模板表失败: %w", err)
+	}
+
+	// SSL配置表
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS ssl_configs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		domain TEXT NOT NULL,
+		cert_path TEXT,
+		key_path TEXT,
+		cert_content TEXT NOT NULL,
+		key_content TEXT NOT NULL,
+		issuer TEXT,
+		subject TEXT,
+		not_before TEXT,
+		not_after TEXT,
+		is_enabled BOOLEAN NOT NULL DEFAULT 0,
+		is_default BOOLEAN NOT NULL DEFAULT 0,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`)
+	if err != nil {
+		return fmt.Errorf("创建SSL配置表失败: %w", err)
+	}
+
+	// API访问配置表
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS api_configs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		description TEXT,
+		rate_limit_enabled BOOLEAN NOT NULL DEFAULT 1,
+		requests_per_min INTEGER NOT NULL DEFAULT 60,
+		requests_per_hour INTEGER NOT NULL DEFAULT 1000,
+		requests_per_day INTEGER NOT NULL DEFAULT 10000,
+		ip_whitelist_enabled BOOLEAN NOT NULL DEFAULT 0,
+		ip_blacklist_enabled BOOLEAN NOT NULL DEFAULT 1,
+		api_key_required BOOLEAN NOT NULL DEFAULT 0,
+		is_enabled BOOLEAN NOT NULL DEFAULT 1,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`)
+	if err != nil {
+		return fmt.Errorf("创建API访问配置表失败: %w", err)
+	}
+
+	// API密钥表
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS api_keys (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		key_value TEXT NOT NULL UNIQUE,
+		secret_value TEXT NOT NULL,
+		user_id INTEGER,
+		permissions TEXT,
+		expires_at TEXT,
+		last_used_at TEXT,
+		usage_count INTEGER NOT NULL DEFAULT 0,
+		is_enabled BOOLEAN NOT NULL DEFAULT 1,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users(id)
+	)`)
+	if err != nil {
+		return fmt.Errorf("创建API密钥表失败: %w", err)
+	}
+
+	// IP白名单表
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS ip_whitelist (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		ip_address TEXT NOT NULL,
+		description TEXT,
+		is_enabled BOOLEAN NOT NULL DEFAULT 1,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`)
+	if err != nil {
+		return fmt.Errorf("创建IP白名单表失败: %w", err)
+	}
+
+	// IP黑名单表
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS ip_blacklist (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		ip_address TEXT NOT NULL,
+		reason TEXT,
+		blocked_at TEXT,
+		expires_at TEXT,
+		is_enabled BOOLEAN NOT NULL DEFAULT 1,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`)
+	if err != nil {
+		return fmt.Errorf("创建IP黑名单表失败: %w", err)
+	}
+
+	// API访问日志表
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS api_access_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		ip_address TEXT NOT NULL,
+		user_agent TEXT,
+		method TEXT NOT NULL,
+		path TEXT NOT NULL,
+		status_code INTEGER NOT NULL,
+		response_time INTEGER,
+		api_key_id INTEGER,
+		user_id INTEGER,
+		request_size INTEGER,
+		response_size INTEGER,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (api_key_id) REFERENCES api_keys(id),
+		FOREIGN KEY (user_id) REFERENCES users(id)
+	)`)
+	if err != nil {
+		return fmt.Errorf("创建API访问日志表失败: %w", err)
+	}
+
 	log.Println("表结构创建成功")
 	return nil
 }
@@ -250,6 +404,75 @@ func seedData(db *sql.DB) error {
 		log.Println("默认系统配置添加成功")
 	} else {
 		log.Println("系统配置已存在，跳过初始化")
+	}
+
+	// 添加默认邮件模板（只有当邮件模板表为空时才插入）
+	var templateCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM email_templates").Scan(&templateCount)
+	if err != nil {
+		return fmt.Errorf("查询邮件模板数量失败: %w", err)
+	}
+	
+	if templateCount == 0 {
+		_, err = db.Exec(`
+		INSERT INTO email_templates (name, subject, body, type, is_default)
+		VALUES 
+			('用户欢迎邮件', '欢迎使用 {{site_name}}', 
+			 '亲爱的 {{user_name}}，
+
+欢迎注册 {{site_name}}！
+
+您的账户已成功创建，现在可以登录系统开始使用了。
+
+如有任何问题，请联系我们：{{support_email}}
+
+{{site_name}} 团队
+{{current_date}}', 
+			 'welcome', 1),
+			('密码重置邮件', '{{site_name}} - 密码重置请求', 
+			 '您好 {{user_name}}，
+
+我们收到了重置您账户密码的请求。
+
+请点击下面的链接重置密码：
+{{reset_link}}
+
+如果您没有请求重置密码，请忽略此邮件。
+
+此链接将在24小时后失效。
+
+{{site_name}} 团队
+{{current_date}}', 
+			 'reset_password', 1),
+			('安全通知邮件', '{{site_name}} - 安全通知', 
+			 '您好 {{user_name}}，
+
+您的账户在 {{login_time}} 从 {{login_ip}} 登录。
+
+如果这不是您的操作，请立即联系我们。
+
+{{site_name}} 团队
+{{current_date}}', 
+			 'security_notification', 1),
+			('系统通知邮件', '{{site_name}} - 系统通知', 
+			 '您好 {{user_name}}，
+
+这是来自 {{site_name}} 的系统通知。
+
+通知内容：{{notification_content}}
+
+如有疑问，请联系技术支持：{{support_email}}
+
+{{site_name}} 团队
+{{current_date}}', 
+			 'system_notification', 1)
+		`)
+		if err != nil {
+			return fmt.Errorf("添加默认邮件模板失败: %w", err)
+		}
+		log.Println("默认邮件模板添加成功")
+	} else {
+		log.Println("邮件模板已存在，跳过初始化")
 	}
 
 	log.Println("示例数据初始化成功")

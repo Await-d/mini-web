@@ -45,12 +45,15 @@ func main() {
 	userService := service.NewUserService(userRepo)
 	connService := service.NewConnectionService(connRepo, sessionRepo)
 	systemService := service.NewSystemService(configRepo, logRepo)
+	dashboardService := service.NewDashboardService(userRepo, connRepo, sessionRepo, systemService)
 
 	// 创建处理器
 	authHandler := api.NewAuthHandler(authService)
 	userHandler := api.NewUserHandler(userService, activityRepo)
 	connHandler := api.NewConnectionHandler(connService)
 	systemHandler := api.NewSystemHandler(systemService)
+	dashboardHandler := api.NewDashboardHandler(dashboardService)
+	terminalSessionHandler := api.NewTerminalSessionHandler(connService)
 
 	// 创建中间件
 	authMiddleware := middleware.NewAuthMiddleware(authService)
@@ -159,6 +162,52 @@ func main() {
 	adminRouter.HandleFunc("/system/configs", systemHandler.GetAllConfigs).Methods("GET", "OPTIONS")
 	adminRouter.HandleFunc("/system/configs", systemHandler.CreateConfig).Methods("POST", "OPTIONS")
 	adminRouter.HandleFunc("/system/configs/batch", systemHandler.BatchUpdateConfigs).Methods("PUT", "OPTIONS")
+
+	// 邮件配置路由 (暂时注释，使用系统处理器中的邮件测试功能)
+	// emailHandler := api.NewEmailHandler()
+	// adminRouter.HandleFunc("/system/email/config", emailHandler.GetEmailConfig).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/email/config", emailHandler.UpdateEmailConfig).Methods("PUT", "OPTIONS")
+	// adminRouter.HandleFunc("/system/email/test-connection", emailHandler.TestEmailConnection).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/email/test-send", emailHandler.SendTestEmail).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/email/templates", emailHandler.GetEmailTemplates).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/email/templates", emailHandler.CreateEmailTemplate).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/email/templates/{id}", emailHandler.UpdateEmailTemplate).Methods("PUT", "OPTIONS")
+	// adminRouter.HandleFunc("/system/email/templates/{id}", emailHandler.DeleteEmailTemplate).Methods("DELETE", "OPTIONS")
+	// adminRouter.HandleFunc("/system/email/variables", emailHandler.GetEmailTemplateVariables).Methods("GET", "OPTIONS")
+
+	// SSL证书配置路由 (暂时注释)
+	// sslHandler := api.NewSSLHandler()
+	// adminRouter.HandleFunc("/system/ssl/configs", sslHandler.GetSSLConfigs).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/ssl/configs", sslHandler.CreateSSLConfig).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/ssl/configs/{id}", sslHandler.GetSSLConfig).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/ssl/configs/{id}", sslHandler.UpdateSSLConfig).Methods("PUT", "OPTIONS")
+	// adminRouter.HandleFunc("/system/ssl/configs/{id}", sslHandler.DeleteSSLConfig).Methods("DELETE", "OPTIONS")
+	// adminRouter.HandleFunc("/system/ssl/configs/{id}/enable", sslHandler.EnableSSLConfig).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/ssl/configs/{id}/disable", sslHandler.DisableSSLConfig).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/ssl/configs/{id}/default", sslHandler.SetDefaultSSLConfig).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/ssl/test-connection", sslHandler.TestSSLConnection).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/ssl/parse-certificate", sslHandler.ParseCertificate).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/ssl/expiring", sslHandler.GetExpiringCertificates).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/ssl/status", sslHandler.GetSSLStatus).Methods("GET", "OPTIONS")
+
+	// API访问控制路由 (暂时注释)
+	// apiControlHandler := api.NewAPIControlHandler()
+	// adminRouter.HandleFunc("/system/api/config", apiControlHandler.GetAPIConfig).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/config", apiControlHandler.UpdateAPIConfig).Methods("PUT", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/keys", apiControlHandler.GetAPIKeys).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/keys", apiControlHandler.CreateAPIKey).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/keys/{id}", apiControlHandler.UpdateAPIKey).Methods("PUT", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/keys/{id}", apiControlHandler.DeleteAPIKey).Methods("DELETE", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/whitelist", apiControlHandler.GetIPWhitelist).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/whitelist", apiControlHandler.AddIPToWhitelist).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/whitelist/{id}", apiControlHandler.RemoveIPFromWhitelist).Methods("DELETE", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/blacklist", apiControlHandler.GetIPBlacklist).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/blacklist", apiControlHandler.AddIPToBlacklist).Methods("POST", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/blacklist/{id}", apiControlHandler.RemoveIPFromBlacklist).Methods("DELETE", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/logs", apiControlHandler.GetAPIAccessLogs).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/statistics", apiControlHandler.GetAccessStatistics).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/rate-limit/status", apiControlHandler.GetRateLimitStatus).Methods("GET", "OPTIONS")
+	// adminRouter.HandleFunc("/system/api/cleanup", apiControlHandler.CleanupExpiredEntries).Methods("POST", "OPTIONS")
 	adminRouter.HandleFunc("/system/configs/category/{category}", systemHandler.GetConfigsByCategory).Methods("GET", "OPTIONS")
 	adminRouter.HandleFunc("/system/configs/{key}", systemHandler.GetConfig).Methods("GET", "OPTIONS")
 	adminRouter.HandleFunc("/system/configs/{key}", systemHandler.UpdateConfig).Methods("PUT", "OPTIONS")
@@ -169,6 +218,29 @@ func main() {
 	adminRouter.HandleFunc("/system/logs/stats", systemHandler.GetLogStats).Methods("GET", "OPTIONS")
 	adminRouter.HandleFunc("/system/logs/clear", systemHandler.ClearLogs).Methods("POST", "OPTIONS")
 	adminRouter.HandleFunc("/system/logs/{id}", systemHandler.DeleteLog).Methods("DELETE", "OPTIONS")
+
+	// 系统信息和性能监控路由
+	adminRouter.HandleFunc("/system/info", systemHandler.GetSystemInfo).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/performance", systemHandler.GetPerformanceMetrics).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/email/test", systemHandler.TestEmailConfig).Methods("POST", "OPTIONS")
+
+	// Dashboard路由
+	protectedRouter.HandleFunc("/dashboard/stats", dashboardHandler.GetDashboardStats).Methods("GET", "OPTIONS")
+	protectedRouter.HandleFunc("/dashboard/system-status", dashboardHandler.GetSystemStatus).Methods("GET", "OPTIONS")
+	protectedRouter.HandleFunc("/dashboard/activities", dashboardHandler.GetRecentActivities).Methods("GET", "OPTIONS")
+	protectedRouter.HandleFunc("/dashboard/connections", dashboardHandler.GetConnectionStats).Methods("GET", "OPTIONS")
+	protectedRouter.HandleFunc("/dashboard/users", dashboardHandler.GetUserStats).Methods("GET", "OPTIONS")
+	protectedRouter.HandleFunc("/dashboard/sessions", dashboardHandler.GetSessionStats).Methods("GET", "OPTIONS")
+
+	// 终端会话管理路由
+	protectedRouter.HandleFunc("/terminal/sessions", terminalSessionHandler.CreateTerminalSession).Methods("POST", "OPTIONS")
+	protectedRouter.HandleFunc("/terminal/sessions", terminalSessionHandler.GetUserTerminalSessions).Methods("GET", "OPTIONS")
+	protectedRouter.HandleFunc("/terminal/sessions/{id}", terminalSessionHandler.GetTerminalSession).Methods("GET", "OPTIONS")
+	protectedRouter.HandleFunc("/terminal/sessions/{id}", terminalSessionHandler.CloseTerminalSession).Methods("DELETE", "OPTIONS")
+	protectedRouter.HandleFunc("/terminal/sessions/stats", terminalSessionHandler.GetSessionStats).Methods("GET", "OPTIONS")
+
+	// 新的WebSocket终端连接（支持会话恢复）
+	router.HandleFunc("/ws/terminal/{sessionId}", terminalSessionHandler.HandleTerminalWebSocketWithSession)
 
 	// 设置服务器
 	server := &http.Server{

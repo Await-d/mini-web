@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Card, Tabs, Form, Input, Button, Switch, Select, Space, message, Typography, Divider, Alert, Table, Tag, DatePicker, Modal } from 'antd';
-import { SaveOutlined, SettingOutlined, BulbOutlined, GlobalOutlined, LockOutlined, FileTextOutlined, DeleteOutlined, ClearOutlined, EyeOutlined } from '@ant-design/icons';
+import { Card, Tabs, Form, Input, Button, Switch, Select, Space, message, Typography, Divider, Alert, Table, Tag, DatePicker, Modal, Statistic, Progress, Row, Col } from 'antd';
+import { SaveOutlined, SettingOutlined, BulbOutlined, GlobalOutlined, LockOutlined, FileTextOutlined, DeleteOutlined, ClearOutlined, EyeOutlined, MailOutlined, SafetyOutlined, DashboardOutlined, DatabaseOutlined, CloudServerOutlined, LineChartOutlined } from '@ant-design/icons';
 import PermissionGuard from '../../components/PermissionGuard';
-import { systemAPI, SystemConfig, SystemLog } from '../../services/api';
+import EmailConfigComponent from '../../components/EmailConfig';
+import SSLConfigComponent from '../../components/SSLConfig';
+import { systemAPI, SystemConfig, SystemLog, PerformanceMetrics } from '../../services/api';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -27,6 +29,12 @@ const SettingsPage = () => {
     visible: boolean;
     log: SystemLog | null;
   }>({ visible: false, log: null });
+  
+  // 性能监控相关状态
+  const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null);
+  const [performanceLoading, setPerformanceLoading] = useState(false);
+  const [performanceAutoRefresh, setPerformanceAutoRefresh] = useState(false);
+  const [performanceInterval, setPerformanceInterval] = useState<NodeJS.Timeout | null>(null);
 
   // 加载系统配置
   const loadConfigs = async () => {
@@ -169,11 +177,75 @@ const SettingsPage = () => {
     loadLogs(logFilters);
   };
 
+  // 加载性能监控数据
+  const loadPerformanceMetrics = async () => {
+    setPerformanceLoading(true);
+    try {
+      const response = await systemAPI.getPerformanceMetrics();
+      if (response.data && response.data.code === 200) {
+        setPerformanceMetrics(response.data.data);
+      }
+    } catch (error) {
+      message.error('加载性能监控数据失败');
+    } finally {
+      setPerformanceLoading(false);
+    }
+  };
+
+  // 切换自动刷新
+  const toggleAutoRefresh = (checked: boolean) => {
+    setPerformanceAutoRefresh(checked);
+    if (checked) {
+      // 开启自动刷新，每30秒刷新一次
+      const interval = setInterval(() => {
+        loadPerformanceMetrics();
+      }, 30000);
+      setPerformanceInterval(interval);
+    } else {
+      // 关闭自动刷新
+      if (performanceInterval) {
+        clearInterval(performanceInterval);
+        setPerformanceInterval(null);
+      }
+    }
+  };
+
+  // 格式化字节大小
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  // 格式化百分比
+  const formatPercent = (value: number): string => {
+    return `${value.toFixed(1)}%`;
+  };
+
   useEffect(() => {
     loadConfigs();
     loadLogs();
     loadLogStats();
+    loadPerformanceMetrics();
+    
+    // 组件卸载时清理定时器
+    return () => {
+      if (performanceInterval) {
+        clearInterval(performanceInterval);
+      }
+    };
   }, []);
+
+  // 监听自动刷新状态变化
+  useEffect(() => {
+    return () => {
+      if (performanceInterval) {
+        clearInterval(performanceInterval);
+      }
+    };
+  }, [performanceInterval]);
 
   const tabItems = [
     {
@@ -362,6 +434,285 @@ const SettingsPage = () => {
               </Button>
             </Form.Item>
           </Form>
+        </PermissionGuard>
+      ),
+    },
+    {
+      key: 'email',
+      label: (
+        <span>
+          <MailOutlined />
+          邮件配置
+        </span>
+      ),
+      children: (
+        <PermissionGuard 
+          permission="settings:access"
+          fallback={
+            <Alert
+              message="权限不足"
+              description="您没有访问邮件配置的权限，请联系管理员。"
+              type="error"
+              showIcon
+            />
+          }
+        >
+          <EmailConfigComponent />
+        </PermissionGuard>
+      ),
+    },
+    {
+      key: 'ssl',
+      label: (
+        <span>
+          <SafetyOutlined />
+          SSL证书
+        </span>
+      ),
+      children: (
+        <PermissionGuard 
+          permission="settings:access"
+          fallback={
+            <Alert
+              message="权限不足"
+              description="您没有访问SSL证书管理的权限，请联系管理员。"
+              type="error"
+              showIcon
+            />
+          }
+        >
+          <SSLConfigComponent />
+        </PermissionGuard>
+      ),
+    },
+    {
+      key: 'performance',
+      label: (
+        <span>
+          <DashboardOutlined />
+          性能监控
+        </span>
+      ),
+      children: (
+        <PermissionGuard 
+          permission="settings:access"
+          fallback={
+            <Alert
+              message="权限不足"
+              description="您没有访问性能监控的权限，请联系管理员。"
+              type="error"
+              showIcon
+            />
+          }
+        >
+          <div className="performance-monitoring">
+            {/* 控制面板 */}
+            <Card size="small" style={{ marginBottom: 16 }}>
+              <Space>
+                <Button type="primary" onClick={loadPerformanceMetrics} loading={performanceLoading}>
+                  刷新数据
+                </Button>
+                <Switch
+                  checked={performanceAutoRefresh}
+                  onChange={toggleAutoRefresh}
+                  checkedChildren="自动刷新"
+                  unCheckedChildren="手动刷新"
+                />
+              </Space>
+            </Card>
+
+            {performanceMetrics && (
+              <>
+                {/* 系统概览 */}
+                <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic 
+                        title="系统负载"
+                        value={performanceMetrics.system_load.average}
+                        precision={2}
+                        suffix="%" 
+                        valueStyle={{ color: performanceMetrics.system_load.average > 80 ? '#f5222d' : '#3f8600' }}
+                      />
+                      <Progress 
+                        percent={performanceMetrics.system_load.average} 
+                        strokeColor={performanceMetrics.system_load.average > 80 ? '#f5222d' : '#52c41a'}
+                        size="small"
+                      />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic 
+                        title="CPU使用率"
+                        value={performanceMetrics.cpu_usage}
+                        precision={1}
+                        suffix="%" 
+                        valueStyle={{ color: performanceMetrics.cpu_usage > 80 ? '#f5222d' : '#3f8600' }}
+                      />
+                      <Progress 
+                        percent={performanceMetrics.cpu_usage} 
+                        strokeColor={performanceMetrics.cpu_usage > 80 ? '#f5222d' : '#52c41a'}
+                        size="small"
+                      />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic 
+                        title="内存使用率"
+                        value={performanceMetrics.memory_usage.percent}
+                        precision={1}
+                        suffix="%" 
+                        valueStyle={{ color: performanceMetrics.memory_usage.percent > 80 ? '#f5222d' : '#3f8600' }}
+                      />
+                      <Progress 
+                        percent={performanceMetrics.memory_usage.percent} 
+                        strokeColor={performanceMetrics.memory_usage.percent > 80 ? '#f5222d' : '#52c41a'}
+                        size="small"
+                      />
+                      <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                        {formatBytes(performanceMetrics.memory_usage.used)} / {formatBytes(performanceMetrics.memory_usage.total)}
+                      </div>
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic 
+                        title="磁盘使用率"
+                        value={performanceMetrics.disk_usage.percent}
+                        precision={1}
+                        suffix="%" 
+                        valueStyle={{ color: performanceMetrics.disk_usage.percent > 80 ? '#f5222d' : '#3f8600' }}
+                      />
+                      <Progress 
+                        percent={performanceMetrics.disk_usage.percent} 
+                        strokeColor={performanceMetrics.disk_usage.percent > 80 ? '#f5222d' : '#52c41a'}
+                        size="small"
+                      />
+                      <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                        {formatBytes(performanceMetrics.disk_usage.used)} / {formatBytes(performanceMetrics.disk_usage.total)}
+                      </div>
+                    </Card>
+                  </Col>
+                </Row>
+
+                {/* 详细信息 */}
+                <Row gutter={[16, 16]}>
+                  <Col span={12}>
+                    <Card title={<><DatabaseOutlined /> 数据库性能</>} size="small">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>连接数:</span>
+                          <span>{performanceMetrics.database_stats.connections}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>活跃连接:</span>
+                          <span>{performanceMetrics.database_stats.active_connections}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>查询/秒:</span>
+                          <span>{performanceMetrics.database_stats.queries_per_second}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>平均查询时间:</span>
+                          <span>{performanceMetrics.database_stats.avg_query_time}ms</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>数据库大小:</span>
+                          <span>{formatBytes(performanceMetrics.database_stats.db_size)}</span>
+                        </div>
+                      </div>
+                    </Card>
+                  </Col>
+                  <Col span={12}>
+                    <Card title={<><CloudServerOutlined /> 网络状态</>} size="small">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>活跃连接:</span>
+                          <span>{performanceMetrics.network_stats.active_connections}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>入站流量:</span>
+                          <span>{formatBytes(performanceMetrics.network_stats.bytes_in)}/s</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>出站流量:</span>
+                          <span>{formatBytes(performanceMetrics.network_stats.bytes_out)}/s</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>数据包丢失:</span>
+                          <span>{formatPercent(performanceMetrics.network_stats.packet_loss)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>平均延迟:</span>
+                          <span>{performanceMetrics.network_stats.latency}ms</span>
+                        </div>
+                      </div>
+                    </Card>
+                  </Col>
+                </Row>
+
+                {/* 应用性能 */}
+                <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+                  <Col span={24}>
+                    <Card title={<><LineChartOutlined /> 应用性能</>} size="small">
+                      <Row gutter={[16, 16]}>
+                        <Col span={8}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>在线用户数:</span>
+                              <span>{performanceMetrics.app_stats.online_users}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>总用户数:</span>
+                              <span>{performanceMetrics.app_stats.total_users}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>活跃会话:</span>
+                              <span>{performanceMetrics.app_stats.active_sessions}</span>
+                            </div>
+                          </div>
+                        </Col>
+                        <Col span={8}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>RDP连接:</span>
+                              <span>{performanceMetrics.app_stats.rdp_connections}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>SSH连接:</span>
+                              <span>{performanceMetrics.app_stats.ssh_connections}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>Telnet连接:</span>
+                              <span>{performanceMetrics.app_stats.telnet_connections}</span>
+                            </div>
+                          </div>
+                        </Col>
+                        <Col span={8}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>请求/分钟:</span>
+                              <span>{performanceMetrics.app_stats.requests_per_minute}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>平均响应时间:</span>
+                              <span>{performanceMetrics.app_stats.avg_response_time}ms</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>错误率:</span>
+                              <span>{formatPercent(performanceMetrics.app_stats.error_rate)}</span>
+                            </div>
+                          </div>
+                        </Col>
+                      </Row>
+                    </Card>
+                  </Col>
+                </Row>
+              </>
+            )}
+          </div>
         </PermissionGuard>
       ),
     },

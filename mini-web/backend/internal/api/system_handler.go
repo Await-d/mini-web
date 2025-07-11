@@ -357,6 +357,67 @@ func (h *SystemHandler) GetLogStats(w http.ResponseWriter, r *http.Request) {
 
 // 辅助函数
 
+// GetPerformanceMetrics 获取性能监控数据
+func (h *SystemHandler) GetPerformanceMetrics(w http.ResponseWriter, r *http.Request) {
+	metrics, err := h.systemService.GetPerformanceMetrics()
+	if err != nil {
+		sendErrorResponse(w, http.StatusInternalServerError, "获取性能监控数据失败: "+err.Error())
+		return
+	}
+
+	sendSuccessResponse(w, "获取性能监控数据成功", metrics)
+}
+
+// GetSystemInfo 获取系统信息
+func (h *SystemHandler) GetSystemInfo(w http.ResponseWriter, r *http.Request) {
+	info, err := h.systemService.GetSystemInfo()
+	if err != nil {
+		sendErrorResponse(w, http.StatusInternalServerError, "获取系统信息失败: "+err.Error())
+		return
+	}
+
+	sendSuccessResponse(w, "获取系统信息成功", info)
+}
+
+// TestEmailConfig 测试邮件配置
+func (h *SystemHandler) TestEmailConfig(w http.ResponseWriter, r *http.Request) {
+	// 解析请求
+	var req struct {
+		Host     string `json:"host"`
+		Port     int    `json:"port"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+		To       string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendErrorResponse(w, http.StatusBadRequest, "无效的请求参数")
+		return
+	}
+
+	// 验证请求
+	if req.Host == "" || req.Username == "" || req.To == "" {
+		sendErrorResponse(w, http.StatusBadRequest, "邮件服务器配置不完整")
+		return
+	}
+
+	// 获取用户ID和IP地址
+	userID, err := getUserIDFromContext(r)
+	if err != nil {
+		sendErrorResponse(w, http.StatusUnauthorized, "未授权访问")
+		return
+	}
+
+	ipAddress := getClientIP(r)
+
+	// 测试邮件配置
+	if err := h.systemService.TestEmailConfig(req.Host, req.Port, req.Username, req.Password, req.To, userID, ipAddress); err != nil {
+		sendErrorResponse(w, http.StatusInternalServerError, "邮件配置测试失败: "+err.Error())
+		return
+	}
+
+	sendSuccessResponse(w, "邮件配置测试成功", nil)
+}
+
 // getClientIP 获取客户端IP地址
 func getClientIP(r *http.Request) string {
 	// 尝试从各种头部获取真实IP
