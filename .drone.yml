@@ -8,8 +8,8 @@ steps:
     volumes:
       - name: docker-socket
         path: /var/run/docker.sock
-      - name: app-config
-        path: /config
+      - name: volume1
+        path: /volume1
     commands:
       # 确保基础目录结构存在
       - mkdir -p /volume1/docker/1panel/apps/local
@@ -43,9 +43,9 @@ volumes:
   - name: docker-socket
     host:
       path: /var/run/docker.sock
-  - name: app-config
+  - name: volume1
     host:
-      path: /volume1/docker/1panel/apps/local/mini-web/configs
+      path: /volume1
 
 trigger:
   branch:
