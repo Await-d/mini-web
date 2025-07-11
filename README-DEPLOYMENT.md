@@ -54,7 +54,7 @@ mini-web:latest
 项目已配置三个远程仓库：
 - **origin**: Gitee - `https://gitee.com/await29/mini-web.git`
 - **github**: GitHub - `https://github.com/Await-d/mini-web.git`
-- **god**: 私有仓库 - `http://14.103.238.12:10882/await/god.git` (mini-web分支)
+- **mini-web**: 私有仓库 - `http://14.103.238.12:10882/await/mini-web.git`
 
 ### 推送到所有仓库
 使用便利脚本推送到所有仓库：
@@ -64,14 +64,14 @@ mini-web:latest
 
 ### Drone配置
 - **`.drone.yml`**: 适用于 origin 和 github (master分支)
-- **`.drone-god.yml`**: 适用于 god 仓库 (mini-web分支)
+- **`.drone-mini-web.yml`**: 适用于 mini-web 仓库
 
 ### 手动推送
 ```bash
 # 推送到特定仓库
 git push origin master        # Gitee
 git push github master       # GitHub
-git push god master:mini-web # 私有仓库的mini-web分支
+git push mini-web master # 私有仓库
 
 # 查看所有远程仓库
 git remote -v

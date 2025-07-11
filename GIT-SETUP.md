@@ -6,12 +6,12 @@
 ```bash
 origin  https://gitee.com/await29/mini-web.git (fetch/push)
 github  https://github.com/Await-d/mini-web.git (fetch/push)
-god     http://14.103.238.12:10882/await/god.git (fetch/push)
+mini-web http://14.103.238.12:10882/await/mini-web.git (fetch/push)
 ```
 
 ### 分支策略
 - **origin/github**: 使用 `master` 分支
-- **god**: 使用 `mini-web` 分支（因为该仓库已有其他项目）
+- **mini-web**: 使用 `master` 分支
 
 ## 推送操作
 
@@ -29,8 +29,8 @@ git push origin master
 # 推送到 GitHub
 git push github master
 
-# 推送到私有仓库 (god) 的 mini-web 分支
-git push god master:mini-web
+# 推送到私有仓库 (mini-web)
+git push mini-web master
 ```
 
 ### 强制推送（谨慎使用）

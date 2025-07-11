@@ -1,6 +1,6 @@
 kind: pipeline
 type: docker
-name: mini-web-deployment-god
+name: mini-web-deployment
 
 steps:
   - name: build-and-deploy
@@ -40,4 +40,4 @@ volumes:
 
 trigger:
   branch:
-    - mini-web  # 监听 mini-web 分支而不是 master
+    - master  # 监听 master 分支
