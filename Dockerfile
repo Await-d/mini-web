@@ -51,18 +51,21 @@ ENV SERVER_HOST=0.0.0.0
 ENV SERVER_PORT=8080
 
 # 创建必要的目录
-RUN mkdir -p /app/data /app/logs /app/configs /tmp/rdp_screenshots /var/log/supervisor
+RUN mkdir -p /app/data /app/logs /app/configs /tmp/rdp_screenshots /var/log/supervisor && \
+    touch /app/data/.gitkeep /app/logs/.gitkeep /app/configs/.gitkeep
 
 # 从构建阶段复制文件
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 COPY --from=backend-builder /app/bin/mini-web-server /app/
 COPY --from=backend-builder /app/backend/data /app/data
 
-# 复制nginx配置
+# 复制nginx配置和启动脚本
 COPY nginx/mini-web.conf /etc/nginx/conf.d/default.conf
+COPY scripts/entrypoint.sh /entrypoint.sh
 
 # 设置权限
 RUN chmod +x /app/mini-web-server && \
+    chmod +x /entrypoint.sh && \
     chown -R nginx:nginx /usr/share/nginx/html && \
     chown -R root:root /app
 
@@ -100,5 +103,5 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost/api/health || exit 1
 
-# 启动supervisor来管理nginx和后端服务
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/mini-web.conf"]
+# 使用启动脚本
+CMD ["/entrypoint.sh"]

@@ -22,6 +22,13 @@ docker rm $CONTAINER_NAME 2>/dev/null || true
 
 echo "2. 创建目录结构..."
 mkdir -p $BASE_PATH/{data,logs,configs,screenshots}
+# 确保目录存在且有正确权限
+chmod 755 $BASE_PATH/{data,logs,configs,screenshots}
+# 创建空的占位文件以确保目录结构
+touch $BASE_PATH/data/.gitkeep
+touch $BASE_PATH/logs/.gitkeep
+touch $BASE_PATH/configs/.gitkeep
+touch $BASE_PATH/screenshots/.gitkeep
 
 echo "3. 构建镜像..."
 docker build -t $IMAGE_NAME .

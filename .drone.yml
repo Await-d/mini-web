@@ -11,17 +11,15 @@ steps:
       - name: app-config
         path: /config
     commands:
-      # 检查并创建目录结构
-      - mkdir -p /volume1/docker/1panel/apps/local/mini-web/data
-      - mkdir -p /volume1/docker/1panel/apps/local/mini-web/logs
-      - mkdir -p /volume1/docker/1panel/apps/local/mini-web/configs
-      - mkdir -p /volume1/docker/1panel/apps/local/mini-web/screenshots
+      # 使用目录设置脚本确保目录结构
+      - chmod +x scripts/setup-directories.sh
+      - ./scripts/setup-directories.sh /volume1/docker/1panel/apps/local/mini-web
       # 构建并部署容器
       - docker build -t mini-web:latest .
       - docker stop mini-web-container || true
       - docker rm mini-web-container || true
       - >
-        docker run -d --name mini-web-container 
+        docker run -d --name mini-web-container --network 1panel-network
         -p 8090:80
         -v /volume1/docker/1panel/apps/local/mini-web/data:/app/data
         -v /volume1/docker/1panel/apps/local/mini-web/logs:/app/logs
