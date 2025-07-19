@@ -7,14 +7,6 @@ clone:
   retries: 3
 
 steps:
-  - name: prepare-workspace
-    image: alpine/git
-    commands:
-      - git config --global http.postBuffer 524288000
-      - git config --global http.lowSpeedLimit 0
-      - git config --global http.lowSpeedTime 999999
-      - echo "Git configuration optimized for large repositories"
-    
   - name: build-frontend
     image: node:18
     commands:
@@ -61,14 +53,14 @@ steps:
       - >
         docker run -d --name mini-web-container
         --network 1panel-network
-        -p 10202:80
+        -p 10203:80
         -v /volume1/docker/1panel/apps/local/mini-web/data:/app/data
         -v /volume1/docker/1panel/apps/local/mini-web/logs:/app/logs
         -v /volume1/docker/1panel/apps/local/mini-web/configs:/app/configs
         -v /volume1/docker/1panel/apps/local/mini-web/screenshots:/tmp/rdp_screenshots
         --restart always
         mini-web:latest
-      - echo "Mini-Web container deployed successfully at http://localhost:10202"
+      - echo "Mini-Web container deployed successfully at http://localhost:10203"
     depends_on:
       - build-backend
 
