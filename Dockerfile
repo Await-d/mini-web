@@ -70,31 +70,29 @@ RUN chmod +x /app/mini-web-server && \
     chown -R root:root /app
 
 # 创建supervisor配置
-RUN cat > /etc/supervisor/conf.d/mini-web.conf << 'EOF'
-[supervisord]
-nodaemon=true
-user=root
-logfile=/var/log/supervisor/supervisord.log
-pidfile=/var/run/supervisord.pid
-
-[program:nginx]
-command=nginx -g "daemon off;"
-autostart=true
-autorestart=true
-stderr_logfile=/var/log/supervisor/nginx.err.log
-stdout_logfile=/var/log/supervisor/nginx.out.log
-user=root
-
-[program:mini-web-server]
-command=/app/mini-web-server
-directory=/app
-autostart=true
-autorestart=true
-stderr_logfile=/var/log/supervisor/mini-web-server.err.log
-stdout_logfile=/var/log/supervisor/mini-web-server.out.log
-environment=HEADLESS=true,CONTAINER=true,SERVER_HOST=0.0.0.0,SERVER_PORT=8080
-user=root
-EOF
+RUN echo '[supervisord]' > /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'nodaemon=true' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'user=root' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'logfile=/var/log/supervisor/supervisord.log' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'pidfile=/var/run/supervisord.pid' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo '' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo '[program:nginx]' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'command=nginx -g "daemon off;"' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'autostart=true' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'autorestart=true' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'stderr_logfile=/var/log/supervisor/nginx.err.log' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'stdout_logfile=/var/log/supervisor/nginx.out.log' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'user=root' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo '' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo '[program:mini-web-server]' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'command=/app/mini-web-server' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'directory=/app' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'autostart=true' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'autorestart=true' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'stderr_logfile=/var/log/supervisor/mini-web-server.err.log' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'stdout_logfile=/var/log/supervisor/mini-web-server.out.log' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'environment=HEADLESS=true,CONTAINER=true,SERVER_HOST=0.0.0.0,SERVER_PORT=8080' >> /etc/supervisor/conf.d/mini-web.conf && \
+    echo 'user=root' >> /etc/supervisor/conf.d/mini-web.conf
 
 # 暴露端口
 EXPOSE 80
