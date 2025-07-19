@@ -250,7 +250,11 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({
                             onClick={async () => {
                                 const values = form.getFieldsValue();
                                 const backendUrl = values.backendUrl || window.location.hostname;
-                                const backendPort = values.backendPort || 8080; // 默认使用8080端口
+                                
+                                // 根据环境配置端口
+                                const backendHost = process.env.NODE_ENV === 'production' 
+                                  ? window.location.host  // 生产环境使用当前host和port
+                                  : `${backendUrl}:8080`; // 开发环境使用8080端口
 
                                 // 定义测试URL
                                 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -268,7 +272,7 @@ const TerminalSettings: React.FC<TerminalSettingsProps> = ({
                                 let success = false;
 
                                 for (const path of paths) {
-                                    const testUrl = `${wsProtocol}//${backendUrl}:${backendPort}${path}`;
+                                    const testUrl = `${wsProtocol}//${backendHost}${path}`;
                                     try {
                                         const ws = new WebSocket(testUrl);
 

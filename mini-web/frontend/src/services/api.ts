@@ -1,7 +1,9 @@
 import axios from 'axios';
 
-// API基础URL - 确保所有HTTP请求使用8080端口
-export const API_BASE_URL = 'http://localhost:8080/api';
+// API基础URL - 根据环境自动配置
+export const API_BASE_URL = process.env.NODE_ENV === 'production' 
+  ? '/api'  // 生产环境使用相对路径，通过Nginx代理
+  : 'http://localhost:8080/api';  // 开发环境直连后端
 
 // 创建axios实例
 const api = axios.create({

@@ -104,11 +104,12 @@ export const terminalSessionAPI = {
   // 创建WebSocket连接URL
   getWebSocketUrl: (sessionId: string, resume = false) => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname;
-    const port = process.env.NODE_ENV === 'development' ? '8080' : window.location.port;
+    const host = process.env.NODE_ENV === 'production' 
+      ? window.location.host  // 生产环境使用当前host和port
+      : 'localhost:8080';     // 开发环境使用localhost:8080
     const token = localStorage.getItem('token');
     
-    let url = `${protocol}//${host}:${port}/ws/terminal/${sessionId}`;
+    let url = `${protocol}//${host}/ws/terminal/${sessionId}`;
     
     const params = new URLSearchParams();
     if (token) {

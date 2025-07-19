@@ -20,14 +20,15 @@ export const createRdpConnection = (sessionId: number, tab: TerminalTab): WebSoc
     try {
         // 获取WebSocket URL
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsHost = window.location.hostname;
-        const wsPort = 8080; // 假设后端服务端口是8080
+        const wsHost = process.env.NODE_ENV === 'production' 
+          ? window.location.host  // 生产环境使用当前host和port
+          : 'localhost:8080';     // 开发环境使用localhost:8080
 
         // 获取认证令牌
         const token = localStorage.getItem('token');
 
         // 添加token参数到URL以解决认证问题
-        const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws/rdp/${sessionId}?token=${token}`;
+        const wsUrl = `${wsProtocol}//${wsHost}/ws/rdp/${sessionId}?token=${token}`;
 
         console.log(`[RDP] 创建连接: ${wsUrl}`);
 
