@@ -1,5 +1,5 @@
 # 多阶段构建：前端 + 后端 + 运行时
-FROM node:18-alpine AS frontend-builder
+FROM node:18 AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -16,7 +16,7 @@ COPY mini-web/frontend .
 RUN yarn build
 
 # 后端构建阶段
-FROM golang:1.20-alpine AS backend-builder
+FROM golang:1.23-alpine AS backend-builder
 
 WORKDIR /app/backend
 
