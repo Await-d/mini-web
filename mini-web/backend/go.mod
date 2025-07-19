@@ -2,7 +2,7 @@ module gitee.com/await29/mini-web
 
 go 1.23.0
 
-toolchain go1.24.3
+toolchain go1.23.11
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.2.2

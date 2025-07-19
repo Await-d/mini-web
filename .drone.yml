@@ -14,7 +14,7 @@ steps:
       - echo "Frontend build completed"
     
   - name: build-backend
-    image: golang:1.20-alpine
+    image: golang:1.23-alpine
     commands:
       - cd mini-web/backend
       - go mod download
