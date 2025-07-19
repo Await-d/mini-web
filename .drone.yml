@@ -2,7 +2,19 @@ kind: pipeline
 type: docker
 name: mini-web-deployment
 
+clone:
+  depth: 1
+  retries: 3
+
 steps:
+  - name: prepare-workspace
+    image: alpine/git
+    commands:
+      - git config --global http.postBuffer 524288000
+      - git config --global http.lowSpeedLimit 0
+      - git config --global http.lowSpeedTime 999999
+      - echo "Git configuration optimized for large repositories"
+    
   - name: build-frontend
     image: node:18
     commands:
