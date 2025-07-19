@@ -3,27 +3,24 @@ type: docker
 name: mini-web-deployment
 
 steps:
-  # 前端构建
   - name: build-frontend
     image: node:18-alpine
     commands:
       - cd mini-web/frontend
       - npm install
       - npm run build
-      - echo "前端构建完成"
+      - echo "Frontend build completed"
     
-  # 后端构建
   - name: build-backend
     image: golang:1.20-alpine
     commands:
       - cd mini-web/backend
       - go mod download
       - CGO_ENABLED=0 GOOS=linux go build -o mini-web-server ./cmd/server
-      - echo "后端构建完成"
+      - echo "Backend build completed"
     depends_on:
       - build-frontend
 
-  # Docker镜像构建和部署
   - name: build-and-deploy
     image: docker:dind
     volumes:
@@ -32,38 +29,32 @@ steps:
       - name: volume1
         path: /volume1
     commands:
-      # 确保基础目录结构存在
       - mkdir -p /volume1/docker/1panel/apps/local/mini-web
       - mkdir -p /volume1/docker/1panel/apps/local/mini-web/data
       - mkdir -p /volume1/docker/1panel/apps/local/mini-web/logs
       - mkdir -p /volume1/docker/1panel/apps/local/mini-web/configs
       - mkdir -p /volume1/docker/1panel/apps/local/mini-web/screenshots
-      # 设置目录权限
       - chmod -R 755 /volume1/docker/1panel/apps/local/mini-web
-      # 创建占位文件确保目录不为空
       - touch /volume1/docker/1panel/apps/local/mini-web/data/.gitkeep
       - touch /volume1/docker/1panel/apps/local/mini-web/logs/.gitkeep
       - touch /volume1/docker/1panel/apps/local/mini-web/configs/.gitkeep
       - touch /volume1/docker/1panel/apps/local/mini-web/screenshots/.gitkeep
-      # 构建Docker镜像 - 前端和后端一体化
-      - echo "开始构建Mini-Web一体化镜像..."
+      - echo "Building Mini-Web integrated image..."
       - docker build -t mini-web:latest -f Dockerfile .
-      - echo "镜像构建完成"
-      # 停止和删除旧容器
+      - echo "Image build completed"
       - docker stop mini-web-container || true
       - docker rm mini-web-container || true
-      # 部署新容器 - 前端后端一体化部署
-      - |
-        docker run -d --name mini-web-container \
-          --network 1panel-network \
-          -p 10202:80 \
-          -v /volume1/docker/1panel/apps/local/mini-web/data:/app/data \
-          -v /volume1/docker/1panel/apps/local/mini-web/logs:/app/logs \
-          -v /volume1/docker/1panel/apps/local/mini-web/configs:/app/configs \
-          -v /volume1/docker/1panel/apps/local/mini-web/screenshots:/tmp/rdp_screenshots \
-          --restart always \
-          mini-web:latest
-      - echo "Mini-Web容器部署完成，访问地址: http://localhost:10202"
+      - >
+        docker run -d --name mini-web-container
+        --network 1panel-network
+        -p 10202:80
+        -v /volume1/docker/1panel/apps/local/mini-web/data:/app/data
+        -v /volume1/docker/1panel/apps/local/mini-web/logs:/app/logs
+        -v /volume1/docker/1panel/apps/local/mini-web/configs:/app/configs
+        -v /volume1/docker/1panel/apps/local/mini-web/screenshots:/tmp/rdp_screenshots
+        --restart always
+        mini-web:latest
+      - echo "Mini-Web container deployed successfully at http://localhost:10202"
     depends_on:
       - build-backend
 
