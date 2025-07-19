@@ -53,7 +53,16 @@ steps:
       - docker stop mini-web-container || true
       - docker rm mini-web-container || true
       # 部署新容器 - 前端后端一体化部署
-      - docker run -d --name mini-web-container --network 1panel-network -p 10202:80 -v /volume1/docker/1panel/apps/local/mini-web/data:/app/data -v /volume1/docker/1panel/apps/local/mini-web/logs:/app/logs -v /volume1/docker/1panel/apps/local/mini-web/configs:/app/configs -v /volume1/docker/1panel/apps/local/mini-web/screenshots:/tmp/rdp_screenshots --restart always mini-web:latest
+      - |
+        docker run -d --name mini-web-container \
+          --network 1panel-network \
+          -p 10202:80 \
+          -v /volume1/docker/1panel/apps/local/mini-web/data:/app/data \
+          -v /volume1/docker/1panel/apps/local/mini-web/logs:/app/logs \
+          -v /volume1/docker/1panel/apps/local/mini-web/configs:/app/configs \
+          -v /volume1/docker/1panel/apps/local/mini-web/screenshots:/tmp/rdp_screenshots \
+          --restart always \
+          mini-web:latest
       - echo "Mini-Web容器部署完成，访问地址: http://localhost:10202"
     depends_on:
       - build-backend
