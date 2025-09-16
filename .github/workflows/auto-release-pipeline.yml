@@ -1,0 +1,254 @@
+name: Auto Release Pipeline
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release-pipeline:
+    runs-on: ubuntu-latest
+    # 跳过由GitHub Actions创建的提交，避免死循环
+    if: github.event.pusher.name != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip ci]')
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Check if version bump is needed
+      id: check
+      run: |
+        # 检测是否是合并提交
+        PARENT_COUNT=$(git rev-list --parents -n 1 HEAD | wc -w)
+        PARENT_COUNT=$((PARENT_COUNT - 1))
+        echo "Parent count: $PARENT_COUNT"
+
+        if [ "$PARENT_COUNT" -gt 1 ]; then
+          # 合并提交：获取合并进来的所有文件变更
+          echo "Detected merge commit, getting all merged changes"
+          # 获取合并基准点
+          MERGE_BASE=$(git merge-base HEAD^1 HEAD^2 2>/dev/null || echo "")
+          if [ -n "$MERGE_BASE" ]; then
+            # 获取从合并基准到 HEAD 的所有变更
+            CHANGED_FILES=$(git diff --name-only $MERGE_BASE..HEAD)
+          else
+            # 如果无法获取合并基准，使用第二个父提交
+            CHANGED_FILES=$(git diff --name-only HEAD^2..HEAD)
+          fi
+        else
+          # 普通提交：获取相对于上一个提交的变更
+          CHANGED_FILES=$(git diff --name-only HEAD~1..HEAD 2>/dev/null || git diff --name-only $(git rev-list --max-parents=0 HEAD))
+        fi
+
+        echo "Changed files:"
+        echo "$CHANGED_FILES"
+
+        # 检查是否有重要的代码变更（排除文档、配置文件等）
+        SIGNIFICANT_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.(go|js|jsx|ts|tsx|vue|json|yaml|yml|sql|html|css|scss|sass|less)$' | grep -v -E '\.(md|txt|log|gitignore|dockerignore)$' || true)
+
+        echo "Significant changes:"
+        echo "$SIGNIFICANT_CHANGES"
+
+        if [ -n "$SIGNIFICANT_CHANGES" ]; then
+          echo "need_release=true" >> $GITHUB_OUTPUT
+          echo "✅ Found significant changes, will proceed with release"
+        else
+          echo "need_release=false" >> $GITHUB_OUTPUT
+          echo "❌ No significant changes found, skipping release"
+        fi
+
+    - name: Setup Node.js
+      if: steps.check.outputs.need_release == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'yarn'
+        cache-dependency-path: 'mini-web/frontend/yarn.lock'
+
+    - name: Setup Go
+      if: steps.check.outputs.need_release == 'true'
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+
+    - name: Get version info
+      if: steps.check.outputs.need_release == 'true'
+      id: version
+      run: |
+        # 获取最新的标签
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        echo "Latest tag: $LATEST_TAG"
+
+        # 检查 VERSION 文件是否存在
+        if [ -f "VERSION" ]; then
+          VERSION_FILE_VERSION="v$(cat VERSION)"
+          echo "Version file version: $VERSION_FILE_VERSION"
+        else
+          VERSION_FILE_VERSION="v0.0.0"
+          echo "No VERSION file found, using default: $VERSION_FILE_VERSION"
+        fi
+
+        # 版本比较函数
+        version_compare() {
+          local ver1=$(echo "$1" | sed 's/^v//')
+          local ver2=$(echo "$2" | sed 's/^v//')
+          printf '%s\n%s\n' "$ver1" "$ver2" | sort -V | head -n1
+        }
+
+        # 如果 VERSION 文件版本比最新标签新，使用 VERSION 文件版本
+        if [ "$VERSION_FILE_VERSION" != "$LATEST_TAG" ] && [ "$(version_compare "$LATEST_TAG" "$VERSION_FILE_VERSION")" = "$(echo "$LATEST_TAG" | sed 's/^v//')" ]; then
+          NEW_VERSION="$VERSION_FILE_VERSION"
+          echo "Using version from VERSION file: $NEW_VERSION"
+        else
+          # 自动递增版本号
+          # 解析版本号
+          MAJOR=$(echo "$LATEST_TAG" | sed 's/^v//' | cut -d. -f1)
+          MINOR=$(echo "$LATEST_TAG" | sed 's/^v//' | cut -d. -f2)
+          PATCH=$(echo "$LATEST_TAG" | sed 's/^v//' | cut -d. -f3)
+
+          # 递增patch版本
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="v$MAJOR.$MINOR.$PATCH"
+          echo "Auto-incremented version: $NEW_VERSION"
+
+          # 更新 VERSION 文件
+          echo "$MAJOR.$MINOR.$PATCH" > VERSION
+        fi
+
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+    - name: Build Frontend
+      if: steps.check.outputs.need_release == 'true'
+      run: |
+        cd mini-web/frontend
+        yarn install --frozen-lockfile
+        yarn build
+        echo "✅ Frontend build completed"
+
+    - name: Test Backend
+      if: steps.check.outputs.need_release == 'true'
+      run: |
+        cd mini-web/backend
+        go mod download
+        go test ./...
+        echo "✅ Backend tests passed"
+
+    - name: Build Backend
+      if: steps.check.outputs.need_release == 'true'
+      run: |
+        cd mini-web/backend
+        CGO_ENABLED=0 GOOS=linux go build -o mini-web-server ./cmd/server
+        echo "✅ Backend build completed"
+
+    - name: Clean up old releases
+      if: steps.check.outputs.need_release == 'true'
+      run: |
+        # 保留最近5个releases，删除更早的
+        gh release list --limit 100 --json tagName,createdAt | \
+        jq -r 'sort_by(.createdAt) | reverse | .[5:] | .[].tagName' | \
+        while read tag; do
+          if [ -n "$tag" ]; then
+            echo "Deleting old release: $tag"
+            gh release delete "$tag" --yes --cleanup-tag || echo "Failed to delete $tag, continuing..."
+          fi
+        done
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Generate Changelog
+      if: steps.check.outputs.need_release == 'true'
+      id: changelog
+      run: |
+        echo "## What's Changed" > changelog.md
+        echo "" >> changelog.md
+
+        # 生成commit记录
+        if [ "${{ steps.version.outputs.latest_tag }}" != "v0.0.0" ]; then
+          git log ${{ steps.version.outputs.latest_tag }}..HEAD --pretty=format:"* %s (%h)" --no-merges >> changelog.md
+        else
+          git log --pretty=format:"* %s (%h)" --no-merges -10 >> changelog.md
+        fi
+
+        echo "" >> changelog.md
+        echo "**Full Changelog**: https://github.com/Await-d/mini-web/compare/${{ steps.version.outputs.latest_tag }}...${{ steps.version.outputs.new_version }}" >> changelog.md
+
+        # 输出变更日志供后续步骤使用
+        {
+          echo 'changelog<<EOF'
+          cat changelog.md
+          echo EOF
+        } >> $GITHUB_OUTPUT
+
+    - name: Create GitHub Release
+      if: steps.check.outputs.need_release == 'true'
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version.outputs.new_version }}
+        release_name: Release ${{ steps.version.outputs.new_version }}
+        body: ${{ steps.changelog.outputs.changelog }}
+        draft: false
+        prerelease: false
+
+    - name: Commit version changes
+      if: steps.check.outputs.need_release == 'true'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add VERSION
+        git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }} [skip ci]" || echo "No changes to commit"
+        git push
+
+    - name: Login to GitHub Container Registry
+      if: steps.check.outputs.need_release == 'true'
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: await2719
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Docker Buildx
+      if: steps.check.outputs.need_release == 'true'
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and push Docker image
+      if: steps.check.outputs.need_release == 'true'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ghcr.io/await2719/mini-web:latest
+          ghcr.io/await2719/mini-web:${{ steps.version.outputs.new_version }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Send Telegram notification
+      if: steps.check.outputs.need_release == 'true' && vars.TELEGRAM_BOT_TOKEN && vars.TELEGRAM_CHAT_ID
+      run: |
+        MESSAGE="🚀 *Mini Web ${{ steps.version.outputs.new_version }} Released!*
+
+        📦 *Docker Images:*
+        \`ghcr.io/await2719/mini-web:latest\`
+        \`ghcr.io/await2719/mini-web:${{ steps.version.outputs.new_version }}\`
+
+        🔗 *Release Notes:*
+        https://github.com/Await-d/mini-web/releases/tag/${{ steps.version.outputs.new_version }}
+
+        ⚡ *Quick Deploy:*
+        \`docker pull ghcr.io/await2719/mini-web:latest\`"
+
+        curl -s -X POST "https://api.telegram.org/bot${{ vars.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+          -d chat_id="${{ vars.TELEGRAM_CHAT_ID }}" \
+          -d text="$MESSAGE" \
+          -d parse_mode="Markdown"

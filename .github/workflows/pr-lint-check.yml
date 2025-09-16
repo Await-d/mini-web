@@ -1,0 +1,385 @@
+name: PR Lint and Format Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**.js'
+      - '**.jsx'
+      - '**.ts'
+      - '**.tsx'
+      - '**.vue'
+      - '**.json'
+      - '**.cjs'
+      - '**.mjs'
+      - '**.go'
+      - '.prettierrc'
+      - '.eslintrc.cjs'
+      - 'package.json'
+      - 'mini-web/frontend/**'
+      - 'mini-web/backend/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  lint-and-format:
+    runs-on: ubuntu-latest
+    name: Check Code Quality
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'yarn'
+          cache-dependency-path: 'mini-web/frontend/yarn.lock'
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install frontend dependencies
+        run: |
+          if [ -d "mini-web/frontend" ] && [ -f "mini-web/frontend/package.json" ]; then
+            cd mini-web/frontend
+            yarn install --frozen-lockfile
+            cd ../..
+          fi
+
+      - name: Install Go dependencies
+        run: |
+          if [ -d "mini-web/backend" ] && [ -f "mini-web/backend/go.mod" ]; then
+            cd mini-web/backend
+            go mod download
+            cd ../..
+          fi
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v41
+        with:
+          files: |
+            **/*.js
+            **/*.jsx
+            **/*.ts
+            **/*.tsx
+            **/*.vue
+            **/*.cjs
+            **/*.mjs
+            **/*.go
+
+      - name: Check Prettier formatting (Frontend)
+        if: steps.changed-files.outputs.any_changed == 'true'
+        id: prettier-check
+        run: |
+          cd mini-web/frontend
+          PRETTIER_ISSUES=""
+
+          # 检查变更的前端文件
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            if [[ "$file" == mini-web/frontend/* ]] && [[ "$file" =~ \.(js|jsx|ts|tsx|vue|json|css|scss|sass|less)$ ]]; then
+              RELATIVE_FILE=${file#mini-web/frontend/}
+              if [ -f "$RELATIVE_FILE" ]; then
+                if ! yarn prettier --check "$RELATIVE_FILE" 2>/dev/null; then
+                  PRETTIER_ISSUES="$PRETTIER_ISSUES
+          - $file"
+                fi
+              fi
+            fi
+          done
+
+          if [ -n "$PRETTIER_ISSUES" ]; then
+            echo "has_prettier_issues=true" >> $GITHUB_OUTPUT
+            echo "prettier_issues<<EOF" >> $GITHUB_OUTPUT
+            echo "$PRETTIER_ISSUES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "has_prettier_issues=false" >> $GITHUB_OUTPUT
+          fi
+          cd ../..
+
+      - name: Run ESLint (Frontend)
+        if: steps.changed-files.outputs.any_changed == 'true'
+        id: eslint-check
+        run: |
+          cd mini-web/frontend
+          ESLINT_ISSUES=""
+
+          # 检查变更的前端文件
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            if [[ "$file" == mini-web/frontend/* ]] && [[ "$file" =~ \.(js|jsx|ts|tsx|vue)$ ]]; then
+              RELATIVE_FILE=${file#mini-web/frontend/}
+              if [ -f "$RELATIVE_FILE" ]; then
+                if ! yarn eslint "$RELATIVE_FILE" --format=compact 2>/dev/null; then
+                  ESLINT_ISSUES="$ESLINT_ISSUES
+          - $file"
+                fi
+              fi
+            fi
+          done
+
+          if [ -n "$ESLINT_ISSUES" ]; then
+            echo "has_eslint_issues=true" >> $GITHUB_OUTPUT
+            echo "eslint_issues<<EOF" >> $GITHUB_OUTPUT
+            echo "$ESLINT_ISSUES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "has_eslint_issues=false" >> $GITHUB_OUTPUT
+          fi
+          cd ../..
+
+      - name: Run Go formatting check (Backend)
+        if: steps.changed-files.outputs.any_changed == 'true'
+        id: gofmt-check
+        run: |
+          cd mini-web/backend
+          GOFMT_ISSUES=""
+
+          # 检查变更的Go文件
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            if [[ "$file" == mini-web/backend/* ]] && [[ "$file" =~ \.go$ ]]; then
+              RELATIVE_FILE=${file#mini-web/backend/}
+              if [ -f "$RELATIVE_FILE" ]; then
+                if ! gofmt -l "$RELATIVE_FILE" | grep -q "^$"; then
+                  GOFMT_ISSUES="$GOFMT_ISSUES
+          - $file"
+                fi
+              fi
+            fi
+          done
+
+          if [ -n "$GOFMT_ISSUES" ]; then
+            echo "has_gofmt_issues=true" >> $GITHUB_OUTPUT
+            echo "gofmt_issues<<EOF" >> $GITHUB_OUTPUT
+            echo "$GOFMT_ISSUES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "has_gofmt_issues=false" >> $GITHUB_OUTPUT
+          fi
+          cd ../..
+
+      - name: Run Go vet (Backend)
+        if: steps.changed-files.outputs.any_changed == 'true'
+        id: govet-check
+        run: |
+          cd mini-web/backend
+          GOVET_ISSUES=""
+
+          if ! go vet ./... 2>/dev/null; then
+            GOVET_ISSUES="Go vet found issues in the backend code"
+            echo "has_govet_issues=true" >> $GITHUB_OUTPUT
+            echo "govet_issues<<EOF" >> $GITHUB_OUTPUT
+            echo "$GOVET_ISSUES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "has_govet_issues=false" >> $GITHUB_OUTPUT
+          fi
+          cd ../..
+
+      - name: Run Go tests (Backend)
+        if: steps.changed-files.outputs.any_changed == 'true'
+        id: gotest-check
+        run: |
+          cd mini-web/backend
+          if ! go test ./... 2>/dev/null; then
+            echo "has_test_failures=true" >> $GITHUB_OUTPUT
+            echo "test_failures=Backend tests failed" >> $GITHUB_OUTPUT
+          else
+            echo "has_test_failures=false" >> $GITHUB_OUTPUT
+          fi
+          cd ../..
+
+      - name: Comment PR with issues
+        if: |
+          steps.prettier-check.outputs.has_prettier_issues == 'true' ||
+          steps.eslint-check.outputs.has_eslint_issues == 'true' ||
+          steps.gofmt-check.outputs.has_gofmt_issues == 'true' ||
+          steps.govet-check.outputs.has_govet_issues == 'true' ||
+          steps.gotest-check.outputs.has_test_failures == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let comment = '## 🔍 Code Quality Check Results\n\n';
+            let hasIssues = false;
+
+            // Prettier issues
+            if ('${{ steps.prettier-check.outputs.has_prettier_issues }}' === 'true') {
+              hasIssues = true;
+              comment += '### ❌ Prettier Formatting Issues\n\n';
+              comment += 'The following files have formatting issues:\n';
+              comment += '${{ steps.prettier-check.outputs.prettier_issues }}\n\n';
+              comment += '**Fix command:**\n';
+              comment += '```bash\n';
+              comment += 'cd mini-web/frontend\n';
+              comment += 'yarn prettier --write .\n';
+              comment += '```\n\n';
+            }
+
+            // ESLint issues
+            if ('${{ steps.eslint-check.outputs.has_eslint_issues }}' === 'true') {
+              hasIssues = true;
+              comment += '### ❌ ESLint Issues\n\n';
+              comment += 'The following files have linting issues:\n';
+              comment += '${{ steps.eslint-check.outputs.eslint_issues }}\n\n';
+              comment += '**Fix command:**\n';
+              comment += '```bash\n';
+              comment += 'cd mini-web/frontend\n';
+              comment += 'yarn eslint --fix .\n';
+              comment += '```\n\n';
+            }
+
+            // Go formatting issues
+            if ('${{ steps.gofmt-check.outputs.has_gofmt_issues }}' === 'true') {
+              hasIssues = true;
+              comment += '### ❌ Go Formatting Issues\n\n';
+              comment += 'The following Go files have formatting issues:\n';
+              comment += '${{ steps.gofmt-check.outputs.gofmt_issues }}\n\n';
+              comment += '**Fix command:**\n';
+              comment += '```bash\n';
+              comment += 'cd mini-web/backend\n';
+              comment += 'gofmt -w .\n';
+              comment += '```\n\n';
+            }
+
+            // Go vet issues
+            if ('${{ steps.govet-check.outputs.has_govet_issues }}' === 'true') {
+              hasIssues = true;
+              comment += '### ❌ Go Vet Issues\n\n';
+              comment += '${{ steps.govet-check.outputs.govet_issues }}\n\n';
+              comment += '**Check command:**\n';
+              comment += '```bash\n';
+              comment += 'cd mini-web/backend\n';
+              comment += 'go vet ./...\n';
+              comment += '```\n\n';
+            }
+
+            // Test failures
+            if ('${{ steps.gotest-check.outputs.has_test_failures }}' === 'true') {
+              hasIssues = true;
+              comment += '### ❌ Test Failures\n\n';
+              comment += '${{ steps.gotest-check.outputs.test_failures }}\n\n';
+              comment += '**Test command:**\n';
+              comment += '```bash\n';
+              comment += 'cd mini-web/backend\n';
+              comment += 'go test ./...\n';
+              comment += '```\n\n';
+            }
+
+            if (hasIssues) {
+              comment += '---\n\n';
+              comment += '✨ **Tip:** Fix these issues locally and push again to re-run the checks.\n';
+              comment += '🔧 Run the suggested fix commands above to automatically resolve formatting issues.\n';
+            }
+
+            // Find existing bot comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Code Quality Check Results')
+            );
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
+
+      - name: Comment PR with success
+        if: |
+          steps.prettier-check.outputs.has_prettier_issues != 'true' &&
+          steps.eslint-check.outputs.has_eslint_issues != 'true' &&
+          steps.gofmt-check.outputs.has_gofmt_issues != 'true' &&
+          steps.govet-check.outputs.has_govet_issues != 'true' &&
+          steps.gotest-check.outputs.has_test_failures != 'true' &&
+          steps.changed-files.outputs.any_changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = `## ✅ Code Quality Check Results
+
+            All checks passed! Your code looks great! 🎉
+
+            **Checks completed:**
+            - ✅ Frontend Prettier formatting
+            - ✅ Frontend ESLint linting
+            - ✅ Backend Go formatting (gofmt)
+            - ✅ Backend Go vet analysis
+            - ✅ Backend Go tests
+
+            ---
+            Ready to merge! 🚀`;
+
+            // Find existing bot comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Code Quality Check Results')
+            );
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
+
+      - name: Fail if issues found
+        if: |
+          steps.prettier-check.outputs.has_prettier_issues == 'true' ||
+          steps.eslint-check.outputs.has_eslint_issues == 'true' ||
+          steps.gofmt-check.outputs.has_gofmt_issues == 'true' ||
+          steps.govet-check.outputs.has_govet_issues == 'true' ||
+          steps.gotest-check.outputs.has_test_failures == 'true'
+        run: |
+          echo "❌ Code quality checks failed. Please fix the issues and push again."
+          exit 1
