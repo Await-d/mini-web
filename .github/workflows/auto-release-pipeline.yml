@@ -228,8 +228,8 @@ jobs:
         platforms: linux/amd64,linux/arm64
         push: true
         tags: |
-          ghcr.io/await2719/mini-web:latest
-          ghcr.io/await2719/mini-web:${{ steps.version.outputs.new_version }}
+          ghcr.io/await-d/mini-web:latest
+          ghcr.io/await-d/mini-web:${{ steps.version.outputs.new_version }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -239,14 +239,14 @@ jobs:
         MESSAGE="🚀 *Mini Web ${{ steps.version.outputs.new_version }} Released!*
 
         📦 *Docker Images:*
-        \`ghcr.io/await2719/mini-web:latest\`
-        \`ghcr.io/await2719/mini-web:${{ steps.version.outputs.new_version }}\`
+        \`ghcr.io/await-d/mini-web:latest\`
+        \`ghcr.io/await-d/mini-web:${{ steps.version.outputs.new_version }}\`
 
         🔗 *Release Notes:*
         https://github.com/Await-d/mini-web/releases/tag/${{ steps.version.outputs.new_version }}
 
         ⚡ *Quick Deploy:*
-        \`docker pull ghcr.io/await2719/mini-web:latest\`"
+        \`docker pull ghcr.io/await-d/mini-web:latest\`"
 
         curl -s -X POST "https://api.telegram.org/bot${{ vars.TELEGRAM_BOT_TOKEN }}/sendMessage" \
           -d chat_id="${{ vars.TELEGRAM_CHAT_ID }}" \

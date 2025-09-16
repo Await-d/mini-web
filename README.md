@@ -37,7 +37,82 @@ mini-web/
 
 ## 快速开始
 
-### 前端
+### 方式一：Docker 部署（推荐）
+
+#### 使用预构建镜像
+
+1. 拉取镜像
+
+```bash
+docker pull ghcr.io/await-d/mini-web:latest
+```
+
+2. 运行容器
+
+```bash
+docker run -d \
+  --name mini-web \
+  -p 80:80 \
+  -v /path/to/data:/app/data \
+  -v /path/to/logs:/app/logs \
+  ghcr.io/await-d/mini-web:latest
+```
+
+3. 访问应用
+
+打开浏览器访问 http://localhost
+
+#### 使用 Docker Compose
+
+1. 创建 `docker-compose.yml` 文件
+
+```yaml
+version: '3.8'
+services:
+  mini-web:
+    image: ghcr.io/await-d/mini-web:latest
+    container_name: mini-web
+    ports:
+      - "80:80"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./configs:/app/configs
+    environment:
+      - TZ=Asia/Shanghai
+      - HEADLESS=true
+      - CONTAINER=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+2. 启动服务
+
+```bash
+docker-compose up -d
+```
+
+#### 本地构建镜像
+
+```bash
+# 克隆仓库
+git clone https://github.com/Await-d/mini-web.git
+cd mini-web
+
+# 构建镜像
+docker build -t mini-web .
+
+# 运行容器
+docker run -d --name mini-web -p 80:80 mini-web
+```
+
+### 方式二：开发环境部署
+
+#### 前端
 
 1. 进入前端目录
 
@@ -59,7 +134,7 @@ yarn dev
 
 4. 打开浏览器访问 http://localhost:5173
 
-### 后端
+#### 后端
 
 1. 进入后端目录
 
@@ -115,10 +190,114 @@ go run cmd/server/main.go
   - 用户名: `user`
   - 密码: `admin123`
 
+## Docker 使用说明
+
+### 环境变量
+
+| 环境变量 | 默认值 | 说明 |
+|---------|--------|------|
+| `TZ` | `Asia/Shanghai` | 时区设置 |
+| `HEADLESS` | `true` | 无头模式运行 |
+| `CONTAINER` | `true` | 容器环境标识 |
+| `SERVER_HOST` | `0.0.0.0` | 服务器监听地址 |
+| `SERVER_PORT` | `8080` | 后端服务端口 |
+
+### 数据持久化
+
+建议挂载以下目录以实现数据持久化：
+
+- `/app/data` - 数据库文件和用户数据
+- `/app/logs` - 应用日志文件
+- `/app/configs` - 配置文件
+- `/tmp/rdp_screenshots` - RDP截图临时文件
+
+### 容器管理
+
+```bash
+# 查看容器状态
+docker ps -a
+
+# 查看容器日志
+docker logs mini-web
+
+# 进入容器
+docker exec -it mini-web /bin/bash
+
+# 停止容器
+docker stop mini-web
+
+# 启动容器
+docker start mini-web
+
+# 重启容器
+docker restart mini-web
+
+# 删除容器
+docker rm mini-web
+```
+
+### 健康检查
+
+容器内置健康检查端点：`/api/health`
+
+```bash
+# 检查应用健康状态
+curl http://localhost/api/health
+```
+
+### 镜像版本
+
+- `latest` - 最新稳定版本
+- `v1.x.x` - 具体版本号
+
+可在 [GitHub Container Registry](https://github.com/Await-d/mini-web/pkgs/container/mini-web) 查看所有可用版本。
+
+### 端口说明
+
+- `80` - Nginx前端服务端口（对外）
+- `8080` - Go后端API端口（内部）
+
 ## 问题排查
+
+### 开发环境
 
 如果遇到问题，请尝试：
 
 1. 前端依赖问题：`yarn install` 重新安装依赖
 2. 后端启动问题：确保Go环境正确安装
 3. 数据库问题：确保SQLite数据库文件存在且有读写权限
+
+### Docker 环境
+
+1. **容器启动失败**
+   ```bash
+   # 查看详细错误信息
+   docker logs mini-web
+   ```
+
+2. **无法访问应用**
+   - 检查端口映射是否正确：`docker port mini-web`
+   - 确认防火墙设置允许访问端口 80
+
+3. **数据丢失**
+   - 确保正确挂载数据目录
+   - 检查目录权限是否正确
+
+4. **性能问题**
+   - 增加容器内存限制：`docker run --memory=2g ...`
+   - 检查磁盘空间是否充足
+
+### 常见问题
+
+1. **RDP连接失败**
+   - 确保目标服务器RDP服务已启用
+   - 检查网络连接和防火墙设置
+   - 验证用户名和密码是否正确
+
+2. **SSH连接超时**
+   - 检查SSH服务是否运行在目标端口
+   - 确认SSH密钥或密码认证设置
+
+3. **文件传输失败**
+   - 检查目标服务器SFTP服务状态
+   - 确认用户权限和目录访问权限
