@@ -1,3 +1,5 @@
+//go:build windows
+
 /*
  * @Author: Await
  * @Date: 2025-06-07 20:00:00

@@ -44,7 +44,7 @@ mini-web/
 1. 拉取镜像
 
 ```bash
-docker pull ghcr.io/await-d/mini-web:latest
+docker pull await2719/mini-web:latest
 ```
 
 2. 运行容器
@@ -55,7 +55,7 @@ docker run -d \
   -p 80:80 \
   -v /path/to/data:/app/data \
   -v /path/to/logs:/app/logs \
-  ghcr.io/await-d/mini-web:latest
+  await2719/mini-web:latest
 ```
 
 3. 访问应用
@@ -70,7 +70,7 @@ docker run -d \
 version: '3.8'
 services:
   mini-web:
-    image: ghcr.io/await-d/mini-web:latest
+    image: await2719/mini-web:latest
     container_name: mini-web
     ports:
       - "80:80"
@@ -250,7 +250,7 @@ curl http://localhost/api/health
 - `latest` - 最新稳定版本
 - `v1.x.x` - 具体版本号
 
-可在 [GitHub Container Registry](https://github.com/Await-d/mini-web/pkgs/container/mini-web) 查看所有可用版本。
+可在 [Docker Hub](https://hub.docker.com/r/await2719/mini-web) 查看所有可用版本。
 
 ### 端口说明
 
