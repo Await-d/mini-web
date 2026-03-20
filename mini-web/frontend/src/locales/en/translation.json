@@ -1,0 +1,12 @@
+{
+    "welcome": "Welcome to Mini Web",
+    "language": "Language",
+    "dashboard": "Dashboard",
+    "remoteConnections": "Remote Connections",
+    "dataManagement": "Data Management",
+    "userManagement": "User Management",
+    "systemSettings": "System Settings",
+    "userProfile": "User Profile",
+    "logout": "Logout",
+    "notLoggedIn": "Not Logged In"
+}

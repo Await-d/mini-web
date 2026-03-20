@@ -653,7 +653,7 @@ func (h *ConnectionHandler) HandleTerminalWebSocket(w http.ResponseWriter, r *ht
 
 	// 如果是RDP会话，需要设置WebSocket连接并启动连接
 	if actualProtocol == "rdp" {
-		if rdpSession, ok := terminal.(*service.RDPSessionSimple); ok {
+		if rdpSession, ok := terminal.(*service.RDPWebSocketProxy); ok {
 			log.Printf("设置RDP会话的WebSocket连接")
 			rdpSession.SetWebSocket(wsConn)
 

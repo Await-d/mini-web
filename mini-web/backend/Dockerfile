@@ -1,16 +1,18 @@
-FROM golang:1.20-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
-# 复制Go模块定义文件
-COPY go.mod go.sum ./
-RUN go mod download
+# 安装CGO所需的构建工具（grdp库需要CGO支持）
+RUN apk add --no-cache gcc musl-dev
 
-# 复制源代码
+# 复制所有源代码
 COPY . .
 
-# 构建后端应用
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/mini-web-server ./cmd/server
+# 整理依赖并下载（确保go.sum完整）
+RUN go mod tidy && go mod download
+
+# 构建后端应用（启用CGO以支持grdp库）
+RUN CGO_ENABLED=1 GOOS=linux go build -o /app/bin/mini-web-server ./cmd/server
 
 # 创建最终镜像
 FROM alpine:latest
@@ -40,8 +42,6 @@ RUN mkdir -p /app/data /app/logs /app/configs /tmp/rdp_screenshots
 
 # 从构建阶段复制二进制文件
 COPY --from=builder /app/bin/mini-web-server /app/
-COPY --from=builder /app/configs /app/configs
-COPY --from=builder /app/data /app/data
 
 # 设置权限
 RUN chmod +x /app/mini-web-server

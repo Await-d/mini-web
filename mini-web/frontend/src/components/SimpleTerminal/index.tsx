@@ -248,8 +248,11 @@ const SimpleTerminal: React.FC<SimpleTerminalProps> = ({
                 setConnectionStatus('connected');
                 setLoading(false);
             } else if (data.type === 'heartbeat_response') {
-                console.log('收到心跳响应');
-                //TODO 心跳响应
+                // 心跳响应已由WebSocketService自动处理
+                // WebSocketService会计算RTT延迟、评估连接质量并发送terminal-heartbeat事件
+                console.debug('收到心跳响应 (由WebSocketService处理)');
+                // UI组件可以监听terminal-heartbeat事件以显示连接质量
+                // 格式: { tabKey, latency, quality, timestamp }
             } else if (data.type === 'init') {
                 // 忽略初始化消息，不在终端中显示
                 console.log('收到初始化消息，已忽略显示');

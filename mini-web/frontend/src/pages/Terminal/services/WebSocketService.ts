@@ -139,12 +139,24 @@ export class WebSocketService {
 
     // 心跳检测间隔(毫秒) - 调整为5秒，便于快速显示延迟信息
     private heartbeatInterval: number = 5000;
+    // 心跳超时时间(毫秒) - 30秒无响应视为超时
+    private heartbeatTimeout: number = 30000;
     // 心跳检测定时器
     private heartbeatTimers: Map<string, number> = new Map();
     // 心跳发送时间戳用于计算延迟
     private heartbeatTimestamps: Map<string, number> = new Map();
+    // 最后收到pong的时间戳
+    private lastPongTime: Map<string, number> = new Map();
     // 网络延迟数据
     private networkLatencies: Map<string, number> = new Map();
+    // 连接质量评估
+    private connectionQuality: Map<string, 'excellent' | 'good' | 'fair' | 'poor'> = new Map();
+    // 心跳失败计数器
+    private heartbeatFailures: Map<string, number> = new Map();
+    // 最后心跳时间
+    private lastHeartbeatTime: Map<string, number> = new Map();
+    // 心跳超时定时器
+    private heartbeatTimeoutTimers: Map<string, number> = new Map();
 
     /**
      * 创建并管理WebSocket连接
@@ -460,20 +472,7 @@ export class WebSocketService {
 
                         // 处理心跳消息
                         if (protocolMessage.header.messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.HEARTBEAT) {
-                            // 统计心跳消息
-                            this.stats.messageTypeStats.heartbeat++;
-
-                            // 计算心跳延迟
-                            const sendTimestamp = this.heartbeatTimestamps.get(tab.key);
-                            if (sendTimestamp) {
-                                const currentTime = Date.now();
-                                const latency = currentTime - sendTimestamp;
-                                this.networkLatencies.set(tab.key, latency);
-                                // 触发延迟更新事件
-                                window.dispatchEvent(new CustomEvent('network-latency-update', {
-                                    detail: { tabKey: tab.key, latency: latency }
-                                }));
-                            }
+                            this.handleHeartbeatResponse(tab.key);
                             return; // 心跳消息不传递给处理函数
                         }
 
@@ -794,6 +793,83 @@ export class WebSocketService {
     }
 
     /**
+     * 处理心跳响应
+     * @param tabKey 标签键
+     */
+    private handleHeartbeatResponse(tabKey: string): void {
+        const sendTime = this.heartbeatTimestamps.get(tabKey);
+        if (!sendTime) {
+            console.warn(`收到心跳响应但未找到发送时间戳: ${tabKey}`);
+            return;
+        }
+
+        // 计算往返延迟 (RTT)
+        const now = Date.now();
+        const latency = now - sendTime;
+
+        // 更新延迟数据
+        this.networkLatencies.set(tabKey, latency);
+        this.lastPongTime.set(tabKey, now);
+        this.lastHeartbeatTime.set(tabKey, now);
+
+        // 重置心跳失败计数器
+        this.heartbeatFailures.set(tabKey, 0);
+
+        // 清除心跳超时定时器
+        const timeoutTimer = this.heartbeatTimeoutTimers.get(tabKey);
+        if (timeoutTimer) {
+            clearTimeout(timeoutTimer);
+            this.heartbeatTimeoutTimers.delete(tabKey);
+        }
+
+        // 评估连接质量
+        let quality: 'excellent' | 'good' | 'fair' | 'poor';
+        if (latency < 50) {
+            quality = 'excellent';
+        } else if (latency < 100) {
+            quality = 'good';
+        } else if (latency < 200) {
+            quality = 'fair';
+        } else {
+            quality = 'poor';
+        }
+        this.connectionQuality.set(tabKey, quality);
+
+        // 统计心跳消息
+        this.stats.messageTypeStats.heartbeat++;
+
+        // 发送心跳状态更新事件
+        window.dispatchEvent(new CustomEvent('terminal-heartbeat', {
+            detail: {
+                tabKey,
+                latency,
+                quality,
+                timestamp: now
+            }
+        }));
+
+        console.debug(`心跳响应: ${tabKey}, 延迟: ${latency}ms, 质量: ${quality}`);
+    }
+
+    /**
+     * 获取连接质量
+     * @param tabKey 标签键
+     * @returns 连接质量等级
+     */
+    getConnectionQuality(tabKey: string): 'excellent' | 'good' | 'fair' | 'poor' | 'unknown' {
+        return this.connectionQuality.get(tabKey) || 'unknown';
+    }
+
+    /**
+     * 获取上次心跳时间
+     * @param tabKey 标签键
+     * @returns 上次心跳时间戳或null
+     */
+    getLastHeartbeatTime(tabKey: string): number | null {
+        return this.lastHeartbeatTime.get(tabKey) || null;
+    }
+
+    /**
      * 清除心跳检测定时器
      * @param tabKey 标签键
      */
@@ -803,9 +879,21 @@ export class WebSocketService {
             clearInterval(timerId);
             this.heartbeatTimers.delete(tabKey);
         }
+
+        // 清除心跳超时定时器
+        const timeoutTimer = this.heartbeatTimeoutTimers.get(tabKey);
+        if (timeoutTimer) {
+            clearTimeout(timeoutTimer);
+            this.heartbeatTimeoutTimers.delete(tabKey);
+        }
+
         // 清理延迟相关数据
         this.heartbeatTimestamps.delete(tabKey);
         this.networkLatencies.delete(tabKey);
+        this.lastPongTime.delete(tabKey);
+        this.lastHeartbeatTime.delete(tabKey);
+        this.heartbeatFailures.delete(tabKey);
+        this.connectionQuality.delete(tabKey);
     }
 
     /**

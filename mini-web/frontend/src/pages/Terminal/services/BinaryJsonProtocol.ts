@@ -2,9 +2,11 @@
  * @Author: Await
  * @Date: 2025-01-27 10:00:00
  * @LastEditors: Await
- * @LastEditTime: 2025-06-02 18:30:30
- * @Description: 二进制流+JSON协议处理器，提供高效的WebSocket通信
+ * @LastEditTime: 2025-10-02 12:00:00
+ * @Description: 二进制流+JSON协议处理器，提供高效的WebSocket通信，支持gzip压缩
  */
+
+import * as pako from 'pako';
 
 // 协议常量
 export const PROTOCOL_CONSTANTS = {
@@ -66,15 +68,12 @@ export class BinaryJsonProtocol {
      */
     private initializeCompression(): void {
         try {
-            // 检测浏览器是否支持压缩
-            if (typeof CompressionStream !== 'undefined') {
-                this.compressionSupported = true;
-                console.log('BinaryJsonProtocol: 压缩支持已启用');
-            } else {
-                console.log('BinaryJsonProtocol: 浏览器不支持压缩，使用无压缩模式');
-            }
+            // 使用pako库进行压缩，总是可用
+            this.compressionSupported = true;
+            console.log('BinaryJsonProtocol: 压缩支持已启用 (pako gzip)');
         } catch (error) {
             console.warn('BinaryJsonProtocol: 压缩初始化失败:', error);
+            this.compressionSupported = false;
         }
     }
 
@@ -177,19 +176,45 @@ export class BinaryJsonProtocol {
         let jsonData: any = undefined;
         let binaryData: ArrayBuffer | undefined = undefined;
 
-        // 解析JSON数据
-        if (header.jsonLength > 0) {
-            const jsonBuffer = data.slice(offset, offset + header.jsonLength);
-            offset += header.jsonLength;
+        // 如果数据被压缩，先解压
+        if (header.compressionFlag === PROTOCOL_CONSTANTS.COMPRESSION_TYPES.GZIP) {
+            // 压缩数据在二进制部分
+            const compressedData = data.slice(offset, offset + header.binaryLength);
+            const decompressed = this.decompressData(compressedData);
 
-            const decoder = new TextDecoder();
-            const jsonString = decoder.decode(jsonBuffer);
-            jsonData = JSON.parse(jsonString);
-        }
+            console.log(`数据解压: ${compressedData.byteLength} bytes -> ${decompressed.byteLength} bytes`);
 
-        // 解析二进制数据
-        if (header.binaryLength > 0) {
-            binaryData = data.slice(offset, offset + header.binaryLength);
+            // 尝试解析为JSON（如果原始消息类型包含JSON）
+            if (header.messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.JSON_ONLY ||
+                header.messageType === PROTOCOL_CONSTANTS.MESSAGE_TYPES.MIXED) {
+                try {
+                    const decoder = new TextDecoder();
+                    const jsonString = decoder.decode(decompressed);
+                    jsonData = JSON.parse(jsonString);
+                } catch {
+                    // 如果不是纯JSON，将解压后的数据作为二进制数据
+                    binaryData = decompressed;
+                }
+            } else {
+                binaryData = decompressed;
+            }
+        } else {
+            // 未压缩数据，按常规方式解析
+
+            // 解析JSON数据
+            if (header.jsonLength > 0) {
+                const jsonBuffer = data.slice(offset, offset + header.jsonLength);
+                offset += header.jsonLength;
+
+                const decoder = new TextDecoder();
+                const jsonString = decoder.decode(jsonBuffer);
+                jsonData = JSON.parse(jsonString);
+            }
+
+            // 解析二进制数据
+            if (header.binaryLength > 0) {
+                binaryData = data.slice(offset, offset + header.binaryLength);
+            }
         }
 
         return {
@@ -324,6 +349,34 @@ export class BinaryJsonProtocol {
             maxMessageSize: this.maxMessageSize,
             headerSize: PROTOCOL_CONSTANTS.HEADER_SIZE
         };
+    }
+
+    /**
+     * 使用pako压缩数据
+     */
+    private compressData(data: ArrayBuffer): ArrayBuffer {
+        try {
+            const uint8Array = new Uint8Array(data);
+            const compressed = pako.gzip(uint8Array);
+            return compressed.buffer;
+        } catch (error) {
+            console.error('压缩数据失败:', error);
+            throw new Error(`压缩数据失败: ${error}`);
+        }
+    }
+
+    /**
+     * 使用pako解压数据
+     */
+    private decompressData(data: ArrayBuffer): ArrayBuffer {
+        try {
+            const uint8Array = new Uint8Array(data);
+            const decompressed = pako.ungzip(uint8Array);
+            return decompressed.buffer;
+        } catch (error) {
+            console.error('解压数据失败:', error);
+            throw new Error(`解压数据失败: ${error}`);
+        }
     }
 }
 

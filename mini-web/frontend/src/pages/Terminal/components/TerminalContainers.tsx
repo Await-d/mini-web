@@ -11,6 +11,8 @@ import type { TerminalTab } from '../../../contexts/TerminalContext';
 import type { Connection } from '../Terminal.d';
 import SimpleTerminal from '../../../components/SimpleTerminal';
 import RdpTerminal from '../../../components/RdpTerminal';
+import WebSshTerminal from '../../../components/WebSshTerminal';
+import { enableXtermTerminal } from '../../../config/featureFlags';
 import webSocketService from '../services/WebSocketService';
 
 // 判断是否为图形化协议
@@ -138,19 +140,34 @@ const TerminalContainers: React.FC<TerminalContainersProps> = ({
                     visible={tab.key === activeTabKey}
                 />
             );
-        } else {
+        }
+
+        const isSshProtocol = protocol === 'ssh';
+
+        if (isSshProtocol && enableXtermTerminal) {
             return (
-                <SimpleTerminal
-                    key={`simple-${tab.key}`}
+                <WebSshTerminal
+                    key={`webssh-${tab.key}`}
                     connectionId={tab.connectionId || 0}
                     sessionId={tab.sessionId || 0}
                     webSocketRef={tab.webSocketRef}
                     visible={tab.key === activeTabKey}
                     onReconnectRequest={handleReconnectRequest}
-                    tabKey={tab.key}
                 />
             );
         }
+
+        return (
+            <SimpleTerminal
+                key={`simple-${tab.key}`}
+                connectionId={tab.connectionId || 0}
+                sessionId={tab.sessionId || 0}
+                webSocketRef={tab.webSocketRef}
+                visible={tab.key === activeTabKey}
+                onReconnectRequest={handleReconnectRequest}
+                tabKey={tab.key}
+            />
+        );
     };
 
     return (

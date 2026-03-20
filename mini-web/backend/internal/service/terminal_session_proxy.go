@@ -245,6 +245,13 @@ func (p *TerminalSessionProxy) GetSession() *PersistentTerminalSession {
 	return p.session
 }
 
+// GetTerminal 获取底层终端会话
+func (p *TerminalSessionProxy) GetTerminal() TerminalSession {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+	return p.terminal
+}
+
 // SendInput 发送输入到终端
 func (p *TerminalSessionProxy) SendInput(input string) error {
 	data := []byte(input)
@@ -265,14 +272,14 @@ func CreateSSHSession(conn *model.Connection) (TerminalSession, error) {
 	return terminal, nil
 }
 
-// CreateRDPSession 创建RDP会话
+// CreateRDPSession 创建RDP会话（基于Apache Guacamole）
 func CreateRDPSession(conn *model.Connection) (TerminalSession, error) {
-	terminal, err := createRDPTerminalSessionSimple(conn)
-	
+	terminal, err := createRDPTerminalSessionGuacamole(conn)
+
 	if err != nil {
 		return nil, fmt.Errorf("RDP连接失败: %w", err)
 	}
-	
+
 	return terminal, nil
 }
 

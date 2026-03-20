@@ -8,10 +8,14 @@
 package service
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"time"
 )
 
 // 协议常量
@@ -67,7 +71,7 @@ type BinaryProtocolHandler struct {
 // NewBinaryProtocolHandler 创建新的二进制协议处理器
 func NewBinaryProtocolHandler() *BinaryProtocolHandler {
 	return &BinaryProtocolHandler{
-		compressionSupported: false,            // 暂时不支持压缩
+		compressionSupported: true,             // 启用压缩支持
 		maxMessageSize:       10 * 1024 * 1024, // 10MB
 		protocolVersion:      "1.0",
 	}
@@ -102,13 +106,45 @@ func (h *BinaryProtocolHandler) EncodeMessage(jsonData interface{}, binaryData [
 		binaryData = []byte{}
 	}
 
+	// 智能压缩策略：数据总大小 >= 1KB 时才压缩
+	totalDataSize := len(jsonBytes) + len(binaryData)
+	shouldCompress := h.compressionSupported && compression == CompressionGzip && totalDataSize >= 1024
+
+	var finalJSONBytes []byte
+	var finalBinaryData []byte
+	var actualCompression uint8 = CompressionNone
+
+	if shouldCompress {
+		// 合并数据后压缩
+		combinedData := make([]byte, 0, totalDataSize)
+		combinedData = append(combinedData, jsonBytes...)
+		combinedData = append(combinedData, binaryData...)
+
+		compressed, err := h.compressData(combinedData)
+		if err != nil {
+			log.Printf("压缩失败，使用未压缩数据: %v", err)
+			finalJSONBytes = jsonBytes
+			finalBinaryData = binaryData
+		} else {
+			// 压缩成功，将压缩后的数据作为二进制数据
+			finalJSONBytes = []byte{} // 压缩后JSON部分为空
+			finalBinaryData = compressed
+			actualCompression = CompressionGzip
+			log.Printf("数据压缩: %d bytes -> %d bytes (%.1f%%)",
+				totalDataSize, len(compressed), float64(len(compressed))*100/float64(totalDataSize))
+		}
+	} else {
+		finalJSONBytes = jsonBytes
+		finalBinaryData = binaryData
+	}
+
 	// 创建消息头
 	header := MessageHeader{
 		MagicNumber:     MagicNumber,
 		MessageType:     messageType,
-		CompressionFlag: compression,
-		JSONLength:      uint32(len(jsonBytes)),
-		BinaryLength:    uint32(len(binaryData)),
+		CompressionFlag: actualCompression,
+		JSONLength:      uint32(len(finalJSONBytes)),
+		BinaryLength:    uint32(len(finalBinaryData)),
 		Reserved:        0,
 	}
 
@@ -116,7 +152,7 @@ func (h *BinaryProtocolHandler) EncodeMessage(jsonData interface{}, binaryData [
 	headerBytes := h.encodeHeader(header)
 
 	// 组合完整消息
-	totalLength := HeaderSize + len(jsonBytes) + len(binaryData)
+	totalLength := HeaderSize + len(finalJSONBytes) + len(finalBinaryData)
 	result := make([]byte, totalLength)
 
 	offset := 0
@@ -126,14 +162,14 @@ func (h *BinaryProtocolHandler) EncodeMessage(jsonData interface{}, binaryData [
 	offset += HeaderSize
 
 	// 复制JSON数据
-	if len(jsonBytes) > 0 {
-		copy(result[offset:], jsonBytes)
-		offset += len(jsonBytes)
+	if len(finalJSONBytes) > 0 {
+		copy(result[offset:], finalJSONBytes)
+		offset += len(finalJSONBytes)
 	}
 
 	// 复制二进制数据
-	if len(binaryData) > 0 {
-		copy(result[offset:], binaryData)
+	if len(finalBinaryData) > 0 {
+		copy(result[offset:], finalBinaryData)
 	}
 
 	return result, nil
@@ -166,20 +202,44 @@ func (h *BinaryProtocolHandler) DecodeMessage(data []byte) (*ProtocolMessage, er
 	var jsonData interface{}
 	var binaryData []byte
 
-	// 解析JSON数据
-	if header.JSONLength > 0 {
-		jsonBytes := data[offset : offset+int(header.JSONLength)]
-		offset += int(header.JSONLength)
-
-		if err := json.Unmarshal(jsonBytes, &jsonData); err != nil {
-			return nil, fmt.Errorf("解析JSON数据失败: %w", err)
+	// 如果数据被压缩，先解压
+	if header.CompressionFlag == CompressionGzip {
+		// 压缩数据在二进制部分
+		compressedData := data[offset : offset+int(header.BinaryLength)]
+		decompressed, err := h.decompressData(compressedData)
+		if err != nil {
+			return nil, fmt.Errorf("解压缩数据失败: %w", err)
 		}
-	}
 
-	// 解析二进制数据
-	if header.BinaryLength > 0 {
-		binaryData = make([]byte, header.BinaryLength)
-		copy(binaryData, data[offset:offset+int(header.BinaryLength)])
+		log.Printf("数据解压: %d bytes -> %d bytes", len(compressedData), len(decompressed))
+
+		// 尝试解析JSON（如果原始消息类型包含JSON）
+		if header.MessageType == MessageTypeJSONOnly || header.MessageType == MessageTypeMixed {
+			if err := json.Unmarshal(decompressed, &jsonData); err != nil {
+				// 如果不是纯JSON，可能是混合数据，暂时将解压后的数据作为二进制数据
+				binaryData = decompressed
+			}
+		} else {
+			binaryData = decompressed
+		}
+	} else {
+		// 未压缩数据，按常规方式解析
+
+		// 解析JSON数据
+		if header.JSONLength > 0 {
+			jsonBytes := data[offset : offset+int(header.JSONLength)]
+			offset += int(header.JSONLength)
+
+			if err := json.Unmarshal(jsonBytes, &jsonData); err != nil {
+				return nil, fmt.Errorf("解析JSON数据失败: %w", err)
+			}
+		}
+
+		// 解析二进制数据
+		if header.BinaryLength > 0 {
+			binaryData = make([]byte, header.BinaryLength)
+			copy(binaryData, data[offset:offset+int(header.BinaryLength)])
+		}
 	}
 
 	return &ProtocolMessage{
@@ -306,4 +366,39 @@ func (h *BinaryProtocolHandler) HandleProtocolNegotiation(clientNegotiation *Pro
 		serverNegotiation.Version, serverNegotiation.Features)
 
 	return serverNegotiation, nil
+}
+
+// compressData 使用gzip压缩数据
+func (h *BinaryProtocolHandler) compressData(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	writer := gzip.NewWriter(&buf)
+	writer.Name = "" // 不设置文件名以节省空间
+	writer.ModTime = time.Time{} // 使用零值时间
+
+	if _, err := writer.Write(data); err != nil {
+		writer.Close()
+		return nil, fmt.Errorf("写入压缩数据失败: %w", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("关闭压缩器失败: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+// decompressData 使用gzip解压数据
+func (h *BinaryProtocolHandler) decompressData(data []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("创建解压器失败: %w", err)
+	}
+	defer reader.Close()
+
+	decompressed, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("读取解压数据失败: %w", err)
+	}
+
+	return decompressed, nil
 }

@@ -10,6 +10,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/mitchellh/go-vnc v0.0.0-20150629162542-723ed9867aed
+	github.com/pkg/sftp v1.13.8
 	github.com/reiver/go-telnet v0.0.0-20180421082511-9ff0b2ab096e
 	golang.org/x/crypto v0.39.0
 	modernc.org/sqlite v1.37.1
@@ -17,6 +18,7 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/kr/fs v0.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/reiver/go-oi v1.0.0 // indirect

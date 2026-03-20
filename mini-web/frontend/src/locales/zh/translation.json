@@ -1,0 +1,12 @@
+{
+    "welcome": "欢迎使用 Mini Web",
+    "language": "语言",
+    "dashboard": "首页",
+    "remoteConnections": "远程连接",
+    "dataManagement": "数据管理",
+    "userManagement": "用户管理",
+    "systemSettings": "系统设置",
+    "userProfile": "个人资料",
+    "logout": "退出登录",
+    "notLoggedIn": "未登录"
+}

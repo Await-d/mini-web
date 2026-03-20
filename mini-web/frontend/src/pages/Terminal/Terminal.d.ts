@@ -151,3 +151,12 @@ export interface RdpTerminalProps {
     onResize?: (width: number, height: number) => void;
     onInput?: (data: string) => void;
 }
+
+export interface WebSshTerminalComponentProps {
+    connectionId: number;
+    sessionId: string | number;
+    webSocketRef: RefObject<WebSocket | null>;
+    visible?: boolean;
+    onReconnectRequest?: (connectionId: number, sessionId: string | number) => void;
+    toolbarExtras?: ReactNode;
+}

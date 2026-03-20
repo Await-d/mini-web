@@ -1,6 +1,22 @@
 version: '3.8'
 
 services:
+  # Guacamole守护进程 - 提供RDP/VNC协议支持
+  guacd:
+    image: guacamole/guacd:latest
+    container_name: mini-web-guacd
+    restart: unless-stopped
+    environment:
+      - GUACD_LOG_LEVEL=info
+    networks:
+      - mini-web-network
+    healthcheck:
+      test: ["CMD-SHELL", "netstat -an | grep 4822 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   backend:
     build:
       context: ./backend
@@ -20,6 +36,11 @@ services:
       - LOG_LEVEL=info
       - HEADLESS=true
       - CONTAINER=true
+      - GUACD_HOST=guacd
+      - GUACD_PORT=4822
+    depends_on:
+      guacd:
+        condition: service_healthy
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/api/health" ]
       interval: 30s

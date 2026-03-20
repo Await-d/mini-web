@@ -8,6 +8,8 @@
 // React 19 兼容性补丁 - 必须在所有其他导入之前
 import '@ant-design/v5-patch-for-react-19';
 
+import './i18n';
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { RouterProvider } from 'react-router-dom';

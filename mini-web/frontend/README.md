@@ -2,6 +2,13 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## SSH 终端展示（新增）
+
+- 新增 `WebSshTerminal` 组件，基于 `xterm.js` 提供 SSH 会话展示能力。
+- 通过环境变量 `VITE_TERMINAL_USE_XTERM` 控制是否启用，默认关闭以便灰度验证。
+- 相关实现位于 `src/components/WebSshTerminal` 以及 `src/hooks/useXtermTerminal.ts` 等文件。
+- 启动前请执行 `yarn install` 以安装 `xterm` 及其插件依赖。
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh

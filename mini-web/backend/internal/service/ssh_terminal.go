@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"gitee.com/await29/mini-web/internal/model"
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -37,6 +38,10 @@ type SSHTerminalSession struct {
 	captureMarker string
 	// 添加终端格式化器
 	formatter *TerminalFormatter
+	// SFTP客户端
+	sftpClient     *sftp.Client
+	sftpClientOnce sync.Once
+	sftpClientErr  error
 }
 
 // 创建SSH终端会话

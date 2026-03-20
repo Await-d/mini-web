@@ -31,12 +31,5 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:80/ || exit 1
 
-# 使用非root用户运行
-RUN adduser -D -u 1000 webuser && \
-    chown -R webuser:webuser /usr/share/nginx/html && \
-    chmod -R 755 /usr/share/nginx/html
-
-USER webuser
-
-# 启动nginx
+# 启动nginx（容器内以root运行是安全的）
 CMD ["nginx", "-g", "daemon off;"] 
