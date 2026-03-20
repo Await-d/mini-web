@@ -7,25 +7,28 @@ import (
 	"gitee.com/await29/mini-web/internal/model"
 )
 
-// DashboardService Dashboard服务
+var serverStartTime = time.Now()
+
 type DashboardService struct {
 	userRepo       model.UserRepository
 	connectionRepo model.ConnectionRepository
 	sessionRepo    model.SessionRepository
+	activityRepo   model.UserActivityRepository
 	systemService  *SystemService
 }
 
-// NewDashboardService 创建Dashboard服务实例
 func NewDashboardService(
 	userRepo model.UserRepository,
 	connectionRepo model.ConnectionRepository,
 	sessionRepo model.SessionRepository,
+	activityRepo model.UserActivityRepository,
 	systemService *SystemService,
 ) *DashboardService {
 	return &DashboardService{
 		userRepo:       userRepo,
 		connectionRepo: connectionRepo,
 		sessionRepo:    sessionRepo,
+		activityRepo:   activityRepo,
 		systemService:  systemService,
 	}
 }
@@ -93,12 +96,12 @@ func (s *DashboardService) GetUserStats() (map[string]interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		"total_users":      totalUsers,
-		"active_users":     activeUsers,
-		"online_users":     onlineUsers,
-		"today_new_users":  todayNewUsers,
-		"admin_users":      s.getAdminUserCount(),
-		"regular_users":    totalUsers - s.getAdminUserCount(),
+		"total_users":     totalUsers,
+		"active_users":    activeUsers,
+		"online_users":    onlineUsers,
+		"today_new_users": todayNewUsers,
+		"admin_users":     s.getAdminUserCount(),
+		"regular_users":   totalUsers - s.getAdminUserCount(),
 	}, nil
 }
 
@@ -180,10 +183,10 @@ func (s *DashboardService) GetSessionStats() (map[string]interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		"total_sessions":    totalSessions,
-		"active_sessions":   activeSessions,
-		"today_sessions":    todaySessions,
-		"avg_duration":      avgDuration,
+		"total_sessions":     totalSessions,
+		"active_sessions":    activeSessions,
+		"today_sessions":     todaySessions,
+		"avg_duration":       avgDuration,
 		"completed_sessions": totalSessions - activeSessions,
 	}, nil
 }
@@ -196,126 +199,177 @@ func (s *DashboardService) GetSystemStatus() (map[string]interface{}, error) {
 		return nil, fmt.Errorf("获取性能数据失败: %w", err)
 	}
 
-	// 添加运行时间
-	uptime := time.Since(time.Now().Add(-time.Hour * 24 * 7)) // 模拟7天运行时间
-	
 	systemStatus := map[string]interface{}{
-		"uptime":         uptime.Hours(),
-		"status":         "running",
-		"version":        "1.0.0",
-		"last_updated":   time.Now().Format("2006-01-02 15:04:05"),
-		"performance":    perfData,
+		"uptime":       time.Since(serverStartTime).Hours(),
+		"status":       "running",
+		"version":      "1.0.0",
+		"last_updated": time.Now().Format("2006-01-02 15:04:05"),
+		"performance":  perfData,
 	}
 
 	return systemStatus, nil
 }
 
-// GetRecentActivities 获取最近活动
 func (s *DashboardService) GetRecentActivities() ([]map[string]interface{}, error) {
-	// 这里应该从用户活动日志表获取数据
-	// 目前返回模拟数据
-	activities := []map[string]interface{}{
-		{
-			"id":          1,
-			"user":        "admin",
-			"action":      "登录系统",
-			"resource":    "系统",
-			"timestamp":   time.Now().Add(-time.Minute * 5).Format("2006-01-02 15:04:05"),
-			"ip_address":  "192.168.1.100",
-			"status":      "success",
-		},
-		{
-			"id":          2,
-			"user":        "user",
-			"action":      "创建连接",
-			"resource":    "SSH连接",
-			"timestamp":   time.Now().Add(-time.Minute * 10).Format("2006-01-02 15:04:05"),
-			"ip_address":  "192.168.1.101",
-			"status":      "success",
-		},
-		{
-			"id":          3,
-			"user":        "admin",
-			"action":      "更新系统配置",
-			"resource":    "系统设置",
-			"timestamp":   time.Now().Add(-time.Minute * 15).Format("2006-01-02 15:04:05"),
-			"ip_address":  "192.168.1.100",
-			"status":      "success",
-		},
+	logs, err := s.activityRepo.GetAll(20, 0)
+	if err != nil {
+		return nil, fmt.Errorf("获取活动日志失败: %w", err)
 	}
-
+	activities := make([]map[string]interface{}, 0, len(logs))
+	for _, l := range logs {
+		activities = append(activities, map[string]interface{}{
+			"id":         l.ID,
+			"user_id":    l.UserID,
+			"action":     l.Action,
+			"resource":   l.Resource,
+			"timestamp":  l.CreatedAt.Format("2006-01-02 15:04:05"),
+			"ip_address": l.IPAddress,
+			"status":     "success",
+		})
+	}
 	return activities, nil
 }
 
-// 以下是辅助方法
-
-// getUserCount 获取用户数量
 func (s *DashboardService) getUserCount(status string) (int, error) {
-	// 这里应该使用实际的数据库查询
-	// 目前返回模拟数据
-	if status == "active" {
-		return 25, nil
+	users, err := s.userRepo.GetAll()
+	if err != nil {
+		return 0, err
 	}
-	return 30, nil
+	if status == "" {
+		return len(users), nil
+	}
+	count := 0
+	for _, u := range users {
+		if u.Status == status {
+			count++
+		}
+	}
+	return count, nil
 }
 
-// getOnlineUserCount 获取在线用户数
 func (s *DashboardService) getOnlineUserCount() (int, error) {
-	// 这里应该根据最近登录时间或在线状态判断
-	return 8, nil
-}
-
-// getTodayNewUsers 获取今日新增用户数
-func (s *DashboardService) getTodayNewUsers() (int, error) {
-	// 这里应该查询今天创建的用户
-	return 2, nil
-}
-
-// getAdminUserCount 获取管理员用户数
-func (s *DashboardService) getAdminUserCount() int {
-	// 这里应该查询角色为admin的用户数
-	return 3
-}
-
-// getConnectionCount 获取连接数量
-func (s *DashboardService) getConnectionCount(protocol string) (int, error) {
-	// 这里应该使用实际的数据库查询
-	if protocol == "" {
-		return 45, nil
+	users, err := s.userRepo.GetAll()
+	if err != nil {
+		return 0, err
 	}
-	switch protocol {
-	case "ssh":
-		return 20, nil
-	case "rdp":
-		return 15, nil
-	case "vnc":
-		return 8, nil
-	case "telnet":
-		return 2, nil
-	default:
+	threshold := time.Now().Add(-15 * time.Minute)
+	count := 0
+	for _, u := range users {
+		if u.LastLoginAt != nil && u.LastLoginAt.After(threshold) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *DashboardService) getTodayNewUsers() (int, error) {
+	users, err := s.userRepo.GetAll()
+	if err != nil {
+		return 0, err
+	}
+	today := time.Now().Truncate(24 * time.Hour)
+	count := 0
+	for _, u := range users {
+		if u.CreatedAt.After(today) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *DashboardService) getAdminUserCount() int {
+	users, err := s.userRepo.GetAll()
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, u := range users {
+		if u.Role == "admin" {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *DashboardService) getConnectionCount(protocol string) (int, error) {
+	conns, err := s.connectionRepo.GetAll()
+	if err != nil {
+		return 0, err
+	}
+	if protocol == "" {
+		return len(conns), nil
+	}
+	count := 0
+	for _, c := range conns {
+		if c.Protocol == protocol {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *DashboardService) getTodayConnections() (int, error) {
+	conns, err := s.connectionRepo.GetAll()
+	if err != nil {
+		return 0, err
+	}
+	today := time.Now().Truncate(24 * time.Hour)
+	count := 0
+	for _, c := range conns {
+		if c.CreatedAt.After(today) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *DashboardService) getSessionCount(status string) (int, error) {
+	var sessions []*model.Session
+	var err error
+	if status == "active" {
+		sessions, err = s.sessionRepo.GetAllActive()
+	} else {
+		sessions, err = s.sessionRepo.GetAll()
+	}
+	if err != nil {
+		return 0, err
+	}
+	return len(sessions), nil
+}
+
+func (s *DashboardService) getTodaySessions() (int, error) {
+	sessions, err := s.sessionRepo.GetAll()
+	if err != nil {
+		return 0, err
+	}
+	today := time.Now().Truncate(24 * time.Hour)
+	count := 0
+	for _, sess := range sessions {
+		if sess.StartTime.After(today) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *DashboardService) getAverageSessionDuration() (float64, error) {
+	sessions, err := s.sessionRepo.GetAll()
+	if err != nil {
+		return 0, err
+	}
+	if len(sessions) == 0 {
 		return 0, nil
 	}
-}
-
-// getTodayConnections 获取今日创建的连接数
-func (s *DashboardService) getTodayConnections() (int, error) {
-	return 5, nil
-}
-
-// getSessionCount 获取会话数量
-func (s *DashboardService) getSessionCount(status string) (int, error) {
-	if status == "active" {
-		return 12, nil
+	var totalMinutes float64
+	count := 0
+	for _, sess := range sessions {
+		if sess.Duration > 0 {
+			totalMinutes += float64(sess.Duration)
+			count++
+		}
 	}
-	return 156, nil
-}
-
-// getTodaySessions 获取今日会话数
-func (s *DashboardService) getTodaySessions() (int, error) {
-	return 25, nil
-}
-
-// getAverageSessionDuration 获取平均会话时长（分钟）
-func (s *DashboardService) getAverageSessionDuration() (float64, error) {
-	return 45.5, nil
+	if count == 0 {
+		return 0, nil
+	}
+	return totalMinutes / float64(count), nil
 }

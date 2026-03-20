@@ -377,7 +377,7 @@ func NewUserActivityRepository(db *sql.DB) *UserActivityRepository {
 // Create 创建活动日志记录
 func (r *UserActivityRepository) Create(log *model.UserActivityLog) error {
 	query := `
-	INSERT INTO user_activity_logs (user_id, action, resource, details, ip_address, user_agent)
+	INSERT INTO user_activities (user_id, action, resource, details, ip_address, user_agent)
 	VALUES (?, ?, ?, ?, ?, ?)
 	`
 
@@ -408,7 +408,7 @@ func (r *UserActivityRepository) Create(log *model.UserActivityLog) error {
 func (r *UserActivityRepository) GetByUserID(userID uint, limit int, offset int) ([]*model.UserActivityLog, error) {
 	query := `
 	SELECT id, user_id, action, resource, details, ip_address, user_agent, created_at
-	FROM user_activity_logs
+	FROM user_activities
 	WHERE user_id = ?
 	ORDER BY created_at DESC
 	LIMIT ? OFFSET ?
@@ -455,7 +455,7 @@ func (r *UserActivityRepository) GetByUserID(userID uint, limit int, offset int)
 func (r *UserActivityRepository) GetAll(limit int, offset int) ([]*model.UserActivityLog, error) {
 	query := `
 	SELECT id, user_id, action, resource, details, ip_address, user_agent, created_at
-	FROM user_activity_logs
+	FROM user_activities
 	ORDER BY created_at DESC
 	LIMIT ? OFFSET ?
 	`

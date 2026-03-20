@@ -16,16 +16,7 @@ import {
     DownloadOutlined,
     DeleteOutlined,
     EditOutlined,
-    SearchOutlined,
-    SortAscendingOutlined,
-    SortDescendingOutlined,
-    CheckSquareOutlined,
-    MinusSquareOutlined,
     EyeOutlined,
-    HistoryOutlined,
-    UpOutlined,
-    DownOutlined,
-    MoreOutlined,
     CopyOutlined,
     ScissorOutlined,
     CloudUploadOutlined,
@@ -36,9 +27,7 @@ import {
     Input,
     Modal,
     Upload,
-    message,
     Progress,
-    Spin,
     Breadcrumb,
     Space,
     Checkbox,
@@ -49,9 +38,9 @@ import {
     Table,
     App,
 } from 'antd';
-import type { UploadFile } from 'antd/es/upload/interface';
 import FileViewer from './FileViewer';
 import ArchiveManager from './ArchiveManager';
+import api from '../../services/api';
 import './FileBrowser.css';
 
 interface FileItem {
@@ -96,7 +85,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     const [searchTerm, setSearchTerm] = useState('');
     const [sortField, setSortField] = useState<'name' | 'size' | 'modified'>('name');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-    const [uploadVisible, setUploadVisible] = useState(false);
     const [newFolderVisible, setNewFolderVisible] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
     const [newFileVisible, setNewFileVisible] = useState(false);
@@ -112,19 +100,18 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         group: { read: false, write: false, execute: false },
         others: { read: false, write: false, execute: false }
     });
-    const [uploadProgress, setUploadProgress] = useState(0);
-    const [clipboard, setClipboard] = useState<{ files: string[], operation: 'copy' | 'cut' | null }>({
-        files: [],
-        operation: null
-    });
     const [isWaitingForLs, setIsWaitingForLs] = useState(false);
     const currentRequestRef = useRef<string | null>(null);
     const [isDragOver, setIsDragOver] = useState(false);
 
-    // 文件查看器和压缩包管理器状态
     const [fileViewerVisible, setFileViewerVisible] = useState(false);
     const [archiveManagerVisible, setArchiveManagerVisible] = useState(false);
     const [selectedFileForView, setSelectedFileForView] = useState<FileItem | null>(null);
+    const [fileEditVisible, setFileEditVisible] = useState(false);
+    const [fileEditTarget, setFileEditTarget] = useState<FileItem | null>(null);
+    const [fileEditContent, setFileEditContent] = useState('');
+    const [fileEditLoading, setFileEditLoading] = useState(false);
+    const [fileEditSaving, setFileEditSaving] = useState(false);
 
     // 分段传输相关状态
     const segmentBufferRef = useRef<Map<string, { segments: Map<number, string>, totalSegments: number, requestId: string }>>(new Map());
@@ -178,7 +165,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     }, [files, searchTerm, sortField, sortOrder]);
 
     // 分页数据处理
-    const paginatedFiles = useMemo(() => {
+    const _paginatedFiles = useMemo(() => {
         const startIndex = (currentPage - 1) * pageSize;
         const endIndex = startIndex + pageSize;
         return filteredFiles.slice(startIndex, endIndex);
@@ -230,8 +217,9 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
             render: (name: string, record: FileItem) => (
                 <Space>
                     {getFileIcon(record)}
-                    <span
-                        style={{ cursor: 'pointer' }}
+                    <button
+                        type="button"
+                        style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
                         onClick={() => {
                             if (record.type === 'directory') {
                                 enterDirectory(record.name);
@@ -239,10 +227,11 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                 viewFile(record.name);
                             }
                         }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { if (record.type === 'directory') { enterDirectory(record.name); } else { viewFile(record.name); } } }}
                         title={record.type === 'directory' ? `点击进入文件夹: ${name}` : `点击打开文件: ${name}`}
                     >
                         {name}
-                    </span>
+                    </button>
                 </Space>
             ),
         },
@@ -367,6 +356,17 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                             />
                         </Tooltip>
 
+                        {record.type === 'file' && !isArchive && (
+                            <Tooltip title="编辑">
+                                <Button
+                                    type="text"
+                                    size="small"
+                                    icon={<EditOutlined />}
+                                    onClick={() => openFileEditor(record)}
+                                />
+                            </Tooltip>
+                        )}
+
                         {/* 删除按钮 */}
                         <Tooltip title="删除">
                             <Button
@@ -429,7 +429,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     }, [getStorageKey, connectionId]);
 
     // 清除所有连接的保存路径（可选功能）
-    const clearAllSavedPaths = useCallback(() => {
+    const _clearAllSavedPaths = useCallback(() => {
         try {
             const keysToRemove: string[] = [];
             for (let i = 0; i < localStorage.length; i++) {
@@ -438,7 +438,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     keysToRemove.push(key);
                 }
             }
-            keysToRemove.forEach(key => localStorage.removeItem(key));
+            for (const key of keysToRemove) { localStorage.removeItem(key); }
             console.log(`已清除所有文件浏览器历史记录，共清除 ${keysToRemove.length} 条记录`);
         } catch (error) {
             console.warn('清除所有保存路径失败:', error);
@@ -446,7 +446,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     }, []);
 
     // 检查WebSocket输出是否为ls命令结果
-    const isLsOutput = useCallback((text: string): boolean => {
+    const _isLsOutput = useCallback((text: string): boolean => {
         // 添加类型检查
         if (typeof text !== 'string' || !text) {
             return false;
@@ -455,7 +455,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         console.log('检查是否为ls输出:', text.substring(0, 200) + '...');
 
         // 清理ANSI转义序列
-        const cleanText = text.replace(/\x1b\[[0-9;]*m/g, '');
+        const cleanText = text.replace(/\u001b\[[0-9;]*m/g, '');
 
         // 检查是否包含文件权限模式字符串 (更宽松的匹配)
         const hasPermissions = /[dl-][rwx-]{9}/.test(cleanText);
@@ -559,7 +559,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
         // 更全面地清理ANSI转义序列和颜色代码
         const cleanOutput = output
-            .replace(/\x1b\[[0-9;]*m/g, '')          // 移除ANSI颜色代码
+            .replace(/\u001b\[[0-9;]*m/g, '')          // 移除ANSI颜色代码
             .replace(/\[0m/g, '')                    // 移除重置代码
             .replace(/\[01;34m/g, '')                // 移除蓝色代码
             .replace(/\[01;36m/g, '')                // 移除青色代码
@@ -668,7 +668,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 }
 
                 // 使用正则匹配结果
-                const linkCount = parseInt(fileInfoMatch[1], 10);
+                const _linkCount = parseInt(fileInfoMatch[1], 10); void _linkCount;
                 const owner = fileInfoMatch[2];
                 const group = fileInfoMatch[3];
                 const size = parseInt(fileInfoMatch[4], 10) || 0;
@@ -796,7 +796,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         } else {
             // 清除所有分段状态
             segmentBufferRef.current.clear();
-            segmentTimeoutRef.current.forEach(timeout => clearTimeout(timeout));
+            segmentTimeoutRef.current.forEach((timeout) => { clearTimeout(timeout); });
             segmentTimeoutRef.current.clear();
             console.log('已清除所有分段状态');
         }
@@ -1381,11 +1381,182 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         }
     }, [files, currentDirectory]);
 
-    // 下载文件
-    const downloadFile = useCallback((fileName: string) => {
-        // TODO: 实现后端JSON格式的下载文件操作
-        message.info('下载文件功能正在开发中，将通过后端API实现');
-    }, []);
+    const openFileEditor = useCallback(async (file: FileItem) => {
+        if (!sessionId) {
+            message.error('会话ID无效');
+            return;
+        }
+        setFileEditTarget(file);
+        setFileEditLoading(true);
+        setFileEditVisible(true);
+        try {
+            const remotePath = file.path || (currentDirectory === '/' ? `/${file.name}` : `${currentDirectory}/${file.name}`);
+            const response = await api.get('/files/download', {
+                params: { sessionId: String(sessionId), remotePath },
+                responseType: 'text',
+            });
+            setFileEditContent(typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
+        } catch (err) {
+            message.error('读取文件内容失败');
+            setFileEditVisible(false);
+        } finally {
+            setFileEditLoading(false);
+        }
+    }, [sessionId, currentDirectory, message]);
+
+    const saveFileEdit = useCallback(async () => {
+        if (!sessionId || !fileEditTarget) return;
+        const remotePath = fileEditTarget.path || (currentDirectory === '/' ? `/${fileEditTarget.name}` : `${currentDirectory}/${fileEditTarget.name}`);
+        setFileEditSaving(true);
+        try {
+            await api.put('/files/edit', {
+                sessionId: String(sessionId),
+                remotePath,
+                content: fileEditContent,
+            });
+            message.success('文件保存成功');
+            setFileEditVisible(false);
+        } catch (err) {
+            message.error('保存文件失败');
+        } finally {
+            setFileEditSaving(false);
+        }
+    }, [sessionId, fileEditTarget, fileEditContent, currentDirectory, message]);
+
+    const downloadFile = useCallback(async (fileName: string) => {
+        const file = files.find((item) => item.name === fileName);
+        if (!file) {
+            message.error('文件不存在');
+            return;
+        }
+
+        if (file.type === 'directory') {
+            message.error('暂不支持直接下载文件夹');
+            return;
+        }
+
+        if (!sessionId) {
+            message.error('会话ID无效，无法下载文件');
+            return;
+        }
+
+        const remotePath = file.path || (currentDirectory === '/' ? `/${fileName}` : `${currentDirectory}/${fileName}`);
+        const hideLoading = message.loading('正在下载文件...', 0);
+
+        try {
+            const response = await api.get('/files/download', {
+                params: {
+                    sessionId: String(sessionId),
+                    remotePath,
+                },
+                responseType: 'blob',
+            });
+
+            const contentDisposition = response.headers['content-disposition'];
+            const match = typeof contentDisposition === 'string'
+                ? contentDisposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i)
+                : null;
+            const fileNameFromHeader = match?.[1] || match?.[2];
+            const downloadName = fileNameFromHeader ? decodeURIComponent(fileNameFromHeader) : fileName;
+
+            const blob = new Blob([response.data], {
+                type: response.headers['content-type'] || 'application/octet-stream',
+            });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = downloadName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            message.success(`下载成功: ${downloadName}`);
+        } catch (error) {
+            const err = error as {
+                response?: {
+                    data?: Blob | { error?: string; message?: string };
+                };
+                message?: string;
+            };
+
+            const responseData = err.response?.data;
+            if (responseData instanceof Blob) {
+                try {
+                    const text = await responseData.text();
+                    let serverMessage = text;
+
+                    try {
+                        const parsed = JSON.parse(text) as { error?: string; message?: string };
+                        serverMessage = parsed.error || parsed.message || text;
+                    } catch {
+                    }
+
+                    message.error(`下载失败: ${serverMessage || '未知错误'}`);
+                } catch {
+                    message.error('下载失败，请重试');
+                }
+            } else {
+                const serverMessage = responseData?.error || responseData?.message || err.message || '未知错误';
+                message.error(`下载失败: ${serverMessage}`);
+            }
+        } finally {
+            hideLoading();
+        }
+    }, [files, sessionId, currentDirectory, message]);
+
+    const batchDeleteItems = useCallback(async () => {
+        if (!sessionId) {
+            message.error('会话ID无效，无法执行批量删除');
+            return;
+        }
+
+        if (selectedFiles.length === 0) {
+            message.info('请先选择要删除的文件');
+            return;
+        }
+
+        const remotePaths = Array.from(new Set(selectedFiles.map((name) => {
+            const file = files.find((item) => item.name === name);
+            return file?.path || (currentDirectory === '/' ? `/${name}` : `${currentDirectory}/${name}`);
+        })));
+
+        const hideLoading = message.loading('正在批量删除...', 0);
+
+        try {
+            const response = await api.post('/files/delete', {
+                sessionId: String(sessionId),
+                remotePaths,
+            });
+
+            const result = response.data as {
+                success?: boolean;
+                message?: string;
+                count?: number;
+                error?: string;
+            };
+
+            if (!result.success) {
+                message.error(result.error || result.message || '批量删除失败');
+                return;
+            }
+
+            message.success(result.message || `成功删除 ${result.count ?? remotePaths.length} 个项目`);
+            setSelectedFiles([]);
+            setTimeout(() => refreshDirectory(), 500);
+        } catch (error) {
+            const err = error as {
+                response?: {
+                    data?: { error?: string; message?: string };
+                };
+                message?: string;
+            };
+            const serverMessage = err.response?.data?.error || err.response?.data?.message || err.message || '未知错误';
+            message.error(`批量删除失败: ${serverMessage}`);
+        } finally {
+            hideLoading();
+        }
+    }, [sessionId, selectedFiles, files, currentDirectory, message, refreshDirectory]);
 
     // 上传状态管理
     const [uploadingFiles, setUploadingFiles] = useState<Map<string, { progress: number, status: 'uploading' | 'success' | 'error' | 'retrying', error?: string, file?: File }>>(new Map());
@@ -1786,40 +1957,32 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         const items = [
             {
                 title: (
-                    <span
-                        onClick={() => {
-                            setCurrentDirectory('/');
-                            saveCurrentPath('/'); // 保存根目录路径
-                            setTimeout(() => {
-                                refreshDirectory('/');
-                            }, 100);
-                        }}
-                        style={{ cursor: 'pointer' }}
+                    <button
+                        type="button"
+                        onClick={() => { setCurrentDirectory('/'); saveCurrentPath('/'); setTimeout(() => { refreshDirectory('/'); }, 100); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setCurrentDirectory('/'); saveCurrentPath('/'); setTimeout(() => { refreshDirectory('/'); }, 100); } }}
+                        style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
                     >
                         <HomeOutlined /> 根目录
-                    </span>
+                    </button>
                 )
             }
         ];
 
         let path = '';
-        parts.forEach((part, index) => {
+        parts.forEach((part) => {
             path += `/${part}`;
             const currentPath = path;
             items.push({
                 title: (
-                    <span
-                        onClick={() => {
-                            setCurrentDirectory(currentPath);
-                            saveCurrentPath(currentPath); // 保存点击的路径
-                            setTimeout(() => {
-                                refreshDirectory(currentPath);
-                            }, 100);
-                        }}
-                        style={{ cursor: 'pointer' }}
+                    <button
+                        type="button"
+                        onClick={() => { setCurrentDirectory(currentPath); saveCurrentPath(currentPath); setTimeout(() => { refreshDirectory(currentPath); }, 100); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setCurrentDirectory(currentPath); saveCurrentPath(currentPath); setTimeout(() => { refreshDirectory(currentPath); }, 100); } }}
+                        style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
                     >
                         {part}
-                    </span>
+                    </button>
                 )
             });
         });
@@ -2156,11 +2319,11 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     enterDirectory(file.name);
                 }
                 break;
-            case 'select':
-                // 处理手动选择（通过复选框或Ctrl+点击）
+            case 'select': {
                 const isCurrentlySelected = selectedFiles.includes(file.name);
                 handleFileSelection(file.name, !isCurrentlySelected);
                 break;
+            }
         }
     }, [viewFile, downloadFile, deleteItem, enterDirectory, selectedFiles, handleFileSelection]);
 
@@ -2201,10 +2364,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     Modal.confirm({
                         title: '批量删除',
                         content: `确定要删除选中的 ${selectedFiles.length} 个项目吗？`,
-                        onOk: () => {
-                            message.info('批量删除功能正在开发中，将通过后端API实现');
-                            setSelectedFiles([]);
-                        }
+                        onOk: () => batchDeleteItems()
                     });
                 }
                 break;
@@ -2242,7 +2402,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 // 其他按键也阻止冒泡，防止影响终端
                 break;
         }
-    }, [refreshDirectory, onClose, selectedFiles, files, filteredFiles, enterDirectory, viewFile, goToParent]);
+    }, [refreshDirectory, onClose, selectedFiles, files, filteredFiles, enterDirectory, viewFile, goToParent, batchDeleteItems]);
 
     // 输入事件处理 - 专门处理输入相关事件
     const handleInput = useCallback((e: React.FormEvent) => {
@@ -2279,7 +2439,8 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     if (!visible) return null;
 
     return (
-        <div
+        <section
+            aria-label="文件浏览器"
             className="file-browser"
             onKeyDown={handleKeyDown}
             onKeyUp={(e) => e.stopPropagation()}
@@ -2521,11 +2682,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                                     Modal.confirm({
                                         title: '批量删除',
                                         content: `确定要删除选中的 ${selectedFiles.length} 个项目吗？`,
-                                        onOk: () => {
-                                            // TODO: 实现后端JSON格式的批量删除操作
-                                            message.info('批量删除功能正在开发中，将通过后端API实现');
-                                            setSelectedFiles([]); // 清空选择
-                                        }
+                                        onOk: () => batchDeleteItems()
                                     });
                                 }}
                             >
@@ -2696,7 +2853,31 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                 />
             )}
 
-            {/* 新建文件夹模态框 */}
+            <Modal
+                title={`编辑文件: ${fileEditTarget?.name ?? ''}`}
+                open={fileEditVisible}
+                onOk={saveFileEdit}
+                onCancel={() => { setFileEditVisible(false); setFileEditContent(''); setFileEditTarget(null); }}
+                okText="保存"
+                cancelText="取消"
+                confirmLoading={fileEditSaving}
+                width={800}
+                style={{ top: 40 }}
+            >
+                {fileEditLoading ? (
+                    <div style={{ textAlign: 'center', padding: 40 }}>加载中...</div>
+                ) : (
+                    <Input.TextArea
+                        value={fileEditContent}
+                        onChange={(e) => setFileEditContent(e.target.value)}
+                        rows={24}
+                        style={{ fontFamily: 'monospace', fontSize: 13 }}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        onKeyUp={(e) => e.stopPropagation()}
+                    />
+                )}
+            </Modal>
+
             <Modal
                 title="新建文件夹"
                 open={newFolderVisible}
@@ -3011,7 +3192,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
                     </div>
                 </Form>
             </Modal>
-        </div>
+        </section>
     );
 };
 

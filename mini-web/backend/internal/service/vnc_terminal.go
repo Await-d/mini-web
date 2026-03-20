@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
+	stdcolor "image/color"
 	"image/png"
 	"io"
 	"log"
@@ -14,35 +15,33 @@ import (
 	"time"
 
 	"gitee.com/await29/mini-web/internal/model"
-	"github.com/mitchellh/go-vnc"
+	vnc "github.com/mitchellh/go-vnc"
 )
 
-// VNCTerminalSession 实现VNC终端会话
 type VNCTerminalSession struct {
-	conn       *vnc.ClientConn
-	reader     *io.PipeReader
-	writer     *io.PipeWriter
-	model      *model.Connection
-	stopChan   chan struct{}
-	closedChan chan struct{}
-	closeOnce  sync.Once
-	mutex      sync.Mutex
-	// 用于存储VNC帧缓冲区的当前状态
-	frameBuffer []byte
-	width       uint16
-	height      uint16
-	// 用于存储上一次屏幕快照
-	lastScreenshot []byte
+	conn           *vnc.ClientConn
+	serverMsgCh    chan vnc.ServerMessage
+	reader         *io.PipeReader
+	writer         *io.PipeWriter
+	model          *model.Connection
+	stopChan       chan struct{}
+	closedChan     chan struct{}
+	closeOnce      sync.Once
+	mutex          sync.Mutex
+	framebuf       *image.RGBA
+	width          uint16
+	height         uint16
 	lastUpdateTime time.Time
 }
 
 // 创建VNC终端会话
 func createVNCTerminalSession(conn *model.Connection) (*VNCTerminalSession, error) {
-	// 准备VNC配置
+	serverMsgCh := make(chan vnc.ServerMessage, 64)
 	config := &vnc.ClientConfig{
 		Auth: []vnc.ClientAuth{
 			&vnc.PasswordAuth{Password: conn.Password},
 		},
+		ServerMessageCh: serverMsgCh,
 	}
 
 	// 连接到VNC服务器
@@ -66,22 +65,20 @@ func createVNCTerminalSession(conn *model.Connection) (*VNCTerminalSession, erro
 	stopChan := make(chan struct{})
 	closedChan := make(chan struct{})
 
-	// 初始化帧缓冲区
 	width := uint16(vncConn.FrameBufferWidth)
 	height := uint16(vncConn.FrameBufferHeight)
-	bufferSize := int(width) * int(height) * 4 // 假设每像素4字节(RGBA)
 
 	session := &VNCTerminalSession{
 		conn:           vncConn,
+		serverMsgCh:    serverMsgCh,
 		reader:         reader,
 		writer:         writer,
 		model:          conn,
 		stopChan:       stopChan,
 		closedChan:     closedChan,
-		frameBuffer:    make([]byte, bufferSize),
+		framebuf:       image.NewRGBA(image.Rect(0, 0, int(width), int(height))),
 		width:          width,
 		height:         height,
-		lastScreenshot: nil,
 		lastUpdateTime: time.Now(),
 	}
 
@@ -117,57 +114,67 @@ func (v *VNCTerminalSession) handleVNCEvents() {
 		select {
 		case <-v.stopChan:
 			return
+		case msg, ok := <-v.serverMsgCh:
+			if !ok {
+				return
+			}
+			if update, ok := msg.(*vnc.FramebufferUpdateMessage); ok {
+				v.applyFramebufferUpdate(update)
+			}
 		case <-ticker.C:
-			// 定期请求帧缓冲区更新
-			err := v.conn.FramebufferUpdateRequest(true, 0, 0, v.width, v.height)
-			if err != nil {
+			if err := v.conn.FramebufferUpdateRequest(true, 0, 0, v.width, v.height); err != nil {
 				log.Printf("请求VNC帧缓冲区更新失败: %v", err)
 				return
 			}
 		case <-screenshotTicker.C:
-			// 定期生成和发送屏幕截图
 			v.captureAndSendScreenshot()
 		}
 	}
 }
 
-// captureAndSendScreenshot 捕获并发送屏幕截图
-func (v *VNCTerminalSession) captureAndSendScreenshot() {
+func (v *VNCTerminalSession) applyFramebufferUpdate(msg *vnc.FramebufferUpdateMessage) {
 	v.mutex.Lock()
 	defer v.mutex.Unlock()
+	for _, rect := range msg.Rectangles {
+		rawEnc, ok := rect.Enc.(*vnc.RawEncoding)
+		if !ok {
+			continue
+		}
+		for i, color := range rawEnc.Colors {
+			px := int(rect.X) + (i % int(rect.Width))
+			py := int(rect.Y) + (i / int(rect.Width))
+			if px < int(v.width) && py < int(v.height) {
+				v.framebuf.SetRGBA(px, py, stdcolor.RGBA{
+					R: uint8(color.R >> 8),
+					G: uint8(color.G >> 8),
+					B: uint8(color.B >> 8),
+					A: 255,
+				})
+			}
+		}
+	}
+	v.lastUpdateTime = time.Now()
+}
 
-	// 如果距离上次更新时间太短，跳过
-	if time.Since(v.lastUpdateTime) < 500*time.Millisecond {
+func (v *VNCTerminalSession) captureAndSendScreenshot() {
+	if time.Since(v.lastUpdateTime) < 200*time.Millisecond {
 		return
 	}
-
-	// 请求完整帧缓冲区
-	err := v.conn.FramebufferUpdateRequest(false, 0, 0, v.width, v.height)
-	if err != nil {
-		log.Printf("请求VNC完整帧缓冲区失败: %v", err)
+	if err := v.conn.FramebufferUpdateRequest(true, 0, 0, v.width, v.height); err != nil {
+		log.Printf("请求VNC帧缓冲区更新失败: %v", err)
 		return
 	}
-
-	// 创建一个简单的图像
-	// 注意：这里只是模拟，实际应该从帧缓冲区生成真实的屏幕截图
-	img := image.NewRGBA(image.Rect(0, 0, int(v.width), int(v.height)))
-	
-	// 将图像编码为PNG
+	v.mutex.Lock()
+	img := v.framebuf
+	v.mutex.Unlock()
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
-		log.Printf("PNG编码失败: %v", err)
+		log.Printf("VNC PNG编码失败: %v", err)
 		return
 	}
-	
-	// 生成base64编码的图像
 	base64Img := base64.StdEncoding.EncodeToString(buf.Bytes())
-	
-	// 发送屏幕截图消息
 	message := fmt.Sprintf("VNC_SCREENSHOT:%d:%d:%s", v.width, v.height, base64Img)
 	v.writer.Write([]byte(message))
-	
-	// 更新时间戳
-	v.lastUpdateTime = time.Now()
 }
 
 // Read 实现io.Reader接口
@@ -192,15 +199,15 @@ func (v *VNCTerminalSession) Write(p []byte) (int, error) {
 			buttonMask := uint8(p[1])
 			x := uint16(p[2])<<8 | uint16(p[3])
 			y := uint16(p[4])<<8 | uint16(p[5])
-			
+
 			// 使用自定义的ButtonMask类型
 			buttonState := vnc.ButtonMask(buttonMask)
-			
+
 			err := v.conn.PointerEvent(buttonState, x, y)
 			if err != nil {
 				return 0, err
 			}
-			
+
 			// 发送鼠标事件确认
 			v.writer.Write([]byte(fmt.Sprintf("VNC_MOUSE_ACK:%d:%d:%d", x, y, buttonMask)))
 		}
@@ -209,13 +216,13 @@ func (v *VNCTerminalSession) Write(p []byte) (int, error) {
 		if len(p) >= 4 {
 			downFlag := p[1] != 0
 			keyCode := uint32(p[2])<<8 | uint32(p[3])
-			
+
 			// 注意：go-vnc库的KeyEvent参数顺序可能不同，需要适配
 			err := v.conn.KeyEvent(keyCode, downFlag)
 			if err != nil {
 				return 0, err
 			}
-			
+
 			// 发送键盘事件确认
 			v.writer.Write([]byte(fmt.Sprintf("VNC_KEY_ACK:%d:%v", keyCode, downFlag)))
 		}
@@ -258,8 +265,8 @@ func (v *VNCTerminalSession) WindowResize(rows, cols uint16) error {
 	// 发送窗口调整通知
 	v.mutex.Lock()
 	defer v.mutex.Unlock()
-	
+
 	v.writer.Write([]byte(fmt.Sprintf("VNC_RESIZE:%d:%d", cols, rows)))
-	
+
 	return nil
 }

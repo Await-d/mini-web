@@ -1,11 +1,16 @@
 package service
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"log"
+	"net"
+	"net/smtp"
 	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -317,13 +322,13 @@ func (s *SystemService) createLog(level, module, message, details string, userID
 func (s *SystemService) GetPerformanceMetrics() (map[string]interface{}, error) {
 	// 这里实现真实的系统性能数据收集
 	performanceData := map[string]interface{}{
-		"cpu_usage": s.getCPUUsage(),
-		"memory_usage": s.getMemoryUsage(),
-		"disk_usage": s.getDiskUsage(),
-		"system_load": s.getSystemLoad(),
-		"network_stats": s.getNetworkStats(),
+		"cpu_usage":      s.getCPUUsage(),
+		"memory_usage":   s.getMemoryUsage(),
+		"disk_usage":     s.getDiskUsage(),
+		"system_load":    s.getSystemLoad(),
+		"network_stats":  s.getNetworkStats(),
 		"database_stats": s.getDatabaseStats(),
-		"app_stats": s.getAppStats(),
+		"app_stats":      s.getAppStats(),
 	}
 
 	s.LogInfo("system", "获取性能监控数据", "性能数据获取成功", nil, "")
@@ -333,41 +338,98 @@ func (s *SystemService) GetPerformanceMetrics() (map[string]interface{}, error) 
 // GetSystemInfo 获取系统信息
 func (s *SystemService) GetSystemInfo() (map[string]interface{}, error) {
 	systemInfo := map[string]interface{}{
-		"hostname":    s.getHostname(),
-		"os":         s.getOS(),
+		"hostname":     s.getHostname(),
+		"os":           s.getOS(),
 		"architecture": s.getArchitecture(),
-		"go_version":  s.getGoVersion(),
-		"uptime":     s.getUptime(),
-		"version":    "1.0.0",
-		"build_time": "2025-01-07",
+		"go_version":   s.getGoVersion(),
+		"uptime":       s.getUptime(),
+		"version":      "1.0.0",
+		"build_time":   "2025-01-07",
 	}
 
 	s.LogInfo("system", "获取系统信息", "系统信息获取成功", nil, "")
 	return systemInfo, nil
 }
 
-// TestEmailConfig 测试邮件配置
 func (s *SystemService) TestEmailConfig(host string, port int, username, password, to string, userID uint, ipAddress string) error {
-	// 这里实现邮件发送测试逻辑
-	// 使用Go的net/smtp包发送测试邮件
-	
 	s.LogInfo("system", "邮件配置测试",
 		fmt.Sprintf("测试邮件发送到: %s", to),
 		&userID, ipAddress)
-	
-	// 模拟邮件发送成功
+
+	addr := fmt.Sprintf("%s:%d", host, port)
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("无法连接邮件服务器 %s: %w", addr, err)
+	}
+	conn.Close()
+
+	var auth smtp.Auth
+	if username != "" && password != "" {
+		auth = smtp.PlainAuth("", username, password, host)
+	}
+
+	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: Mini-Web 邮件测试\r\n\r\n这是一封来自 Mini-Web 的测试邮件，说明邮件配置正常。",
+		username, to)
+
+	if err := smtp.SendMail(addr, auth, username, []string{to}, []byte(msg)); err != nil {
+		return fmt.Errorf("发送测试邮件失败: %w", err)
+	}
+
+	s.LogInfo("system", "邮件配置测试成功",
+		fmt.Sprintf("测试邮件已发送到: %s", to),
+		&userID, ipAddress)
 	return nil
 }
 
 // 以下是性能数据收集的辅助方法
 
-// getCPUUsage 获取CPU使用率
+func readCPUStat() (idle, total uint64, err error) {
+	f, err := os.Open("/proc/stat")
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "cpu ") {
+			continue
+		}
+		fields := strings.Fields(line)
+		for i, v := range fields[1:] {
+			n, _ := strconv.ParseUint(v, 10, 64)
+			total += n
+			if i == 3 {
+				idle = n
+			}
+		}
+		return
+	}
+	err = fmt.Errorf("/proc/stat cpu line not found")
+	return
+}
+
 func (s *SystemService) getCPUUsage() map[string]interface{} {
-	// 简化实现，实际应该通过系统调用获取真实数据
+	idle1, total1, err := readCPUStat()
+	if err != nil {
+		return map[string]interface{}{"usage": 0, "cores": runtime.NumCPU(), "error": err.Error()}
+	}
+	time.Sleep(200 * time.Millisecond)
+	idle2, total2, err := readCPUStat()
+	if err != nil {
+		return map[string]interface{}{"usage": 0, "cores": runtime.NumCPU(), "error": err.Error()}
+	}
+	idleDelta := float64(idle2 - idle1)
+	totalDelta := float64(total2 - total1)
+	var usage float64
+	if totalDelta > 0 {
+		usage = (1.0 - idleDelta/totalDelta) * 100
+	}
+	load := s.getSystemLoad()
 	return map[string]interface{}{
-		"usage":    75.5 + float64(time.Now().Second()%10), // 模拟动态数据
+		"usage":    usage,
 		"cores":    runtime.NumCPU(),
-		"load_avg": []float64{1.2, 1.5, 1.8},
+		"load_avg": []float64{load["1min"].(float64), load["5min"].(float64), load["15min"].(float64)},
 	}
 }
 
@@ -375,16 +437,16 @@ func (s *SystemService) getCPUUsage() map[string]interface{} {
 func (s *SystemService) getMemoryUsage() map[string]interface{} {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	
+
 	// 获取系统内存信息
 	var info syscall.Sysinfo_t
 	syscall.Sysinfo(&info)
-	
+
 	total := info.Totalram * uint64(info.Unit)
 	free := info.Freeram * uint64(info.Unit)
 	used := total - free
 	percent := float64(used) / float64(total) * 100
-	
+
 	return map[string]interface{}{
 		"total":   total,
 		"used":    used,
@@ -399,12 +461,12 @@ func (s *SystemService) getMemoryUsage() map[string]interface{} {
 func (s *SystemService) getDiskUsage() map[string]interface{} {
 	var stat syscall.Statfs_t
 	syscall.Statfs("/", &stat)
-	
+
 	total := stat.Blocks * uint64(stat.Bsize)
 	free := stat.Bavail * uint64(stat.Bsize)
 	used := total - free
 	percent := float64(used) / float64(total) * 100
-	
+
 	return map[string]interface{}{
 		"total":   total,
 		"used":    used,
@@ -413,35 +475,53 @@ func (s *SystemService) getDiskUsage() map[string]interface{} {
 	}
 }
 
-// getSystemLoad 获取系统负载
 func (s *SystemService) getSystemLoad() map[string]interface{} {
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return map[string]interface{}{"1min": 0.0, "5min": 0.0, "15min": 0.0, "average": 0.0}
+	}
+	fields := strings.Fields(string(data))
+	parse := func(s string) float64 { v, _ := strconv.ParseFloat(s, 64); return v }
+	load1 := parse(fields[0])
+	load5 := parse(fields[1])
+	load15 := parse(fields[2])
 	return map[string]interface{}{
-		"average": 65.0 + float64(time.Now().Second()%20), // 模拟动态数据
-		"1min":    1.2,
-		"5min":    1.5,
-		"15min":   1.8,
+		"1min":    load1,
+		"5min":    load5,
+		"15min":   load15,
+		"average": load1,
 	}
 }
 
-// getNetworkStats 获取网络统计
 func (s *SystemService) getNetworkStats() map[string]interface{} {
+	var tcpCount, tcp6Count int
+	if data, err := os.ReadFile("/proc/net/tcp"); err == nil {
+		lines := strings.Split(string(data), "\n")
+		if len(lines) > 1 {
+			tcpCount = len(lines) - 2
+		}
+	}
+	if data, err := os.ReadFile("/proc/net/tcp6"); err == nil {
+		lines := strings.Split(string(data), "\n")
+		if len(lines) > 1 {
+			tcp6Count = len(lines) - 2
+		}
+	}
 	return map[string]interface{}{
-		"active_connections": 45,
-		"bytes_in":          1024 * 1024 * 5,  // 5MB/s
-		"bytes_out":         1024 * 1024 * 3,  // 3MB/s
-		"packet_loss":       0.01,             // 0.01%
-		"latency":          25,                // 25ms
+		"active_connections": tcpCount + tcp6Count,
+		"tcp_connections":    tcpCount,
+		"tcp6_connections":   tcp6Count,
 	}
 }
 
 // getDatabaseStats 获取数据库统计
 func (s *SystemService) getDatabaseStats() map[string]interface{} {
 	return map[string]interface{}{
-		"connections":         15,
-		"active_connections":  8,
-		"queries_per_second":  125,
-		"avg_query_time":     12.5, // ms
-		"db_size":           1024 * 1024 * 50, // 50MB
+		"connections":        15,
+		"active_connections": 8,
+		"queries_per_second": 125,
+		"avg_query_time":     12.5,             // ms
+		"db_size":            1024 * 1024 * 50, // 50MB
 	}
 }
 
@@ -456,7 +536,7 @@ func (s *SystemService) getAppStats() map[string]interface{} {
 		"telnet_connections":  3,
 		"requests_per_minute": 350,
 		"avg_response_time":   85.5, // ms
-		"error_rate":         1.2,  // %
+		"error_rate":          1.2,  // %
 	}
 }
 

@@ -45,7 +45,7 @@ func main() {
 	userService := service.NewUserService(userRepo)
 	connService := service.NewConnectionService(connRepo, sessionRepo)
 	systemService := service.NewSystemService(configRepo, logRepo)
-	dashboardService := service.NewDashboardService(userRepo, connRepo, sessionRepo, systemService)
+	dashboardService := service.NewDashboardService(userRepo, connRepo, sessionRepo, activityRepo, systemService)
 
 	// 创建处理器
 	authHandler := api.NewAuthHandler(authService)
@@ -54,6 +54,7 @@ func main() {
 	systemHandler := api.NewSystemHandler(systemService)
 	dashboardHandler := api.NewDashboardHandler(dashboardService)
 	terminalSessionHandler := api.NewTerminalSessionHandler(connService)
+	fileHandler := api.NewFileHandler()
 
 	// 创建中间件
 	authMiddleware := middleware.NewAuthMiddleware(authService)
@@ -70,46 +71,46 @@ func main() {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		
+
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok","message":"服务运行正常"}`))
 	}).Methods("GET", "OPTIONS")
-	
+
 	// 添加WebSocket健康检查端点
 	router.HandleFunc("/api/ws/health", func(w http.ResponseWriter, r *http.Request) {
 		// 确保CORS头部应用到此路由
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		
+
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		// 升级到WebSocket连接
 		upgrader := websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true
 			},
 		}
-		
+
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Printf("升级WebSocket连接失败: %v", err)
 			return
 		}
 		defer conn.Close()
-		
+
 		// 发送健康状态消息
 		conn.WriteMessage(websocket.TextMessage, []byte("WebSocket连接正常"))
-		
+
 		// 保持连接，等待客户端关闭
 		for {
 			_, _, err := conn.ReadMessage()
@@ -127,7 +128,7 @@ func main() {
 	// 受保护的路由
 	protectedRouter := router.PathPrefix("/api").Subrouter()
 	protectedRouter.Use(authMiddleware.JWTAuth)
-	
+
 	// 用户相关路由
 	protectedRouter.HandleFunc("/user/profile", authHandler.GetUserInfo).Methods("GET", "OPTIONS")
 	protectedRouter.HandleFunc("/user/profile", authHandler.UpdateUserInfo).Methods("PUT", "OPTIONS")
@@ -141,13 +142,13 @@ func main() {
 	protectedRouter.HandleFunc("/connections/{id}", connHandler.UpdateConnection).Methods("PUT", "OPTIONS")
 	protectedRouter.HandleFunc("/connections/{id}", connHandler.DeleteConnection).Methods("DELETE", "OPTIONS")
 	protectedRouter.HandleFunc("/connections/test", connHandler.TestConnection).Methods("POST", "OPTIONS")
-	
+
 	// 会话相关路由
 	protectedRouter.HandleFunc("/sessions", connHandler.GetUserSessions).Methods("GET", "OPTIONS")
 	protectedRouter.HandleFunc("/sessions/active", connHandler.GetActiveSessions).Methods("GET", "OPTIONS")
 	protectedRouter.HandleFunc("/connections/{id}/sessions", connHandler.CreateSession).Methods("POST", "OPTIONS")
 	protectedRouter.HandleFunc("/sessions/{id}", connHandler.CloseSession).Methods("DELETE", "OPTIONS")
-	
+
 	// WebSocket终端连接 - 移到公开路由，移除认证要求，便于调试
 	log.Println("注册WebSocket终端路由: /ws/{protocol}/{sessionId}")
 	router.HandleFunc("/ws/{protocol}/{sessionId}", connHandler.HandleTerminalWebSocket)
@@ -163,51 +164,48 @@ func main() {
 	adminRouter.HandleFunc("/system/configs", systemHandler.CreateConfig).Methods("POST", "OPTIONS")
 	adminRouter.HandleFunc("/system/configs/batch", systemHandler.BatchUpdateConfigs).Methods("PUT", "OPTIONS")
 
-	// 邮件配置路由 (暂时注释，使用系统处理器中的邮件测试功能)
-	// emailHandler := api.NewEmailHandler()
-	// adminRouter.HandleFunc("/system/email/config", emailHandler.GetEmailConfig).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/email/config", emailHandler.UpdateEmailConfig).Methods("PUT", "OPTIONS")
-	// adminRouter.HandleFunc("/system/email/test-connection", emailHandler.TestEmailConnection).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/email/test-send", emailHandler.SendTestEmail).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/email/templates", emailHandler.GetEmailTemplates).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/email/templates", emailHandler.CreateEmailTemplate).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/email/templates/{id}", emailHandler.UpdateEmailTemplate).Methods("PUT", "OPTIONS")
-	// adminRouter.HandleFunc("/system/email/templates/{id}", emailHandler.DeleteEmailTemplate).Methods("DELETE", "OPTIONS")
-	// adminRouter.HandleFunc("/system/email/variables", emailHandler.GetEmailTemplateVariables).Methods("GET", "OPTIONS")
+	emailHandler := api.NewEmailHandler()
+	adminRouter.HandleFunc("/system/email/config", emailHandler.GetEmailConfig).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/email/config", emailHandler.UpdateEmailConfig).Methods("PUT", "OPTIONS")
+	adminRouter.HandleFunc("/system/email/test-connection", emailHandler.TestEmailConnection).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/email/test-send", emailHandler.SendTestEmail).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/email/templates", emailHandler.GetEmailTemplates).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/email/templates", emailHandler.CreateEmailTemplate).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/email/templates/{id}", emailHandler.UpdateEmailTemplate).Methods("PUT", "OPTIONS")
+	adminRouter.HandleFunc("/system/email/templates/{id}", emailHandler.DeleteEmailTemplate).Methods("DELETE", "OPTIONS")
+	adminRouter.HandleFunc("/system/email/variables", emailHandler.GetEmailTemplateVariables).Methods("GET", "OPTIONS")
 
-	// SSL证书配置路由 (暂时注释)
-	// sslHandler := api.NewSSLHandler()
-	// adminRouter.HandleFunc("/system/ssl/configs", sslHandler.GetSSLConfigs).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/ssl/configs", sslHandler.CreateSSLConfig).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/ssl/configs/{id}", sslHandler.GetSSLConfig).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/ssl/configs/{id}", sslHandler.UpdateSSLConfig).Methods("PUT", "OPTIONS")
-	// adminRouter.HandleFunc("/system/ssl/configs/{id}", sslHandler.DeleteSSLConfig).Methods("DELETE", "OPTIONS")
-	// adminRouter.HandleFunc("/system/ssl/configs/{id}/enable", sslHandler.EnableSSLConfig).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/ssl/configs/{id}/disable", sslHandler.DisableSSLConfig).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/ssl/configs/{id}/default", sslHandler.SetDefaultSSLConfig).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/ssl/test-connection", sslHandler.TestSSLConnection).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/ssl/parse-certificate", sslHandler.ParseCertificate).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/ssl/expiring", sslHandler.GetExpiringCertificates).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/ssl/status", sslHandler.GetSSLStatus).Methods("GET", "OPTIONS")
+	sslHandler := api.NewSSLHandler()
+	adminRouter.HandleFunc("/system/ssl/configs", sslHandler.GetSSLConfigs).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/ssl/configs", sslHandler.CreateSSLConfig).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/ssl/configs/{id}", sslHandler.GetSSLConfig).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/ssl/configs/{id}", sslHandler.UpdateSSLConfig).Methods("PUT", "OPTIONS")
+	adminRouter.HandleFunc("/system/ssl/configs/{id}", sslHandler.DeleteSSLConfig).Methods("DELETE", "OPTIONS")
+	adminRouter.HandleFunc("/system/ssl/configs/{id}/enable", sslHandler.EnableSSLConfig).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/ssl/configs/{id}/disable", sslHandler.DisableSSLConfig).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/ssl/configs/{id}/default", sslHandler.SetDefaultSSLConfig).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/ssl/test-connection", sslHandler.TestSSLConnection).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/ssl/parse-certificate", sslHandler.ParseCertificate).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/ssl/expiring", sslHandler.GetExpiringCertificates).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/ssl/status", sslHandler.GetSSLStatus).Methods("GET", "OPTIONS")
 
-	// API访问控制路由 (暂时注释)
-	// apiControlHandler := api.NewAPIControlHandler()
-	// adminRouter.HandleFunc("/system/api/config", apiControlHandler.GetAPIConfig).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/config", apiControlHandler.UpdateAPIConfig).Methods("PUT", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/keys", apiControlHandler.GetAPIKeys).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/keys", apiControlHandler.CreateAPIKey).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/keys/{id}", apiControlHandler.UpdateAPIKey).Methods("PUT", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/keys/{id}", apiControlHandler.DeleteAPIKey).Methods("DELETE", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/whitelist", apiControlHandler.GetIPWhitelist).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/whitelist", apiControlHandler.AddIPToWhitelist).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/whitelist/{id}", apiControlHandler.RemoveIPFromWhitelist).Methods("DELETE", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/blacklist", apiControlHandler.GetIPBlacklist).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/blacklist", apiControlHandler.AddIPToBlacklist).Methods("POST", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/blacklist/{id}", apiControlHandler.RemoveIPFromBlacklist).Methods("DELETE", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/logs", apiControlHandler.GetAPIAccessLogs).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/statistics", apiControlHandler.GetAccessStatistics).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/rate-limit/status", apiControlHandler.GetRateLimitStatus).Methods("GET", "OPTIONS")
-	// adminRouter.HandleFunc("/system/api/cleanup", apiControlHandler.CleanupExpiredEntries).Methods("POST", "OPTIONS")
+	apiControlHandler := api.NewAPIControlHandler()
+	adminRouter.HandleFunc("/system/api/config", apiControlHandler.GetAPIConfig).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/config", apiControlHandler.UpdateAPIConfig).Methods("PUT", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/keys", apiControlHandler.GetAPIKeys).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/keys", apiControlHandler.CreateAPIKey).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/keys/{id}", apiControlHandler.UpdateAPIKey).Methods("PUT", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/keys/{id}", apiControlHandler.DeleteAPIKey).Methods("DELETE", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/whitelist", apiControlHandler.GetIPWhitelist).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/whitelist", apiControlHandler.AddIPToWhitelist).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/whitelist/{id}", apiControlHandler.RemoveIPFromWhitelist).Methods("DELETE", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/blacklist", apiControlHandler.GetIPBlacklist).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/blacklist", apiControlHandler.AddIPToBlacklist).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/blacklist/{id}", apiControlHandler.RemoveIPFromBlacklist).Methods("DELETE", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/logs", apiControlHandler.GetAPIAccessLogs).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/statistics", apiControlHandler.GetAccessStatistics).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/rate-limit/status", apiControlHandler.GetRateLimitStatus).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/system/api/cleanup", apiControlHandler.CleanupExpiredEntries).Methods("POST", "OPTIONS")
 	adminRouter.HandleFunc("/system/configs/category/{category}", systemHandler.GetConfigsByCategory).Methods("GET", "OPTIONS")
 	adminRouter.HandleFunc("/system/configs/{key}", systemHandler.GetConfig).Methods("GET", "OPTIONS")
 	adminRouter.HandleFunc("/system/configs/{key}", systemHandler.UpdateConfig).Methods("PUT", "OPTIONS")
@@ -241,6 +239,12 @@ func main() {
 
 	// 新的WebSocket终端连接（支持会话恢复）
 	router.HandleFunc("/ws/terminal/{sessionId}", terminalSessionHandler.HandleTerminalWebSocketWithSession)
+
+	// SSH文件管理路由
+	protectedRouter.HandleFunc("/files/download", fileHandler.DownloadFile).Methods("GET", "OPTIONS")
+	protectedRouter.HandleFunc("/files/upload", fileHandler.UploadFile).Methods("POST", "OPTIONS")
+	protectedRouter.HandleFunc("/files/delete", fileHandler.DeleteFiles).Methods("POST", "OPTIONS")
+	protectedRouter.HandleFunc("/files/edit", fileHandler.EditFile).Methods("PUT", "OPTIONS")
 
 	// 设置服务器
 	server := &http.Server{

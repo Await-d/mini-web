@@ -375,8 +375,7 @@ func (s *ConnectionService) CreateTerminalSession(protocol string, connection *m
 	case model.ProtocolTelnet:
 		return s.createTelnetSession(connection)
 	default:
-		// 默认使用本地模拟终端（仅用于开发测试）
-		return s.createLocalTerminalSession()
+		return nil, fmt.Errorf("不支持的协议类型: %s，支持的协议为 ssh/rdp/vnc/telnet", protocol)
 	}
 }
 

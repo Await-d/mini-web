@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
+	"gitee.com/await29/mini-web/internal/middleware"
 	"gitee.com/await29/mini-web/internal/model"
 	"gitee.com/await29/mini-web/internal/service"
 )
@@ -208,25 +208,11 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 // getUserIDFromContext 从请求上下文中获取用户ID
 func getUserIDFromContext(r *http.Request) (uint, error) {
-	// 在实际应用中，这个函数应该从JWT中间件设置的上下文中获取用户ID
-	// 这里简单模拟一下
-	// 实际实现需要根据你的认证中间件来调整
-	
-	// 从Authorization头获取令牌
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return 0, errors.New("缺少授权头")
+	userID, ok := middleware.GetUserID(r)
+	if !ok {
+		return 0, errors.New("无法从上下文获取用户ID，请确认JWT认证中间件已正确配置")
 	}
-
-	// 期望格式: "Bearer {token}"
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		return 0, errors.New("授权头格式无效")
-	}
-
-	// 这里简单返回1，实际应用中应该从令牌中解析用户ID
-	// 真实实现应该使用JWT令牌解析
-	return 1, nil
+	return userID, nil
 }
 
 // sendSuccessResponse 发送成功响应

@@ -18,8 +18,8 @@ import (
 
 // UserHandler 用户相关处理器
 type UserHandler struct {
-	userService     *service.UserService
-	activityRepo    model.UserActivityRepository
+	userService  *service.UserService
+	activityRepo model.UserActivityRepository
 }
 
 // NewUserHandler 创建用户处理器
@@ -107,52 +107,10 @@ func (h *UserHandler) GetUserByID(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Login 用户登录
 func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
-	// 解析请求
-	var req model.UserLoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"code":    400,
-			"message": "无效的请求参数",
-		})
-		return
-	}
-
-	// 模拟验证用户名和密码
-	if req.Username != "admin" || req.Password != "admin123" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"code":    401,
-			"message": "用户名或密码错误",
-		})
-		return
-	}
-
-	// 登录成功返回token和用户信息
-	user := model.User{
-		ID:       1,
-		Username: "admin",
-		Email:    "admin@example.com",
-		Nickname: "管理员",
-		Avatar:   "https://randomuser.me/api/portraits/men/1.jpg",
-		Role:     "admin",
-		Status:   "active",
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"code":    200,
-		"message": "登录成功",
-		"data": model.UserLoginResponse{
-			Token:  "mock_token_12345",
-			User:   user,
-			Expire: 1714588800, // 模拟过期时间
-		},
-	})
+	w.WriteHeader(http.StatusGone)
+	json.NewEncoder(w).Encode(model.ResponseData{Code: 410, Message: "此接口已废弃，请使用 POST /api/auth/login"})
 }
 
 // CreateUser 创建用户
@@ -191,12 +149,12 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := &model.User{
-		Username: req.Username,
-		Email:    req.Email,
-		Password: req.Password,
-		Nickname: req.Nickname,
-		Role:     req.Role,
-		Status:   req.Status,
+		Username:  req.Username,
+		Email:     req.Email,
+		Password:  req.Password,
+		Nickname:  req.Nickname,
+		Role:      req.Role,
+		Status:    req.Status,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -657,22 +615,22 @@ func (h *UserHandler) GetUserActivities(w http.ResponseWriter, r *http.Request) 
 	// 获取分页参数
 	pageStr := r.URL.Query().Get("page")
 	pageSizeStr := r.URL.Query().Get("page_size")
-	
+
 	page := 1
 	pageSize := 20
-	
+
 	if pageStr != "" {
 		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
 			page = p
 		}
 	}
-	
+
 	if pageSizeStr != "" {
 		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
 			pageSize = ps
 		}
 	}
-	
+
 	offset := (page - 1) * pageSize
 
 	// 获取活动日志
@@ -705,22 +663,22 @@ func (h *UserHandler) GetAllActivities(w http.ResponseWriter, r *http.Request) {
 	// 获取分页参数
 	pageStr := r.URL.Query().Get("page")
 	pageSizeStr := r.URL.Query().Get("page_size")
-	
+
 	page := 1
 	pageSize := 20
-	
+
 	if pageStr != "" {
 		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
 			page = p
 		}
 	}
-	
+
 	if pageSizeStr != "" {
 		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
 			pageSize = ps
 		}
 	}
-	
+
 	offset := (page - 1) * pageSize
 
 	// 获取活动日志

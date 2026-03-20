@@ -100,11 +100,11 @@ func (r *ConnectionRepository) Create(conn *model.Connection) error {
 		return err
 	}
 	conn.ID = uint(id)
-	
+
 	// 设置创建和更新时间
 	conn.CreatedAt = time.Now()
 	conn.UpdatedAt = time.Now()
-	
+
 	return nil
 }
 
@@ -132,7 +132,7 @@ func (r *ConnectionRepository) Update(conn *model.Connection) error {
 		conn.Description,
 		conn.ID,
 	)
-	
+
 	return err
 }
 
@@ -152,7 +152,7 @@ func (r *ConnectionRepository) Delete(id uint) error {
 // GetByID 根据ID获取连接
 func (r *ConnectionRepository) GetByID(id uint) (*model.Connection, error) {
 	var conn model.Connection
-	var createdAt, updatedAt, lastUsed sql.NullString
+	var createdAt, updatedAt, lastUsed, privateKey sql.NullString
 
 	query := `
 	SELECT id, name, protocol, host, port, username, password, private_key,
@@ -170,7 +170,7 @@ func (r *ConnectionRepository) GetByID(id uint) (*model.Connection, error) {
 		&conn.Port,
 		&conn.Username,
 		&conn.Password,
-		&conn.PrivateKey,
+		&privateKey,
 		&conn.Group,
 		&conn.Description,
 		&lastUsed,
@@ -181,12 +181,13 @@ func (r *ConnectionRepository) GetByID(id uint) (*model.Connection, error) {
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil // 连接不存在
+			return nil, nil
 		}
 		return nil, err
 	}
-
-	// 解析时间
+	if privateKey.Valid {
+		conn.PrivateKey = privateKey.String
+	}
 	if createdAt.Valid {
 		conn.CreatedAt, _ = time.Parse(time.RFC3339, createdAt.String)
 	}
@@ -196,7 +197,6 @@ func (r *ConnectionRepository) GetByID(id uint) (*model.Connection, error) {
 	if lastUsed.Valid {
 		conn.LastUsed, _ = time.Parse(time.RFC3339, lastUsed.String)
 	}
-
 	return &conn, nil
 }
 
@@ -219,7 +219,7 @@ func (r *ConnectionRepository) GetByUserID(userID uint) ([]*model.Connection, er
 	var connections []*model.Connection
 	for rows.Next() {
 		var conn model.Connection
-		var createdAt, updatedAt, lastUsed sql.NullString
+		var createdAt, updatedAt, lastUsed, privateKey sql.NullString
 
 		err := rows.Scan(
 			&conn.ID,
@@ -229,7 +229,7 @@ func (r *ConnectionRepository) GetByUserID(userID uint) ([]*model.Connection, er
 			&conn.Port,
 			&conn.Username,
 			&conn.Password,
-			&conn.PrivateKey,
+			&privateKey,
 			&conn.Group,
 			&conn.Description,
 			&lastUsed,
@@ -240,8 +240,9 @@ func (r *ConnectionRepository) GetByUserID(userID uint) ([]*model.Connection, er
 		if err != nil {
 			return nil, err
 		}
-
-		// 解析时间
+		if privateKey.Valid {
+			conn.PrivateKey = privateKey.String
+		}
 		if createdAt.Valid {
 			conn.CreatedAt, _ = time.Parse(time.RFC3339, createdAt.String)
 		}
@@ -251,7 +252,6 @@ func (r *ConnectionRepository) GetByUserID(userID uint) ([]*model.Connection, er
 		if lastUsed.Valid {
 			conn.LastUsed, _ = time.Parse(time.RFC3339, lastUsed.String)
 		}
-
 		connections = append(connections, &conn)
 	}
 
@@ -280,7 +280,7 @@ func (r *ConnectionRepository) GetAll() ([]*model.Connection, error) {
 	var connections []*model.Connection
 	for rows.Next() {
 		var conn model.Connection
-		var createdAt, updatedAt, lastUsed sql.NullString
+		var createdAt, updatedAt, lastUsed, privateKey sql.NullString
 
 		err := rows.Scan(
 			&conn.ID,
@@ -290,7 +290,7 @@ func (r *ConnectionRepository) GetAll() ([]*model.Connection, error) {
 			&conn.Port,
 			&conn.Username,
 			&conn.Password,
-			&conn.PrivateKey,
+			&privateKey,
 			&conn.Group,
 			&conn.Description,
 			&lastUsed,
@@ -301,8 +301,9 @@ func (r *ConnectionRepository) GetAll() ([]*model.Connection, error) {
 		if err != nil {
 			return nil, err
 		}
-
-		// 解析时间
+		if privateKey.Valid {
+			conn.PrivateKey = privateKey.String
+		}
 		if createdAt.Valid {
 			conn.CreatedAt, _ = time.Parse(time.RFC3339, createdAt.String)
 		}
@@ -312,7 +313,6 @@ func (r *ConnectionRepository) GetAll() ([]*model.Connection, error) {
 		if lastUsed.Valid {
 			conn.LastUsed, _ = time.Parse(time.RFC3339, lastUsed.String)
 		}
-
 		connections = append(connections, &conn)
 	}
 
@@ -373,10 +373,10 @@ func (r *SessionRepository) Create(session *model.Session) error {
 		return err
 	}
 	session.ID = uint(id)
-	
+
 	// 设置开始时间
 	session.StartTime = time.Now()
-	
+
 	return nil
 }
 
@@ -489,28 +489,49 @@ func (r *SessionRepository) CloseSession(id uint) error {
 	if err != nil {
 		return err
 	}
-	
+
 	// 计算会话持续时间
 	startTime, err := time.Parse(time.RFC3339, startTimeStr)
 	if err != nil {
 		return err
 	}
-	
+
 	endTime := time.Now()
 	duration := int(endTime.Sub(startTime).Seconds())
-	
+
 	// 更新会话
 	query := `
 	UPDATE sessions
 	SET status = 'closed', end_time = CURRENT_TIMESTAMP, duration = ?
 	WHERE id = ?
 	`
-	
+
 	_, err = r.db.Exec(query, duration, id)
 	return err
 }
 
 // querySessions 查询会话辅助函数
+func (r *SessionRepository) GetAll() ([]*model.Session, error) {
+	query := `
+	SELECT id, connection_id, user_id, start_time, end_time, duration, status,
+		   client_ip, server_ip, log_path
+	FROM sessions
+	ORDER BY start_time DESC
+	`
+	return r.querySessions(query)
+}
+
+func (r *SessionRepository) GetAllActive() ([]*model.Session, error) {
+	query := `
+	SELECT id, connection_id, user_id, start_time, end_time, duration, status,
+		   client_ip, server_ip, log_path
+	FROM sessions
+	WHERE status = 'active'
+	ORDER BY start_time DESC
+	`
+	return r.querySessions(query)
+}
+
 func (r *SessionRepository) querySessions(query string, args ...interface{}) ([]*model.Session, error) {
 	rows, err := r.db.Query(query, args...)
 	if err != nil {

@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -1165,9 +1166,13 @@ func (s *RDPWebSocketProxy) handleInitMessage(message map[string]interface{}) {
 
 func (s *RDPWebSocketProxy) handleRDPDataMessage(message map[string]interface{}) {
 	if dataStr, ok := message["data"].(string); ok && s.RDPConn != nil {
-		// 这里应该解码base64数据并发送到RDP服务器
-		// 简化实现，实际应用中需要更复杂的数据处理
-		s.RDPConn.Write([]byte(dataStr))
+		decoded, err := base64.StdEncoding.DecodeString(dataStr)
+		if err != nil {
+			decoded = []byte(dataStr)
+		}
+		if _, err := s.RDPConn.Write(decoded); err != nil {
+			log.Printf("RDP数据写入失败: %v", err)
+		}
 	}
 }
 
